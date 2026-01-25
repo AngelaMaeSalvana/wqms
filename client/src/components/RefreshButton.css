@@ -1,0 +1,54 @@
+.refresh-btn {
+  border: 1px solid var(--border);
+  background: var(--panel-dark);
+  color: var(--text);
+  padding: 8px 14px;
+  border-radius: 999px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.9rem;
+  transition: all 0.2s ease;
+  font-family: 'Manrope', sans-serif;
+}
+
+.refresh-btn:hover:not(:disabled) {
+  background: var(--panel);
+  border-color: var(--border);
+  transform: translateY(-1px);
+}
+
+.refresh-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.refresh-btn .spinning {
+  display: inline-block;
+  animation: spin 1s linear infinite;
+}
+
+.refresh-text {
+  font-size: 0.85rem;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+[data-theme="light"] .refresh-btn {
+  background-color: #f8f9fa;
+  border-color: rgba(0, 0, 0, 0.2);
+}
+
+[data-theme="light"] .refresh-btn:hover:not(:disabled) {
+  background-color: #e9ecef;
+  border-color: rgba(0, 0, 0, 0.3);
+}
+

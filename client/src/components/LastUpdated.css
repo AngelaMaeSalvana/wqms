@@ -1,0 +1,10 @@
+.last-updated {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+[data-theme="light"] .last-updated {
+  color: rgba(0, 0, 0, 0.65);
+}
+

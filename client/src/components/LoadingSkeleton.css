@@ -1,0 +1,59 @@
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--panel-dark) 0%,
+    rgba(255, 255, 255, 0.05) 50%,
+    var(--panel-dark) 100%
+  );
+  background-size: 200% 100%;
+  animation: skeleton-loading 1.5s ease-in-out infinite;
+  border-radius: 8px;
+}
+
+.skeleton-line {
+  background: linear-gradient(
+    90deg,
+    var(--panel-dark) 0%,
+    rgba(255, 255, 255, 0.05) 50%,
+    var(--panel-dark) 100%
+  );
+  background-size: 200% 100%;
+  animation: skeleton-loading 1.5s ease-in-out infinite;
+  border-radius: 4px;
+}
+
+@keyframes skeleton-loading {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+.chart-skeleton {
+  width: 100%;
+  height: 100%;
+  min-height: 200px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.calendar-skeleton {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 8px;
+}
+
+[data-theme="light"] .skeleton,
+[data-theme="light"] .skeleton-line {
+  background: linear-gradient(
+    90deg,
+    #f5f5f7 0%,
+    rgba(0, 0, 0, 0.05) 50%,
+    #f5f5f7 100%
+  );
+  background-size: 200% 100%;
+}
+
