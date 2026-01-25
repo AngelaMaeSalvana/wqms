@@ -14,22 +14,22 @@ import {
 } from "chart.js";
 import { Line } from "react-chartjs-2";
 import "./App.css";
-import Navigation from "./components/Navigation";
-import { useMQTT, useWaterQualityMQTT } from "./hooks/useMQTT";
-import { useTheme } from "./contexts/ThemeContext";
-import api from "./services/api";
-import ErrorBoundary from "./components/ErrorBoundary";
-import { useToast } from "./hooks/useToast";
-import { ToastContainer } from "./components/Toast";
-import ConnectionStatus from "./components/ConnectionStatus";
-import EmptyState from "./components/EmptyState";
-import { MetricSkeleton, ChartSkeleton, AlertSkeleton } from "./components/LoadingSkeleton";
-import LastUpdated from "./components/LastUpdated";
-import RefreshButton from "./components/RefreshButton";
-import { useOffline } from "./hooks/useOffline";
-import OfflineBanner from "./components/OfflineBanner";
-import { exportToJSON, exportToCSV, formatReadingsForExport, formatAlertsForExport } from "./utils/exportData";
-import { calculateWQI } from "./utils/wqiCalculator";
+import Navigation from "./components/Navigation.js";
+import { useMQTT, useWaterQualityMQTT } from "./hooks/useMQTT.js";
+import { useTheme } from "./contexts/ThemeContext.js";
+import api from "./services/api.js";
+import ErrorBoundary from "./components/ErrorBoundary.js";
+import { useToast } from "./hooks/useToast.js";
+import { ToastContainer } from "./components/Toast.js";
+import ConnectionStatus from "./components/ConnectionStatus.js";
+import EmptyState from "./components/EmptyState.js";
+import { MetricSkeleton, ChartSkeleton, AlertSkeleton } from "./components/LoadingSkeleton.js";
+import LastUpdated from "./components/LastUpdated.js";
+import RefreshButton from "./components/RefreshButton.js";
+import { useOffline } from "./hooks/useOffline.js";
+import OfflineBanner from "./components/OfflineBanner.js";
+import { exportToJSON, exportToCSV, formatReadingsForExport, formatAlertsForExport } from "./utils/exportData.js";
+import { calculateWQI } from "./utils/wqiCalculator.js";
 
 // Register Chart.js components
 ChartJS.register(
