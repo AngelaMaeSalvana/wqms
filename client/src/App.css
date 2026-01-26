@@ -93,16 +93,30 @@
 html,
 body,
 #root {
-  height: 100vh;
-  max-height: 100vh;
+  min-height: 100%;
+  min-height: 100dvh;
+  height: 100%;
   background: var(--bg);
   margin: 0;
   padding: 0;
+  overflow-x: hidden;
+}
+
+body {
+  font-size: clamp(14px, 1.2vw, 16px);
+}
+
+img,
+video,
+svg {
+  max-width: 100%;
+  height: auto;
 }
 
 .App {
-  height: 100vh;
-  max-height: 100vh;
+  min-height: 100vh;
+  min-height: 100dvh;
+  height: auto;
   display: flex;
   flex-direction: column;
   background: var(--bg);
@@ -140,6 +154,7 @@ body,
   max-height: 100%;
   flex: 1 1 0;
   min-height: 0;
+  min-width: 0;
 }
 
 .card {
@@ -924,6 +939,7 @@ body,
 .calendar-card .controls {
   display: flex;
   gap: 8px;
+  flex-wrap: wrap;
 }
 
 .calendar-card button {
@@ -1254,12 +1270,104 @@ body,
   font-size: 0.75rem;
   margin-top: 0;
   font-weight: 500;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.modal-overlay {
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.modal-surface {
+  width: min(92vw, 1200px);
+  max-height: min(90vh, 900px);
+}
+
+.modal-surface--alerts {
+  height: min(80vh, 900px);
+}
+
+.modal-surface--date {
+  width: min(92vw, 800px);
+}
+
+.modal-surface--sensor {
+  width: min(92vw, 700px);
+}
+
+.wqi-summary {
+  padding: clamp(20px, 3vw, 32px) clamp(16px, 2.5vw, 20px);
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  display: flex;
+  gap: clamp(16px, 4vw, 32px);
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.wqi-summary-score {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  flex-shrink: 0;
+  min-width: 0;
+}
+
+.wqi-summary-value {
+  font-size: clamp(2.5rem, 6vw, 4.5rem);
+  font-weight: 700;
+  line-height: 1;
+  margin-bottom: 16px;
+}
+
+.wqi-summary-class {
+  font-size: clamp(1rem, 2.5vw, 1.2rem);
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.wqi-summary-label {
+  font-size: clamp(0.85rem, 2vw, 0.95rem);
+  color: var(--text-muted);
+}
+
+.wqi-summary-details {
+  flex: 1 1 280px;
+  padding: 16px;
+  border-radius: 10px;
+}
+
+.metrics-grid--modal {
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+}
+
+.sensor-status-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.sensor-status-meta {
+  text-align: right;
+  margin-left: 16px;
 }
 
 @media (max-width: 1600px) {
   .layout-grid {
     grid-template-columns: minmax(0, 2.6fr) minmax(260px, 1.1fr);
     gap: clamp(16px, 2vw, 24px);
+  }
+}
+
+@media (max-width: 1440px) {
+  .layout-grid {
+    grid-template-columns: minmax(0, 2.55fr) minmax(250px, 1fr);
   }
 }
 
@@ -1469,14 +1577,92 @@ body,
     margin-top: clamp(12px, 2vw, 20px);
   }
 
+  .weekly-card .line-chart {
+    min-height: 160px;
+    max-height: 220px;
+  }
+
+  .weekly-card .line-chart > canvas,
+  .weekly-card .line-chart > div {
+    min-height: 160px !important;
+    max-height: 220px !important;
+  }
+
   .section-header h1,
   .section-header h2 {
     font-size: clamp(0.9rem, 2.5vw, 1.1rem);
   }
 
   /* Touch-friendly targets for mobile */
-  button, .metric-item, .alert {
+  button,
+  .metric-item,
+  .alert,
+  .metric-select,
+  .date-input,
+  .ghost-btn {
     min-height: 44px;
+  }
+
+  .calendar-card button {
+    min-width: 44px;
+    height: 44px;
+  }
+
+  .metrics-grid--modal {
+    grid-template-columns: 1fr;
+  }
+
+  .wqi-summary-score {
+    align-items: flex-start;
+    text-align: left;
+  }
+
+  .sensor-status-meta {
+    text-align: left;
+    margin-left: 0;
+  }
+}
+
+@media (max-width: 414px) {
+  .legend-labels {
+    font-size: 0.7rem;
+  }
+
+  .calendar-legend {
+    margin-top: 16px;
+    padding-top: 16px;
+  }
+
+  .alerts-list {
+    gap: 12px;
+  }
+}
+
+@media (max-width: 375px) {
+  .dashboard {
+    padding: clamp(10px, 2.5vw, 14px) clamp(8px, 2vw, 12px) clamp(14px, 3vw, 20px);
+  }
+
+  .score .value {
+    font-size: 2.2rem;
+  }
+
+  .metric-value {
+    font-size: 1rem;
+  }
+}
+
+@media (max-width: 320px) {
+  .calendar-weekdays span {
+    font-size: 0.5rem;
+  }
+
+  .day {
+    font-size: 0.55rem;
+  }
+
+  .legend-labels {
+    gap: 8px;
   }
 }
 

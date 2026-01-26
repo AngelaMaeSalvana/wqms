@@ -2405,6 +2405,7 @@ const App = () => {
 
       {isAlertsModalOpen && (
         <div
+          className="modal-overlay"
           style={{
             position: "fixed",
             inset: 0,
@@ -2418,14 +2419,11 @@ const App = () => {
           onClick={() => setIsAlertsModalOpen(false)}
         >
           <div
-            className="card"
+            className="card modal-surface modal-surface--alerts"
             role="dialog"
             aria-modal="true"
             aria-labelledby="alerts-modal-title"
             style={{
-              width: "80%",
-              maxWidth: "1200px",
-              height: "80vh",
               display: "flex",
               flexDirection: "column",
               overflow: "hidden",
@@ -2501,6 +2499,7 @@ const App = () => {
       {/* Date Details Modal */}
       {isDateDetailsModalOpen && selectedDateDetails && selectedDateDetails.date && (
         <div
+          className="modal-overlay"
           style={{
             position: "fixed",
             inset: 0,
@@ -2514,14 +2513,11 @@ const App = () => {
           onClick={() => setIsDateDetailsModalOpen(false)}
         >
           <div
-            className="card date-details-modal"
+            className="card date-details-modal modal-surface modal-surface--date"
             role="dialog"
             aria-modal="true"
             aria-labelledby="date-details-modal-title"
             style={{
-              width: "90%",
-              maxWidth: "800px",
-              maxHeight: "90vh",
               display: "flex",
               flexDirection: "column",
               overflow: "hidden",
@@ -2601,51 +2597,29 @@ const App = () => {
                 }
                 
                 return (
-                  <div style={{ 
-                    padding: "32px 20px", 
-                    background: "rgba(255,255,255,0.03)", 
-                    borderRadius: "12px", 
-                    border: "1px solid var(--border)",
-                    display: "flex",
-                    gap: "32px",
-                    alignItems: "flex-start"
-                  }}>
+                  <div className="wqi-summary">
                     {/* Score Section */}
-                    <div style={{
-                      display: "flex",
-                      flexDirection: "column",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      textAlign: "center",
-                      flexShrink: 0,
-                      minWidth: "200px"
-                    }}>
-                      <span style={{ 
-                        fontSize: "4.5rem", 
-                        fontWeight: "700", 
-                        color: scoreColor,
-                        lineHeight: "1",
-                        marginBottom: "16px"
-                      }}>
+                    <div className="wqi-summary-score">
+                      <span className="wqi-summary-value" style={{ color: scoreColor }}>
                         {wqi}
                       </span>
-                      <div style={{ fontSize: "1.2rem", fontWeight: "600", color: scoreColor, marginBottom: "8px" }}>
+                      <div className="wqi-summary-class" style={{ color: scoreColor }}>
                         Class {selectedDateDetails.qualityData.class} - {selectedDateDetails.qualityData.label}
                       </div>
-                      <div style={{ fontSize: "0.9rem", color: "var(--text-muted)" }}>
+                      <div className="wqi-summary-label">
                         Water Quality Index
                       </div>
                     </div>
                     
                     {/* Class Details Section */}
-                    <div style={{
-                      flex: 1,
-                      padding: "16px",
+                    <div
+                      className="wqi-summary-details"
+                      style={{
                       background: `rgba(${quality === 'excellent' ? '68, 211, 126' : quality === 'good' ? '144, 238, 144' : quality === 'poor' ? '240, 165, 0' : quality === 'very-poor' ? '255, 107, 107' : '212, 91, 91'}, 0.15)`,
-                      borderRadius: "10px",
                       border: `1px solid rgba(${quality === 'excellent' ? '68, 211, 126' : quality === 'good' ? '144, 238, 144' : quality === 'poor' ? '240, 165, 0' : quality === 'very-poor' ? '255, 107, 107' : '212, 91, 91'}, 0.4)`,
                       borderLeft: `4px solid ${scoreColor}`
-                    }}>
+                      }}
+                    >
                       <div style={{ marginBottom: "12px" }}>
                         <div style={{ fontSize: "0.9rem", color: "var(--text-muted)", marginBottom: "4px", fontWeight: "500" }}>
                           WQI Range: {
@@ -2678,7 +2652,7 @@ const App = () => {
                 <h3 style={{ fontSize: "1.1rem", fontWeight: "600", marginBottom: "16px", color: "var(--text)" }}>
                   Water Quality Parameters
                 </h3>
-                <div className="metrics-grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))" }}>
+                <div className="metrics-grid metrics-grid--modal">
                   <div style={{ padding: "16px", background: "rgba(255,255,255,0.03)", borderRadius: "8px", border: "1px solid var(--border)" }}>
                     <p className="metric-title">Temperature</p>
                     <p className="metric-value">
@@ -2729,6 +2703,7 @@ const App = () => {
       {/* Sensor Test Results Modal */}
       {isSensorTestModalOpen && (
         <div
+          className="modal-overlay"
           style={{
             position: "fixed",
             inset: 0,
@@ -2742,11 +2717,8 @@ const App = () => {
           onClick={() => setIsSensorTestModalOpen(false)}
         >
           <div
-            className="card sensor-test-modal"
+            className="card sensor-test-modal modal-surface modal-surface--sensor"
             style={{
-              width: "90%",
-              maxWidth: "700px",
-              maxHeight: "90vh",
               display: "flex",
               flexDirection: "column",
               overflow: "hidden",
@@ -2843,10 +2815,8 @@ const App = () => {
                             background: "rgba(255,255,255,0.03)",
                             borderRadius: "8px",
                             border: "1px solid var(--border)",
-                            display: "flex",
-                            justifyContent: "space-between",
-                            alignItems: "center",
                           }}
+                          className="sensor-status-row"
                         >
                           <div style={{ flex: 1 }}>
                             <p style={{ margin: "0 0 4px", fontSize: "0.95rem", fontWeight: "600" }}>
@@ -2856,7 +2826,7 @@ const App = () => {
                               Response: {sensor.responseTime}
                             </p>
                           </div>
-                          <div style={{ textAlign: "right", marginLeft: "16px" }}>
+                          <div className="sensor-status-meta">
                             <div style={{ 
                               display: "inline-flex", 
                               alignItems: "center", 
