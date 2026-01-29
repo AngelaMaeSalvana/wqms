@@ -30,7 +30,7 @@ const Navigation = () => {
         <div className='logo'>
             <p>Water Quality Monitoring System</p>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+        <div className="nav-actions">
           <div className='datetime'>
               <p>{formattedDate}</p>
           </div>

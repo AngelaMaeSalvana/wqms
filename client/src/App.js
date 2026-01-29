@@ -1780,7 +1780,7 @@ const App = () => {
               <h2>Alerts</h2>
                 {lastUpdated && <LastUpdated timestamp={lastUpdated} />}
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <div className="alerts-actions">
               <span className="badge">{alerts.length}</span>
                 <RefreshButton 
                   onRefresh={handleRefresh} 

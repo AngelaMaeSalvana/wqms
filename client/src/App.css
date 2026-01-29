@@ -287,6 +287,7 @@ body,
   justify-content: space-between;
   align-items: flex-start;
   gap: 16px;
+  flex-wrap: wrap;
 }
 
 .section-header h1,
@@ -387,7 +388,7 @@ body,
 .area-chart-scrollable {
   display: flex;
   flex-direction: column;
-  min-width: 2000px; /* Minimum width for 48 data points (30-min intervals) */
+  min-width: clamp(900px, 160vw, 2000px); /* Responsive width for 48 data points */
   height: 100%;
   position: relative;
 }
@@ -408,7 +409,7 @@ body,
 .area-chart-scrollable > div {
   height: 100% !important;
   width: 100% !important;
-  min-width: 2000px;
+  min-width: clamp(900px, 160vw, 2000px);
 }
 
 .chart-hours {
@@ -417,6 +418,13 @@ body,
   font-size: 0.8rem;
   color: var(--text-muted);
   margin-top: 12px;
+}
+
+.alerts-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .alerts-card .badge {
@@ -1402,6 +1410,11 @@ body,
     font-size: clamp(1rem, 3vw, 1.2rem);
   }
 
+  .map-body {
+    padding: 16px;
+    gap: 16px;
+  }
+
   .legend {
     width: 100%;
     justify-content: space-between;
@@ -1435,6 +1448,11 @@ body,
     grid-template-columns: repeat(4, 1fr);
     row-gap: clamp(4px, 1vw, 6px);
     font-size: clamp(0.7rem, 2vw, 0.8rem);
+  }
+
+  .alerts-actions {
+    width: 100%;
+    justify-content: flex-start;
   }
 
   .calendar-weekdays {

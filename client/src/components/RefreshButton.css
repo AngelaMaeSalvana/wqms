@@ -52,3 +52,13 @@
   border-color: rgba(0, 0, 0, 0.3);
 }
 
+@media (max-width: 520px) {
+  .refresh-btn {
+    padding: 6px 10px;
+    gap: 6px;
+  }
+
+  .refresh-text {
+    display: none;
+  }
+}
