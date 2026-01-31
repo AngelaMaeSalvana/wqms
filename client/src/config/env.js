@@ -11,10 +11,10 @@ export const config = {
     user: env.REACT_APP_MQTT_USER || '',
     pass: env.REACT_APP_MQTT_PASS || '',
   },
-  // Supabase
+  // Supabase — supports both REACT_APP_* and NEXT_PUBLIC_* (Supabase’s Next.js names)
   supabase: {
-    url: env.REACT_APP_SUPABASE_URL || env.NEXT_PUBLIC_SUPABASE_URL || '',
-    anonKey: env.REACT_APP_SUPABASE_ANON_KEY || env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '',
+    url: env.NEXT_PUBLIC_SUPABASE_URL || env.REACT_APP_SUPABASE_URL || '',
+    anonKey: env.NEXT_PUBLIC_SUPABASE_ANON_KEY || env.REACT_APP_SUPABASE_ANON_KEY || '',
   },
   // Backend API (optional)
   apiUrl: env.REACT_APP_API_URL || '',

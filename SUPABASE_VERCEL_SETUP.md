@@ -24,20 +24,22 @@ This guide walks you through using **Supabase** as the database for WQMS, with t
 
 1. In Supabase Dashboard go to **Settings → API**.
 2. Note:
-   - **Project URL** → `REACT_APP_SUPABASE_URL` (client) and `SUPABASE_URL` (server)
-   - **anon public** key → `REACT_APP_SUPABASE_ANON_KEY` (client)
+   - **Project URL** → use as `NEXT_PUBLIC_SUPABASE_URL` (or `REACT_APP_SUPABASE_URL`) on the client, and `SUPABASE_URL` on the server
+   - **anon public** key → use as `NEXT_PUBLIC_SUPABASE_ANON_KEY` (or `REACT_APP_SUPABASE_ANON_KEY`) on the client
    - **service_role** key → `SUPABASE_SERVICE_ROLE_KEY` (server only; keep secret)
 
 ## 4. Configure Vercel (client)
 
 1. In [Vercel](https://vercel.com), open your project (the **client** app).
 2. **Settings → Environment Variables**.
-3. Add:
+3. Add (you can use the **exact names Supabase shows** for Next.js):
 
-   | Name                         | Value                    | Environment   |
-   |------------------------------|--------------------------|---------------|
-   | `REACT_APP_SUPABASE_URL`     | `https://xxx.supabase.co`| All           |
-   | `REACT_APP_SUPABASE_ANON_KEY` | your anon key          | All           |
+   | Name                            | Value                    | Environment   |
+   |---------------------------------|--------------------------|---------------|
+   | `NEXT_PUBLIC_SUPABASE_URL`      | `https://xxx.supabase.co`| All           |
+   | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | your anon key            | All           |
+
+   Or use `REACT_APP_SUPABASE_URL` and `REACT_APP_SUPABASE_ANON_KEY` instead; both work.
 
 4. Add your existing MQTT vars if you use them:  
    `REACT_APP_MQTT_WS_URL`, `REACT_APP_MQTT_USER`, `REACT_APP_MQTT_PASS`.
@@ -48,10 +50,12 @@ When these are set, the React app uses Supabase for readings, alerts, and nodes 
 
 ### If Vercel still shows "DB: Not connected"
 
-- **Use exact names**: `REACT_APP_SUPABASE_URL` and `REACT_APP_SUPABASE_ANON_KEY` (Create React App only exposes `REACT_APP_*`). Do **not** use `NEXT_PUBLIC_SUPABASE_*` for this app.
+The app UI shows **which** variable is missing (e.g. "Missing: NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY"). Use that to fix the right one.
+
+- **Names**: Use `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` (same as Supabase’s Next.js snippet) or `REACT_APP_SUPABASE_URL` and `REACT_APP_SUPABASE_ANON_KEY`. Both work.
 - **Apply to the right env**: If you only added vars to "Preview", Production builds won’t see them. Add to **Production** (and Preview if needed).
-- **Redeploy after adding vars**: Env vars are baked in at **build** time. After adding or changing them, trigger a new deployment.
-- **No typos**: URL should be like `https://htrqixgpmbncbkifizty.supabase.co` (no trailing slash). Anon key is the long JWT from Supabase → Settings → API → anon **public**.
+- **Clear cache and redeploy** (most important): Env vars are baked in at **build** time. Vercel may reuse a cached build from before you added the vars. In Vercel: **Deployments** → latest deployment → **⋮** → **Redeploy** → turn **ON** "Clear build cache" → confirm. Wait for the new build.
+- **No typos**: URL like `https://xxxx.supabase.co` (no trailing slash). Anon key = long JWT from Supabase → Settings → API → anon **public** (no extra spaces when pasting).
 
 ## 5. Backend / MQTT ingestion (optional)
 
@@ -70,7 +74,7 @@ If you don’t set them, the server keeps using SQLite (`wqms.db`).
 **Client (React):**
 
 - Copy `client/.env.example` to `client/.env`.
-- Set `REACT_APP_SUPABASE_URL` and `REACT_APP_SUPABASE_ANON_KEY`.
+- Set `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` (or `REACT_APP_*`).
 - Run `npm start` in `client/`.
 
 **Server (optional):**
@@ -83,7 +87,7 @@ If you don’t set them, the server keeps using SQLite (`wqms.db`).
 
 | Where        | Env vars |
 |--------------|----------|
-| **Vercel (client)** | `REACT_APP_SUPABASE_URL`, `REACT_APP_SUPABASE_ANON_KEY` |
+| **Vercel (client)** | `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` (or `REACT_APP_*`) |
 | **Server**   | `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` (and MQTT vars if used) |
 
 - **Database**: Run `supabase/schema.sql` once in the Supabase SQL Editor.
