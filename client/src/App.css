@@ -75,6 +75,46 @@
   color: #1d1d1f;
 }
 
+/* Minimal scrollbars (global) */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 3px;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+[data-theme="light"] * {
+  scrollbar-color: rgba(0, 0, 0, 0.2) transparent;
+}
+
+[data-theme="light"] *::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.2);
+}
+
+[data-theme="light"] *::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.3);
+}
+
 [data-theme="dark"] {
   --tooltip-bg: rgba(22, 21, 30, 0.95);
   --tooltip-border: rgba(255, 255, 255, 0.1);
@@ -102,9 +142,10 @@ body,
 
 .App {
   height: 100vh;
-  max-height: 100vh;
-  display: flex;
-  flex-direction: column;
+    max-height: 100vh;
+    display: grid;
+    grid-template-columns: 10% 90%;
+    grid-auto-rows: auto;
   background: var(--bg);
 }
 
@@ -132,13 +173,13 @@ body,
 .layout-grid {
   display: grid;
   grid-template-columns: minmax(0, 2.8fr) minmax(280px, 1.2fr);
-  grid-template-rows: 1fr 1.5fr 1.1fr 1fr;
+  grid-template-rows: 1fr 1fr 0.5fr 1fr;
   grid-auto-rows: 0;
   gap: clamp(12px, 2vw, 24px);
   width: 100%;
   height: 100%;
   max-height: 100%;
-  flex: 1 1 0;
+  flex: 1 1;
   min-height: 0;
 }
 
@@ -169,23 +210,31 @@ body,
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.04);
 }
 
+.reports-card{
+  grid-area: 1/1/3/2;
+  max-height: 100%;
+  min-height: 550px;
+  display: grid;
+  grid-template-rows: 0.8fr 1fr;
+  gap: clamp(10px, 2vw, 24px);;
+  justify-content: center;
+  align-content: center;
+}
 .today-card {
-  grid-column: 1 / 2;
-  grid-row: 1 / 2;
+
   min-height: 0;
 }
 
 .alerts-card {
-  grid-column: 2 / 3;
-  grid-row: 1 / 3;
+  grid-area: 1/2/3/3;
   display: flex;
   flex-direction: column;
   overflow: auto;
 }
 
 .weekly-card {
-  grid-column: 1 / 2;
-  grid-row: 2 / 3;
+  /* grid-column: 1 / 2;
+  grid-row: 2 / 3; */
   min-height: 0;
   display: flex;
   flex-direction: column;
@@ -282,12 +331,59 @@ body,
   letter-spacing: 0.05em;
 }
 
+.calendar-legend-bar-wrap {
+  position: relative;
+  width: 100%;
+  height: 12px;
+}
+
+.calendar-legend .legend-bar {
+  width: 100%;
+  height: 12px;
+  border-radius: 999px;
+}
+
+.calendar-legend-indicator {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  left: 0;
+  transform: translateX(-50%);
+  background: white;
+  border-radius: 1px;
+  box-shadow: 0 0 6px rgba(255, 255, 255, 0.8);
+  z-index: 2;
+  pointer-events: none;
+}
+
+.calendar-legend-indicator::before {
+  content: "";
+  position: absolute;
+  top: -4px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 0;
+  height: 0;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 5px solid white;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.3));
+}
+
+.calendar-legend-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
 .section-header {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
   gap: 16px;
-  flex-wrap: wrap;
 }
 
 .section-header h1,
@@ -388,7 +484,7 @@ body,
 .area-chart-scrollable {
   display: flex;
   flex-direction: column;
-  min-width: clamp(900px, 160vw, 2000px); /* Responsive width for 48 data points */
+  min-width: 2000px; /* Minimum width for 48 data points (30-min intervals) */
   height: 100%;
   position: relative;
 }
@@ -409,7 +505,7 @@ body,
 .area-chart-scrollable > div {
   height: 100% !important;
   width: 100% !important;
-  min-width: clamp(900px, 160vw, 2000px);
+  min-width: 2000px;
 }
 
 .chart-hours {
@@ -418,13 +514,6 @@ body,
   font-size: 0.8rem;
   color: var(--text-muted);
   margin-top: 12px;
-}
-
-.alerts-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
 }
 
 .alerts-card .badge {
@@ -885,50 +974,6 @@ body,
   line-height: 1.2;
 }
 
-/* Responsive adjustments for WQI details */
-@media (max-width: 1024px) {
-  .wqi-details-container {
-    flex-direction: column;
-    gap: 24px;
-  }
-
-  .wqi-score {
-    border-right: none;
-    border-bottom: 1px solid var(--border);
-    padding-right: 0;
-    padding-bottom: 24px;
-    min-width: auto;
-  }
-
-  .metrics-grid {
-    grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
-    gap: 16px;
-  }
-}
-
-@media (max-width: 640px) {
-  .wqi-details-container {
-    gap: 20px;
-  }
-
-  .score .value {
-    font-size: 2.5rem;
-  }
-
-  .metrics-grid {
-    grid-template-columns: repeat(2, 1fr);
-    gap: 12px;
-  }
-
-  .metric-item {
-    padding: 12px;
-  }
-
-  .metric-value {
-    font-size: 1.1rem;
-  }
-}
-
 .calendar-card .controls {
   display: flex;
   gap: 8px;
@@ -1264,240 +1309,6 @@ body,
   font-weight: 500;
 }
 
-@media (max-width: 1600px) {
-  .layout-grid {
-    grid-template-columns: minmax(0, 2.6fr) minmax(260px, 1.1fr);
-    gap: clamp(16px, 2vw, 24px);
-  }
-}
-
-@media (max-width: 1360px) {
-  .layout-grid {
-    grid-template-columns: minmax(0, 2.5fr) minmax(240px, 1fr);
-    gap: clamp(14px, 1.8vw, 20px);
-  }
-
-  .dashboard {
-    padding: clamp(16px, 2vw, 28px) clamp(16px, 2.5vw, 40px) clamp(16px, 2vw, 28px);
-  }
-}
-
-@media (max-width: 1200px) {
-  .layout-grid {
-    grid-template-columns: minmax(0, 2.3fr) minmax(220px, 0.9fr);
-    gap: clamp(12px, 1.5vw, 18px);
-  }
-
-  .card {
-    padding: clamp(14px, 1.8vw, 18px);
-  }
-}
-
-@media (max-width: 1024px) {
-  html,
-  body,
-  #root {
-    height: auto;
-    max-height: none;
-    min-height: 100vh;
-  }
-
-  .App {
-    height: auto;
-    max-height: none;
-    min-height: 100vh;
-  }
-
-  .App > * {
-    flex-shrink: 0;
-  }
-
-  .dashboard {
-    max-height: none;
-    flex: 1 1 auto;
-    min-height: 0;
-  }
-
-  .layout-grid {
-    grid-template-columns: 1fr;
-    grid-template-rows: auto;
-    height: auto;
-    max-height: none;
-    flex: none;
-    min-height: auto;
-  }
-
-  .alerts-card,
-  .map-card,
-  .calendar-card,
-  .today-card,
-  .weekly-card {
-    grid-column: 1 / -1;
-    grid-row: auto;
-    min-height: auto;
-    height: auto;
-    max-height: none;
-  }
-
-  .card {
-    min-height: auto;
-    height: auto;
-  }
-
-  .alerts-card {
-    order: 5;
-    min-height: auto;
-    height: auto;
-    overflow: visible;
-  }
-
-  .alerts-list {
-    min-height: 200px;
-    max-height: none;
-    -webkit-overflow-scrolling: touch; /* Smooth scrolling on iOS */
-  }
-
-  .map-wrapper {
-    height: clamp(240px, 45vh, 380px);
-    min-height: 240px;
-  }
-
-  .map-card {
-    min-height: auto;
-    height: auto;
-  }
-
-  .calendar-card {
-    min-height: auto;
-    height: auto;
-    overflow: visible;
-  }
-
-  .calendar-grid {
-    min-height: auto;
-    height: auto;
-  }
-
-  .area-chart {
-    min-height: 200px;
-    height: auto;
-  }
-
-  .line-chart {
-    min-height: 180px;
-    height: auto;
-  }
-}
-
-@media (max-width: 768px) {
-  .dashboard {
-    padding: clamp(16px, 3vw, 20px) clamp(12px, 2vw, 16px) clamp(20px, 4vw, 32px);
-  }
-
-  .card {
-    padding: clamp(14px, 2.5vw, 18px);
-    border-radius: clamp(12px, 1.2vw, 16px);
-  }
-
-  .section-header {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: clamp(8px, 1.5vw, 12px);
-  }
-
-  .section-header h1,
-  .section-header h2 {
-    font-size: clamp(1rem, 3vw, 1.2rem);
-  }
-
-  .map-body {
-    padding: 16px;
-    gap: 16px;
-  }
-
-  .legend {
-    width: 100%;
-    justify-content: space-between;
-    gap: clamp(8px, 1.5vw, 12px);
-  }
-
-  .area-chart {
-    height: clamp(160px, 35vh, 240px);
-  }
-
-  .line-chart {
-    min-height: clamp(140px, 25vh, 200px);
-  }
-}
-
-@media (max-width: 520px) {
-  .dashboard {
-    padding: clamp(12px, 2.5vw, 16px) clamp(10px, 1.5vw, 14px) clamp(16px, 3vw, 24px);
-  }
-
-  .layout-grid {
-    gap: clamp(10px, 2vw, 14px);
-  }
-
-  .card {
-    padding: clamp(12px, 2vw, 16px);
-    border-radius: clamp(10px, 1vw, 14px);
-  }
-
-  .chart-hours {
-    grid-template-columns: repeat(4, 1fr);
-    row-gap: clamp(4px, 1vw, 6px);
-    font-size: clamp(0.7rem, 2vw, 0.8rem);
-  }
-
-  .alerts-actions {
-    width: 100%;
-    justify-content: flex-start;
-  }
-
-  .calendar-weekdays {
-    gap: clamp(3px, 1vw, 4px);
-    margin-bottom: clamp(6px, 1.5vw, 8px);
-    padding: 0 clamp(1px, 0.5vw, 2px);
-  }
-
-  .calendar-weekdays span {
-    font-size: clamp(0.55rem, 2vw, 0.65rem);
-  }
-
-  .calendar-grid {
-    gap: clamp(3px, 1vw, 4px);
-    padding: 0 clamp(1px, 0.5vw, 2px);
-  }
-
-  .day {
-    border-radius: clamp(6px, 1vw, 8px);
-    font-size: clamp(0.6rem, 2.5vw, 0.75rem);
-    border-width: 1px;
-    min-height: 44px; /* iOS recommended touch target */
-  }
-
-  .area-chart {
-    height: clamp(140px, 30vh, 200px);
-    margin-top: clamp(12px, 2vw, 20px);
-  }
-
-  .line-chart {
-    min-height: clamp(120px, 22vh, 180px);
-    margin-top: clamp(12px, 2vw, 20px);
-  }
-
-  .section-header h1,
-  .section-header h2 {
-    font-size: clamp(0.9rem, 2.5vw, 1.1rem);
-  }
-
-  /* Touch-friendly targets for mobile */
-  button, .metric-item, .alert {
-    min-height: 44px;
-  }
-}
-
 /* MQTT Connection Status Animation */
 @keyframes pulse {
   0%, 100% {
@@ -1564,15 +1375,6 @@ body,
   box-shadow: 0 2px 8px rgba(40, 167, 69, 0.3);
 }
 
-@media (max-width: 640px) {
-  .manual-input-trigger {
-    bottom: 10px;
-    right: 10px;
-    padding: 12px 16px;
-    font-size: 0.9rem;
-  }
-}
-
 /* Error Boundary */
 .error-boundary {
   display: flex;
@@ -1613,4 +1415,63 @@ body,
   display: flex;
   gap: 12px;
   justify-content: center;
+}
+
+/* Responsive Media Queries */
+
+   /* =================================================
+   Large desktops / smaller height laptops
+   Width ≤ 1535px OR Height ≤ 900px
+   ================================================= */
+@media (max-width: 1535px), (max-height: 900px) {
+  /* slightly reduce spacing, container width */
+
+}
+
+/* =================================================
+   Standard desktops / laptops
+   Width ≤ 1280px OR Height ≤ 800px
+   ================================================= */
+@media (max-width: 1280px), (max-height: 800px) {
+  /* tighten layout, reduce padding */
+}
+
+/* =================================================
+   Small laptops
+   Width ≤ 1024px OR Height ≤ 768px
+   ================================================= */
+@media (max-width: 1024px), (max-height: 768px) {
+  /* reduce columns, avoid vertical overflow */
+}
+
+/* =================================================
+   Tablets (landscape)
+   Width ≤ 768px OR Height ≤ 600px
+   ================================================= */
+@media (max-width: 768px), (max-height: 600px) {
+  /* switch to stacked layout */
+}
+
+/* =================================================
+   Tablets portrait / large phones
+   Width ≤ 600px OR Height ≤ 520px
+   ================================================= */
+@media (max-width: 600px), (max-height: 520px) {
+  /* increase tap targets */
+}
+
+/* =================================================
+   Mobile phones
+   Width ≤ 480px OR Height ≤ 480px
+   ================================================= */
+@media (max-width: 480px), (max-height: 480px) {
+  /* single column, mobile nav */
+}
+
+/* =================================================
+   Small phones
+   Width ≤ 360px OR Height ≤ 420px
+   ================================================= */
+@media (max-width: 360px), (max-height: 420px) {
+  /* smallest fonts, minimal spacing */
 }

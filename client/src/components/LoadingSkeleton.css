@@ -46,6 +46,10 @@
   gap: 8px;
 }
 
+.alert.skeleton {
+  min-height: 60px;
+}
+
 [data-theme="light"] .skeleton,
 [data-theme="light"] .skeleton-line {
   background: linear-gradient(

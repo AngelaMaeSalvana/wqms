@@ -238,5 +238,18 @@ export const getQualityRatings = (params) => {
   };
 };
 
+/**
+ * Get WQI classification (class, label, quality key for styling)
+ * Ranges: <50 Excellent, 50–100 Good, 100–200 Poor, 200–300 Very Poor, >300 Unsuitable
+ */
+export function getWQIClass(wqi) {
+  if (wqi == null || isNaN(wqi)) return { class: "N/A", label: "No Data", quality: "muted" };
+  if (wqi < 50) return { class: "I", label: "Excellent", quality: "excellent" };
+  if (wqi <= 100) return { class: "II", label: "Good", quality: "good" };
+  if (wqi <= 200) return { class: "III", label: "Poor", quality: "poor" };
+  if (wqi <= 300) return { class: "IV", label: "Very Poor", quality: "very-poor" };
+  return { class: "V", label: "Unsuitable", quality: "unsuitable" };
+}
+
 export default calculateWQI;
 

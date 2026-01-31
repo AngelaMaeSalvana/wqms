@@ -1,9 +1,14 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
+import 'leaflet/dist/leaflet.css';
 import './index.css';
 import App from './App';
 import { ThemeProvider } from './contexts/ThemeContext';
 import ErrorBoundary from './components/ErrorBoundary';
+
+// Apply saved font preference before first paint
+const savedFont = localStorage.getItem('fontPreference');
+if (savedFont) document.documentElement.setAttribute('data-font-size', savedFont);
 
 const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(

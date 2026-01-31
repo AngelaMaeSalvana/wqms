@@ -1,0 +1,19 @@
+.page-date-with-status {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.page-date-with-status .page-date {
+  font-size: 1rem;
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.page-date-with-status .last-updated {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}

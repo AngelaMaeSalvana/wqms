@@ -1,0 +1,528 @@
+/* Dashboard shared styles */
+
+/* Node selector: compact dropdown pill */
+.node-selector-pill {
+  display: inline-flex;
+  align-items: center;
+}
+
+.node-selector-pill__select {
+  padding: 6px 12px 6px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--panel-dark);
+  color: var(--text);
+  font-size: 0.85rem;
+  font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 12 12'%3E%3Cpath fill='%23888' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  padding-right: 28px;
+  min-width: 0;
+  max-width: 240px;
+}
+
+.node-selector-pill__select:hover {
+  border-color: rgba(255, 255, 255, 0.15);
+  background-color: var(--panel);
+}
+
+.node-selector-pill__select:focus {
+  outline: none;
+  border-color: rgba(141, 218, 213, 0.5);
+}
+
+.dashHint {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-top: 8px;
+}
+
+/* Node status pills */
+.node-status-pill {
+  display: inline-block;
+  padding: 4px 12px;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: capitalize;
+}
+
+.node-status-pill--online {
+  background: rgba(68, 211, 126, 0.2);
+  color: var(--success);
+  border: 1px solid rgba(68, 211, 126, 0.4);
+}
+
+.node-status-pill--offline {
+  background: rgba(212, 91, 91, 0.2);
+  color: var(--danger);
+  border: 1px solid rgba(212, 91, 91, 0.4);
+}
+
+.node-status-pill--testing {
+  background: rgba(240, 165, 0, 0.2);
+  color: var(--warning);
+  border: 1px solid rgba(240, 165, 0, 0.4);
+}
+
+.node-status-pill--passed {
+  background: rgba(68, 211, 126, 0.2);
+  color: var(--success);
+  border: 1px solid rgba(68, 211, 126, 0.4);
+}
+
+.node-status-pill--failed {
+  background: rgba(212, 91, 91, 0.2);
+  color: var(--danger);
+  border: 1px solid rgba(212, 91, 91, 0.4);
+}
+
+/* Card body fill */
+.card__body--fill {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.card--fill .card__body {
+  flex: 1;
+  min-height: 0;
+}
+
+/* Consistent card title size across all dashboard cards */
+.card .card__title {
+  font-size: 1.05rem;
+  font-weight: 600;
+}
+
+/* Minimized card description — same size for all dashboard cards */
+.card .card__desc {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin: 0;
+}
+
+/* WQI card — narrow column but score fills the space, large font */
+.wqi-card {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.wqi-card .card__header {
+  padding-bottom: 4px;
+  flex-shrink: 0;
+}
+
+.wqi-card .card__desc {
+  font-size: 0.75rem;
+}
+
+.wqi-card .wqiBox {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 12px 0;
+  text-align: center;
+  min-height: 0;
+}
+
+.wqiScore {
+  font-size: clamp(2.25rem, 5vw, 3.5rem);
+  font-weight: 700;
+  color: var(--text);
+  line-height: 1.1;
+}
+
+.wqi-card .wqiLabel {
+  font-size: 0.9rem;
+  margin-top: 4px;
+}
+
+.wqi-card .dashHint {
+  font-size: 0.7rem;
+  margin-top: 6px;
+}
+
+.wqiLabel {
+  font-size: 1rem;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+/* Today card: low / avg / high stat blocks — horizontal so they fit without scroll */
+.today-stats-grid {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 12px;
+  flex: 1;
+  min-height: 0;
+  align-content: flex-start;
+}
+
+.today-stats-grid .today-stat-block {
+  flex: 1 1 120px;
+  min-width: 0;
+}
+
+.today-stats-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.today-stat-block {
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--panel-dark);
+  border: 1px solid var(--border);
+}
+
+.today-stat-block__label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.today-stat-block--temp { border-left: 3px solid #1b9c85; }
+.today-stat-block--turb { border-left: 3px solid #d45b5b; }
+.today-stat-block--ph { border-left: 3px solid #f0a500; }
+.today-stat-block--nh3 { border-left: 3px solid #9b59b6; }
+.today-stat-block--flow { border-left: 3px solid #3498db; }
+.today-stat-block--do { border-left: 3px solid #2ecc71; }
+
+.today-stat-block__row {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.today-stat-block__item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.today-stat-block__key {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.today-stat-block__val {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+/* Mini map — map fills card */
+.mini-map-card .card__body {
+  padding: 0;
+  overflow: hidden;
+}
+
+.mini-map-wrapper {
+  flex: 1;
+  min-height: 180px;
+  width: 100%;
+  border-radius: 0 0 14px 14px;
+  overflow: hidden;
+}
+
+.mini-map-wrapper > div {
+  width: 100% !important;
+  height: 100% !important;
+  min-height: 180px;
+}
+
+/* Leaflet map in mini map card */
+.mini-map-wrapper--leaflet {
+  position: relative;
+  min-height: 180px;
+}
+
+.mini-map-wrapper--leaflet .leaflet-container {
+  min-height: 180px;
+  height: 100%;
+  border-radius: 12px;
+}
+
+.mini-map-fallback {
+  flex: 1;
+  min-height: 180px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: var(--panel-dark);
+  border: 1px dashed var(--border);
+  border-radius: 12px;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  text-align: center;
+}
+
+.mini-map-fallback__text {
+  margin: 0;
+}
+
+.mini-map-fallback code {
+  font-size: 0.8rem;
+  padding: 2px 6px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 4px;
+}
+
+.mini-map-fallback__node {
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.mini-map-fallback__coords {
+  font-size: 0.75rem;
+  opacity: 0.8;
+}
+
+/* Alerts summary — export beside header */
+.alerts-summary-card__header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.alerts-summary-card__header .card__title {
+  margin-bottom: 2px;
+}
+
+.alerts-summary-card .card__body {
+  padding-top: 8px;
+}
+
+.export-dropdown {
+  position: relative;
+  display: inline-block;
+}
+
+.export-dropdown__trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.export-dropdown__chevron {
+  font-size: 0.65em;
+  opacity: 0.8;
+}
+
+.export-dropdown__menu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 4px;
+  min-width: 140px;
+  padding: 6px 0;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.export-dropdown__item {
+  display: block;
+  width: 100%;
+  padding: 8px 14px;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 0.85rem;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.export-dropdown__item:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.export-dropdown__item:focus {
+  outline: none;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.alerts-summary-card .alerts-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.alerts-list__item {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.alerts-summary-card .alert {
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--panel-dark);
+  border: 1px solid var(--border);
+  display: block;
+  width: 100%;
+  text-align: left;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  min-width: 0;
+}
+
+.alerts-summary-card .alert--clickable {
+  cursor: pointer;
+  font-family: inherit;
+  color: inherit;
+  transition: background 0.2s, border-color 0.2s;
+}
+
+.alerts-summary-card .alert--clickable:hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.15);
+}
+
+.alerts-summary-card .alert .alert-title,
+.alerts-summary-card .alert .alert-detail,
+.alerts-summary-card .alert .alert-date {
+  display: block;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: unset;
+}
+
+.alerts-summary-card .alert .alert-title {
+  margin-bottom: 4px;
+}
+
+.alerts-summary-card .alert .alert-detail {
+  margin-bottom: 4px;
+}
+
+.alert--high { border-left: 3px solid var(--danger); }
+.alert--medium { border-left: 3px solid var(--warning); }
+.alert--low,
+.alert--info { border-left: 3px solid var(--success); }
+
+.legend {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.legendItem--temp { color: #1b9c85; }
+.legendItem--turb { color: #d45b5b; }
+.legendItem--ph { color: #f0a500; }
+
+.today-card .line-chart,
+.live-chart-card .line-chart {
+  flex: 1;
+  min-height: 200px;
+}
+
+/* Live chart: legend in header (right), no vertical scroll, compact so time labels fit */
+.live-chart-card .card__header {
+  flex-shrink: 0;
+  padding-bottom: 6px;
+}
+
+.live-chart-card__header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.live-chart-card .card__desc {
+  font-size: 0.75rem;
+}
+
+.live-chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  font-size: 0.7rem;
+  color: var(--text-muted);
+}
+
+.live-chart-legend__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.live-chart-legend__dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--legend-color, #888);
+  flex-shrink: 0;
+}
+
+.live-chart-card .card__body.live-chart-body {
+  overflow-y: hidden;
+  overflow-x: auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+}
+
+.live-chart-card .line-chart--horizontal-only {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  width: 100%;
+  height: 100%;
+  position: relative;
+}
+
+.live-chart-card .line-chart--horizontal-only > div {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+
+.live-chart-card .line-chart--horizontal-only canvas {
+  width: 100% !important;
+  height: 100% !important;
+  max-width: 100%;
+  display: block;
+}

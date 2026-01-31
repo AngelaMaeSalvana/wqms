@@ -1,0 +1,208 @@
+:root {
+    --sidenav-w: 260px;
+    --sidenav-w-collapsed: 72px;
+  }
+  
+  /* =========================
+     SIDEBAR CONTAINER
+  ========================= */
+  .side-nav {
+    width: var(--sidenav-w);
+    flex: 0 0 var(--sidenav-w);
+    height: 100vh;
+  
+    position: sticky;
+    top: 0;
+  
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  
+    padding: 16px;
+  
+    background: var(--panel);
+    border-right: 1px solid var(--border);
+  }
+  
+  .side-nav.collapsed {
+    width: var(--sidenav-w-collapsed);
+    flex-basis: var(--sidenav-w-collapsed);
+    padding: 16px 12px;
+  }
+  
+  /* =========================
+     TOP / BRAND
+  ========================= */
+  .side-nav__top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+  }
+  
+  .side-nav__brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+  }
+  
+  .brand__logo {
+    width: 36px;
+    height: 36px;
+    border-radius: 12px;
+  
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid var(--border);
+  }
+  
+  .brand__text {
+    font-weight: 700;
+    letter-spacing: 0.3px;
+    white-space: nowrap;
+  }
+  
+  /* =========================
+     COLLAPSE BUTTON
+  ========================= */
+  .side-nav__collapse-btn {
+    width: 34px;
+    height: 34px;
+  
+    border-radius: 12px;
+    border: 1px solid var(--border);
+  
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--text);
+  
+    cursor: pointer;
+  }
+  
+  .side-nav__collapse-btn:hover {
+    background: rgba(255, 255, 255, 0.08);
+  }
+  
+  /* =========================
+     MENU
+  ========================= */
+  .side-nav__menu {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-top: 6px;
+  }
+  
+  /* =========================
+     MENU ITEM (IMPORTANT)
+  ========================= */
+  .side-nav__item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  
+    height: 48px;              /* FIXED HEIGHT */
+    padding: 0 12px;
+  
+    border-radius: 14px;
+    text-decoration: none;
+    color: var(--text);
+  
+    border: 1px solid transparent;
+    background: transparent;
+  
+    transition: background 0.15s ease, border 0.15s ease;
+  }
+  
+  /* COLLAPSED MODE — center icon (hover box centering) */
+  .side-nav.collapsed .side-nav__item {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 48px;
+    height: 48px;
+    padding: 0;
+    border-radius: 16px;
+  }
+  
+  /* HOVER */
+  .side-nav__item:hover {
+    background: rgba(255, 255, 255, 0.05);
+    border-color: rgba(255, 255, 255, 0.08);
+  }
+  
+  /* ACTIVE */
+  .side-nav__item.active {
+    background: rgba(141, 218, 213, 0.18);
+    border-color: rgba(141, 218, 213, 0.35);
+  }
+  
+  /* =========================
+     ICON
+  ========================= */
+  .side-nav__icon {
+    width: 32px;
+    height: 32px;
+    min-width: 32px;
+    min-height: 32px;
+
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    border-radius: 10px;
+
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid var(--border);
+
+    flex-shrink: 0;
+  }
+  
+  /* =========================
+     LABEL
+  ========================= */
+  .side-nav__label {
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  
+  /* =========================
+     BOTTOM / HINT
+  ========================= */
+  .side-nav__bottom {
+    margin-top: auto;
+    padding-top: 10px;
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+  }
+  
+  .side-nav__hint {
+    padding: 12px;
+    border-radius: 14px;
+  
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid var(--border);
+  }
+  
+  .hint__title {
+    font-weight: 700;
+    margin-bottom: 6px;
+  }
+  
+  .hint__text {
+    font-size: 12px;
+    color: var(--text-muted);
+    line-height: 1.5;
+  }
+  
+  /* =========================
+     SMALL SCREENS
+  ========================= */
+  @media (max-width: 900px) {
+    .side-nav {
+      padding: 14px;
+    }
+  }
+  
