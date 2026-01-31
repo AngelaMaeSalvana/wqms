@@ -1,11 +1,12 @@
 /**
  * Supabase client for WQMS.
- * Reads URL and anon key from REACT_APP_* (CRA) or NEXT_PUBLIC_* (Next/Vercel) env vars.
+ * Reads URL and anon key from .env (REACT_APP_* or NEXT_PUBLIC_*).
  */
 import { createClient } from '@supabase/supabase-js';
+import { config } from '../config/env';
 
-const supabaseUrl = process.env.REACT_APP_SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
-const supabaseAnonKey = process.env.REACT_APP_SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+const supabaseUrl = config.supabase.url;
+const supabaseAnonKey = config.supabase.anonKey;
 
 export const supabase = supabaseUrl && supabaseAnonKey
   ? createClient(supabaseUrl, supabaseAnonKey)

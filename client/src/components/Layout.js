@@ -4,11 +4,12 @@ import SideNavigation from "./SideNavigation";
 import ConnectionStatus from "./ConnectionStatus";
 import DatabaseStatus from "./DatabaseStatus";
 import { useMQTTContext } from "../contexts/MQTTContext";
+import { config } from "../config/env";
 import "./layout.css";
 
 const Layout = () => {
   const { isConnected, isConnecting, error, reconnect } = useMQTTContext();
-  const brokerUrl = process.env.REACT_APP_MQTT_WS_URL || process.env.REACT_APP_MQTT_URL || "HiveMQ Cloud";
+  const brokerUrl = config.mqtt?.url || "HiveMQ Cloud";
 
   return (
     <div className="layout-container">

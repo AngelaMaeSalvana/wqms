@@ -1,8 +1,20 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import mqtt from 'mqtt';
+import { config } from '../config/env';
 
 // Local dev fallback when .env has no MQTT URL (browser needs ws/wss)
 const FALLBACK_URL = 'ws://localhost:9001';
+
+/** HTTPS pages cannot use ws:// (mixed content). Use wss:// or skip connect. */
+function getSafeMqttUrl(url) {
+  if (typeof window === 'undefined') return url;
+  if (window.location.protocol !== 'https:') return url;
+  // Page is HTTPS (e.g. Vercel): must use wss://
+  if (url.startsWith('wss://') || url.startsWith('wss:')) return url;
+  if (url.startsWith('ws://')) return 'wss://' + url.slice(5);
+  // Fallback is ws://localhost — cannot use on HTTPS; return as-is and let connection fail with clear error
+  return url;
+}
 
 /**
  * Custom hook for MQTT connection and subscription.
@@ -19,9 +31,10 @@ export const useMQTT = (brokerUrl = null, options = {}) => {
   const [error, setError] = useState(null);
   const clientRef = useRef(null);
 
-  const url = brokerUrl || process.env.REACT_APP_MQTT_WS_URL || process.env.REACT_APP_MQTT_URL || FALLBACK_URL;
-  const username = options.username ?? process.env.REACT_APP_MQTT_USER ?? '';
-  const password = options.password ?? process.env.REACT_APP_MQTT_PASS ?? '';
+  let url = brokerUrl || config.mqtt.url || FALLBACK_URL;
+  url = getSafeMqttUrl(url);
+  const username = options.username ?? config.mqtt.user ?? '';
+  const password = options.password ?? config.mqtt.pass ?? '';
 
   useEffect(() => {
     const mqttOptions = {

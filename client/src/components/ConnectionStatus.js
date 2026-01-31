@@ -1,10 +1,10 @@
 import React, { useState } from 'react';
+import { config } from '../config/env';
 import './ConnectionStatus.css';
 
 const ConnectionStatus = ({ isConnected, isConnecting, error, onReconnect, brokerUrl }) => {
   const [showDetails, setShowDetails] = useState(false);
-  
-  const mqttUrl = brokerUrl || process.env.REACT_APP_MQTT_WS_URL || process.env.REACT_APP_MQTT_URL || 'HiveMQ Cloud';
+  const mqttUrl = brokerUrl || config.mqtt?.url || 'HiveMQ Cloud';
 
   return (
     <div 
