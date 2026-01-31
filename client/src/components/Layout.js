@@ -2,6 +2,7 @@ import React from "react";
 import { Outlet } from "react-router-dom";
 import SideNavigation from "./SideNavigation";
 import ConnectionStatus from "./ConnectionStatus";
+import DatabaseStatus from "./DatabaseStatus";
 import { useMQTTContext } from "../contexts/MQTTContext";
 import "./layout.css";
 
@@ -15,6 +16,7 @@ const Layout = () => {
 
       <main className="layout-main">
         <div className="layout-main__header">
+          <DatabaseStatus />
           <ConnectionStatus
             isConnected={isConnected}
             isConnecting={isConnecting}
