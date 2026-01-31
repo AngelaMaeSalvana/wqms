@@ -41,6 +41,9 @@
 .settings-page .page-meta {
   font-size: 0.85rem;
   color: var(--text-muted);
+  margin-left: auto;
+  flex-shrink: 0;
+  text-align: right;
 }
 
 .settings-section {
@@ -394,4 +397,68 @@
   background: rgba(212, 91, 91, 0.2);
   border-color: rgba(212, 91, 91, 0.4);
   color: #d45b5b;
+}
+
+/* Responsive Media Queries */
+@media (max-width: 1024px), (max-height: 768px) {
+  .settings-grid {
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  }
+}
+
+@media (max-width: 768px), (max-height: 600px) {
+  .settings-page {
+    overflow: visible;
+    min-height: auto;
+  }
+  .settings-page .settings-content {
+    overflow: visible;
+    min-height: auto;
+  }
+  .settings-page .page-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .settings-page .page-meta {
+    align-self: flex-end;
+  }
+  .settings-grid {
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+  .settings-option-row {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+
+@media (max-width: 600px), (max-height: 520px) {
+  .settings-page .page-title {
+    font-size: 1.2rem;
+  }
+  .settings-grid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+  .settings-theme-buttons,
+  .settings-font-buttons {
+    flex-direction: column;
+  }
+  .settings-theme-btn,
+  .settings-font-btn {
+    width: 100%;
+  }
+}
+
+@media (max-width: 480px), (max-height: 480px) {
+  .settings-page .page-title {
+    font-size: 1rem;
+  }
+  .settings-section .card__body {
+    padding: 12px;
+  }
+  .settings-nodes-list-item {
+    flex-direction: column;
+    align-items: flex-start;
+  }
 }

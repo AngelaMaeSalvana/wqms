@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import PageDateWithStatus from "../components/PageDateWithStatus";
-import { getNodes, saveNodes } from "../utils/nodesStorage";
+import { getNodes, loadNodes, saveNodes } from "../utils/nodesStorage";
 import "./Nodes.css";
 
 const emptyNode = () => ({
@@ -34,17 +34,30 @@ function parseCoordinates(str) {
 }
 
 export default function Nodes() {
-  const [nodes, setNodes] = useState(getNodes);
+  const [nodes, setNodes] = useState(() => getNodes());
   const [newNode, setNewNode] = useState(emptyNode);
   const [editingId, setEditingId] = useState(null);
   const [editForm, setEditForm] = useState(emptyNode);
+  const [showAddModal, setShowAddModal] = useState(false);
   const [lastUpdated] = useState(() => new Date());
 
   useEffect(() => {
-    const onFocus = () => setNodes(getNodes());
+    loadNodes().then(() => setNodes(getNodes()));
+  }, []);
+  useEffect(() => {
+    const onFocus = () => loadNodes().then(() => setNodes(getNodes()));
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
   }, []);
+
+  useEffect(() => {
+    if (!showAddModal) return;
+    const onEscape = (e) => {
+      if (e.key === "Escape") setShowAddModal(false);
+    };
+    window.addEventListener("keydown", onEscape);
+    return () => window.removeEventListener("keydown", onEscape);
+  }, [showAddModal]);
 
   // Auto-fill next node ID for Add form
   const nextNodeId = getNextNodeId(nodes);
@@ -70,6 +83,7 @@ export default function Nodes() {
     setNodes(next);
     saveNodes(next);
     setNewNode({ ...emptyNode(), id: getNextNodeId(next) });
+    setShowAddModal(false);
   };
 
   const handleEdit = (node) => {
@@ -127,13 +141,22 @@ export default function Nodes() {
       <header className="page-header">
         <div>
           <h1 className="page-title">Nodes</h1>
-          <p className="page-subtitle">Add, edit, or remove monitoring nodes. They appear on the Map and Dashboard.</p>
         </div>
         <PageDateWithStatus lastUpdated={lastUpdated} className="page-meta" />
       </header>
 
+      {/* Mobile: Add node button (visible only on small screens) */}
+      <button
+        type="button"
+        className="nodes-add-btn-mobile"
+        onClick={() => setShowAddModal(true)}
+        aria-label="Add node"
+      >
+        + Add node
+      </button>
+
       <div className="nodes-content">
-        {/* Add node card */}
+        {/* Add node card (hidden on mobile, shown on desktop) */}
         <section className="nodes-section card nodes-add-card">
           <div className="card__header nodes-add-card__header">
             <div>
@@ -331,6 +354,104 @@ export default function Nodes() {
           </div>
         </section>
       </div>
+
+      {/* Mobile: Add node modal */}
+      {showAddModal && (
+        <div
+          className="nodes-add-modal-overlay"
+          onClick={() => setShowAddModal(false)}
+          role="presentation"
+        >
+          <div
+            className="nodes-add-modal"
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="nodes-add-modal-title"
+          >
+            <div className="nodes-add-modal__header">
+              <h2 id="nodes-add-modal-title">Add node</h2>
+              <button
+                type="button"
+                className="nodes-add-modal__close"
+                onClick={() => setShowAddModal(false)}
+                aria-label="Close"
+              >
+                ×
+              </button>
+            </div>
+            <form className="nodes-add-modal__form" onSubmit={handleAdd}>
+              <div className="nodes-form-grid">
+                <label className="nodes-label">
+                  <span>Node ID</span>
+                  <input
+                    type="text"
+                    className="nodes-input nodes-input--readonly"
+                    value={addFormId}
+                    readOnly
+                    aria-label="Node ID (auto-generated)"
+                  />
+                </label>
+                <label className="nodes-label">
+                  <span>Name</span>
+                  <input
+                    type="text"
+                    className="nodes-input"
+                    placeholder="e.g. River C - Outlet"
+                    value={newNode.name}
+                    onChange={(e) => setNewNode((n) => ({ ...n, name: e.target.value }))}
+                    aria-label="Node name"
+                  />
+                </label>
+                <label className="nodes-label">
+                  <span>Location</span>
+                  <input
+                    type="text"
+                    className="nodes-input"
+                    placeholder="e.g. City or area"
+                    value={newNode.location}
+                    onChange={(e) => setNewNode((n) => ({ ...n, location: e.target.value }))}
+                    aria-label="Location"
+                  />
+                </label>
+                <label className="nodes-label">
+                  <span>Status</span>
+                  <select
+                    className="nodes-input nodes-select"
+                    value={newNode.status}
+                    onChange={(e) => setNewNode((n) => ({ ...n, status: e.target.value }))}
+                    aria-label="Node status"
+                  >
+                    <option value="online">Online</option>
+                    <option value="testing">Testing</option>
+                    <option value="offline">Offline</option>
+                  </select>
+                </label>
+                <label className="nodes-label nodes-label--full">
+                  <span>Coordinates</span>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    className="nodes-input nodes-input-coords"
+                    placeholder="e.g. 8.52, 124.70  (paste from Google Maps: right‑click map → coordinates)"
+                    value={newNode.coords}
+                    onChange={(e) => setNewNode((n) => ({ ...n, coords: e.target.value }))}
+                    aria-label="Coordinates"
+                  />
+                </label>
+              </div>
+              <div className="nodes-add-modal__actions">
+                <button type="button" className="nodes-btn nodes-btn--secondary" onClick={() => setShowAddModal(false)}>
+                  Cancel
+                </button>
+                <button type="submit" className="nodes-btn nodes-btn--primary">
+                  Add node
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

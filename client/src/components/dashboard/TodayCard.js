@@ -1,5 +1,5 @@
 import React from "react";
-import { MetricSkeleton } from "../LoadingSkeleton";
+import EmptyState from "../EmptyState";
 import "./dashboard.css";
 
 const PARAMS = [
@@ -44,16 +44,15 @@ export function TodayCard({ todayStats, selectedNode }) {
       <div className="card__header">
         <div>
           <h2 className="card__title">Today</h2>
-          <p className="card__desc">Today from 00:00 to current hour — {selectedNode?.name || "—"}</p>
         </div>
       </div>
       <div className="card__body card__body--fill">
         {!hasStats ? (
-          <div className="today-stats-skeleton">
-            {[1, 2, 3, 4, 5, 6].map((i) => (
-              <MetricSkeleton key={i} />
-            ))}
-          </div>
+          <EmptyState
+            icon="📋"
+            title="No data yet"
+            message="Today’s stats will appear when live sensor data is received via HiveMQ."
+          />
         ) : (
           <div className="today-stats-grid">
             {PARAMS.map(({ key, label, unit, color }) => {

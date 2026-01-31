@@ -133,11 +133,24 @@
 html,
 body,
 #root {
-  height: 100vh;
-  max-height: 100vh;
+  height: 100%;
+  min-height: 100vh;
   background: var(--bg);
   margin: 0;
   padding: 0;
+}
+
+/* Enable page scroll on tablets and phones */
+@media (max-width: 768px), (max-height: 600px) {
+  html,
+  body,
+  #root {
+    height: auto;
+    min-height: 100vh;
+  }
+  body {
+    overflow-y: auto;
+  }
 }
 
 .App {
@@ -1419,13 +1432,32 @@ body,
 
 /* Responsive Media Queries */
 
-   /* =================================================
+/* =================================================
    Large desktops / smaller height laptops
    Width ≤ 1535px OR Height ≤ 900px
    ================================================= */
 @media (max-width: 1535px), (max-height: 900px) {
-  /* slightly reduce spacing, container width */
-
+  .layout-grid {
+    gap: clamp(10px, 1.5vw, 20px);
+  }
+  .card {
+    padding: clamp(12px, 1.5vw, 16px);
+  }
+  .dashboard {
+    padding: clamp(4px, 2vw, 8px) clamp(12px, 2.5vw, 32px) clamp(12px, 2vw, 24px);
+  }
+  .reports-card {
+    min-height: 480px;
+  }
+  .weekly-card .line-chart {
+    min-height: 200px;
+    max-height: 260px;
+  }
+  .calendar-legend {
+    margin-top: 16px;
+    padding-top: 16px;
+    gap: 10px;
+  }
 }
 
 /* =================================================
@@ -1433,7 +1465,34 @@ body,
    Width ≤ 1280px OR Height ≤ 800px
    ================================================= */
 @media (max-width: 1280px), (max-height: 800px) {
-  /* tighten layout, reduce padding */
+  .layout-grid {
+    gap: clamp(8px, 1.2vw, 16px);
+  }
+  .card {
+    padding: clamp(10px, 1.2vw, 14px);
+  }
+  .dashboard {
+    padding: clamp(4px, 1.5vw, 6px) clamp(10px, 2vw, 24px) clamp(10px, 1.5vw, 20px);
+  }
+  .section-header {
+    gap: 12px;
+  }
+  .metrics-grid {
+    gap: 12px;
+  }
+  .area-chart-wrapper,
+  .area-chart {
+    height: clamp(160px, 28vh, 280px);
+  }
+  .reports-card {
+    min-height: 420px;
+  }
+  .manual-input-trigger {
+    bottom: 16px;
+    right: 16px;
+    padding: 12px 16px;
+    font-size: 0.9rem;
+  }
 }
 
 /* =================================================
@@ -1441,7 +1500,35 @@ body,
    Width ≤ 1024px OR Height ≤ 768px
    ================================================= */
 @media (max-width: 1024px), (max-height: 768px) {
-  /* reduce columns, avoid vertical overflow */
+  .layout-grid {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto;
+    gap: 12px;
+  }
+  .reports-card {
+    grid-area: unset;
+    min-height: 400px;
+  }
+  .alerts-card {
+    grid-area: unset;
+  }
+  .map-card {
+    grid-column: unset;
+    grid-row: unset;
+    min-height: 280px;
+  }
+  .calendar-card {
+    grid-column: unset;
+    grid-row: unset;
+  }
+  .weekly-card .line-chart {
+    min-height: 180px;
+    max-height: 240px;
+  }
+  .map-wrapper {
+    min-height: 200px;
+    max-height: 40vh;
+  }
 }
 
 /* =================================================
@@ -1449,7 +1536,40 @@ body,
    Width ≤ 768px OR Height ≤ 600px
    ================================================= */
 @media (max-width: 768px), (max-height: 600px) {
-  /* switch to stacked layout */
+  .card {
+    padding: 12px;
+  }
+  .dashboard {
+    padding: 8px 12px 12px;
+  }
+  .wqi-details-container {
+    flex-direction: column;
+    gap: 20px;
+    align-items: flex-start;
+  }
+  .wqi-score {
+    padding-right: 0;
+    padding-bottom: 16px;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+    min-width: unset;
+  }
+  .metrics-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+  }
+  .map-body {
+    padding: 12px;
+    gap: 12px;
+  }
+  .calendar-weekdays {
+    margin-top: 12px;
+    margin-bottom: 8px;
+    gap: 4px;
+  }
+  .day {
+    font-size: clamp(0.65rem, 2vw, 0.8rem);
+  }
 }
 
 /* =================================================
@@ -1457,7 +1577,43 @@ body,
    Width ≤ 600px OR Height ≤ 520px
    ================================================= */
 @media (max-width: 600px), (max-height: 520px) {
-  /* increase tap targets */
+  .card {
+    padding: 10px 12px;
+  }
+  .section-header h1,
+  .section-header h2 {
+    font-size: 1.1rem;
+  }
+  .eyebrow {
+    font-size: 0.75rem;
+  }
+  .metrics-grid {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+  .metric-item {
+    padding: 12px;
+  }
+  .calendar-weekdays span {
+    font-size: 0.65rem;
+  }
+  .calendar-grid {
+    gap: 4px;
+  }
+  .day {
+    font-size: 0.7rem;
+  }
+  .manual-input-trigger {
+    padding: 14px 18px;
+    min-height: 48px;
+    min-width: 48px;
+  }
+  .ghost-btn,
+  .metric-select,
+  .date-input {
+    padding: 10px 14px;
+    min-height: 44px;
+  }
 }
 
 /* =================================================
@@ -1465,7 +1621,39 @@ body,
    Width ≤ 480px OR Height ≤ 480px
    ================================================= */
 @media (max-width: 480px), (max-height: 480px) {
-  /* single column, mobile nav */
+  .card {
+    padding: 10px;
+  }
+  .section-header {
+    flex-direction: column;
+    gap: 8px;
+  }
+  .section-header h1,
+  .section-header h2 {
+    font-size: 1rem;
+  }
+  .score .value {
+    font-size: 2.25rem;
+  }
+  .calendar-weekdays {
+    margin-top: 8px;
+    margin-bottom: 6px;
+  }
+  .calendar-grid {
+    grid-auto-rows: minmax(28px, 1fr);
+    gap: 3px;
+  }
+  .day {
+    font-size: 0.65rem;
+    border-radius: 8px;
+  }
+  .map-modal-overlay .sensor-test-modal {
+    width: 95%;
+    max-height: 85vh;
+  }
+  .date-details-modal .metrics-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* =================================================
@@ -1473,5 +1661,35 @@ body,
    Width ≤ 360px OR Height ≤ 420px
    ================================================= */
 @media (max-width: 360px), (max-height: 420px) {
-  /* smallest fonts, minimal spacing */
+  html {
+    font-size: 14px;
+  }
+  .card {
+    padding: 8px;
+  }
+  .section-header h1,
+  .section-header h2 {
+    font-size: 0.95rem;
+  }
+  .eyebrow {
+    font-size: 0.7rem;
+  }
+  .score .value {
+    font-size: 2rem;
+  }
+  .calendar-weekdays span {
+    font-size: 0.6rem;
+  }
+  .day {
+    font-size: 0.6rem;
+  }
+  .metric-item {
+    padding: 10px;
+  }
+  .manual-input-trigger {
+    bottom: 12px;
+    right: 12px;
+    padding: 12px 14px;
+    font-size: 0.85rem;
+  }
 }

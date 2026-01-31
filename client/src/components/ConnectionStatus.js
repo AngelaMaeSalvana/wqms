@@ -4,7 +4,7 @@ import './ConnectionStatus.css';
 const ConnectionStatus = ({ isConnected, isConnecting, error, onReconnect, brokerUrl }) => {
   const [showDetails, setShowDetails] = useState(false);
   
-  const mqttUrl = brokerUrl || process.env.REACT_APP_MQTT_URL || 'ws://localhost:9001';
+  const mqttUrl = brokerUrl || process.env.REACT_APP_MQTT_WS_URL || process.env.REACT_APP_MQTT_URL || 'HiveMQ Cloud';
 
   return (
     <div 
@@ -34,10 +34,8 @@ const ConnectionStatus = ({ isConnected, isConnecting, error, onReconnect, broke
             <p><strong>MQTT Broker:</strong> {mqttUrl}</p>
             {error && <p><strong>Error:</strong> {error}</p>}
             <p className="connection-help">
-              💡 <strong>To connect:</strong><br/>
-              1. Start MQTT broker on port 9001<br/>
-              2. Or set REACT_APP_MQTT_URL in .env<br/>
-              3. See MQTT_SETUP.md for details
+              💡 <strong>Live data:</strong> Sensor → LoRa → Forwarder → HiveMQ → Dashboard.<br/>
+              Default: HiveMQ Cloud (WSS). Override with REACT_APP_MQTT_WS_URL, REACT_APP_MQTT_USER, REACT_APP_MQTT_PASS in .env
             </p>
           </div>
         </div>

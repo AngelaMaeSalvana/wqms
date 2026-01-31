@@ -371,26 +371,61 @@
   border-color: rgba(0, 0, 0, 0.1);
 }
 
-@media (max-width: 640px) {
+@media (max-width: 768px), (max-height: 600px) {
   .manual-input-content {
     width: 95%;
+    max-height: 90vh;
+  }
+  .manual-input-header {
+    padding: 16px 20px;
+  }
+  .manual-input-header h2 {
+    font-size: 1.25rem;
+  }
+  .manual-input-body {
+    padding: 16px 20px;
+  }
+}
+
+@media (max-width: 600px), (max-height: 520px) {
+  .manual-input-modal {
+    padding: 12px;
+  }
+  .manual-input-content {
+    width: 98%;
     max-height: 95vh;
   }
-
   .input-grid {
     grid-template-columns: 1fr;
+    gap: 16px;
   }
-
   .rating-item {
     grid-template-columns: 1fr;
     gap: 8px;
     text-align: left;
   }
-
   .rating-value,
   .rating-weight,
   .rating-contribution {
     text-align: left;
+  }
+  .time-inputs {
+    flex-wrap: wrap;
+  }
+  .wqi-value {
+    font-size: 2.25rem;
+  }
+}
+
+@media (max-width: 480px), (max-height: 480px) {
+  .manual-input-header,
+  .manual-input-body {
+    padding: 12px 16px;
+  }
+  .close-btn {
+    width: 44px;
+    height: 44px;
+    min-height: 44px;
   }
 }
 

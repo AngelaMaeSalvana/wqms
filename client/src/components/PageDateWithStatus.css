@@ -5,6 +5,9 @@
   gap: 4px;
   font-size: 0.85rem;
   color: var(--text-muted);
+  margin-left: auto;
+  flex-shrink: 0;
+  text-align: right;
 }
 
 .page-date-with-status .page-date {

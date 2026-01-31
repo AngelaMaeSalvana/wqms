@@ -24,26 +24,12 @@ function getThresholds() {
   }
 }
 
-/** Mock latest readings for a node (same seed logic as Dashboard today data). */
-function getLatestReadingsForNode(node) {
-  const now = new Date();
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
-  const dateSeed = today.getFullYear() * 372 + today.getMonth() * 31 + today.getDate();
-  const nodeSeed = (node.id || "").split("").reduce((a, c) => a + c.charCodeAt(0), 0);
-  const hourSeed = now.getHours();
-  const seed = dateSeed + nodeSeed * 7 + hourSeed * 11;
-  return {
-    temperature: 18 + (seed % 15),
-    pH: Math.round((6.2 + (seed % 30) / 20) * 10) / 10,
-    turbidity: seed % 40,
-    dissolvedOxygen: 3 + (seed % 10),
-    nh3: Math.round((seed % 50) / 100 * 100) / 100,
-    flowRate: 8 + (seed % 12),
-  };
-}
-
-/** Build alerts for all nodes: threshold breaches, node status, maintenance. */
-export function buildAlertsForAllNodes(nodes = []) {
+/**
+ * Build alerts for all nodes: threshold breaches (from real readings only), node status, maintenance.
+ * @param {Array} nodes - List of nodes
+ * @param {Object} [readingsByNode] - Optional { nodeId: { temperature, pH, turbidity, dissolvedOxygen, nh3, ... } } from MQTT/API. If missing or no reading for a node, threshold alerts are skipped for that node.
+ */
+export function buildAlertsForAllNodes(nodes = [], readingsByNode = {}) {
   const thresholds = getThresholds();
   const alerts = [];
   let id = 0;
@@ -52,6 +38,7 @@ export function buildAlertsForAllNodes(nodes = []) {
   for (const node of nodes) {
     const nodeName = node.name || node.id || "Unknown node";
     const nodeId = node.id;
+    const readings = readingsByNode && readingsByNode[nodeId];
 
     if (node.status === "offline") {
       alerts.push({
@@ -81,9 +68,7 @@ export function buildAlertsForAllNodes(nodes = []) {
       });
     }
 
-    const readings = getLatestReadingsForNode(node);
-
-    if (readings.temperature != null && (readings.temperature < thresholds.temperatureMin || readings.temperature > thresholds.temperatureMax)) {
+    if (readings && readings.temperature != null && (readings.temperature < thresholds.temperatureMin || readings.temperature > thresholds.temperatureMax)) {
       const which = readings.temperature < thresholds.temperatureMin ? "below minimum" : "above maximum";
       alerts.push({
         id: `alert-${++id}`,
@@ -102,7 +87,7 @@ export function buildAlertsForAllNodes(nodes = []) {
       });
     }
 
-    if (readings.pH != null && (readings.pH < thresholds.pHMin || readings.pH > thresholds.pHMax)) {
+    if (readings && readings.pH != null && (readings.pH < thresholds.pHMin || readings.pH > thresholds.pHMax)) {
       alerts.push({
         id: `alert-${++id}`,
         nodeId,
@@ -120,7 +105,7 @@ export function buildAlertsForAllNodes(nodes = []) {
       });
     }
 
-    if (readings.turbidity != null && readings.turbidity > thresholds.turbidityMax) {
+    if (readings && readings.turbidity != null && readings.turbidity > thresholds.turbidityMax) {
       alerts.push({
         id: `alert-${++id}`,
         nodeId,
@@ -137,7 +122,7 @@ export function buildAlertsForAllNodes(nodes = []) {
       });
     }
 
-    if (readings.dissolvedOxygen != null && readings.dissolvedOxygen < thresholds.dissolvedOxygenMin) {
+    if (readings && readings.dissolvedOxygen != null && readings.dissolvedOxygen < thresholds.dissolvedOxygenMin) {
       alerts.push({
         id: `alert-${++id}`,
         nodeId,
@@ -154,7 +139,7 @@ export function buildAlertsForAllNodes(nodes = []) {
       });
     }
 
-    if (readings.nh3 != null && readings.nh3 > thresholds.nh3Max) {
+    if (readings && readings.nh3 != null && readings.nh3 > thresholds.nh3Max) {
       alerts.push({
         id: `alert-${++id}`,
         nodeId,

@@ -33,6 +33,9 @@
 .nodes-page .page-meta {
   font-size: 0.85rem;
   color: var(--text-muted);
+  margin-left: auto;
+  flex-shrink: 0;
+  text-align: right;
 }
 
 .nodes-content {
@@ -310,4 +313,199 @@
   margin: 12px 0 0 0;
   font-size: 0.9rem;
   color: var(--text-muted);
+}
+
+/* Mobile: Add node button (hidden on desktop) */
+.nodes-add-btn-mobile {
+  display: none;
+}
+
+/* Mobile: Add node modal */
+.nodes-add-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+  padding: 16px;
+  animation: nodesModalFadeIn 0.2s ease-out;
+}
+
+@keyframes nodesModalFadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.nodes-add-modal {
+  width: 100%;
+  max-width: 480px;
+  max-height: 90vh;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.nodes-add-modal__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 20px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.nodes-add-modal__header h2 {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.nodes-add-modal__close {
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 1.75rem;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: 10px;
+  padding: 0;
+  transition: background 0.2s;
+}
+
+.nodes-add-modal__close:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.nodes-add-modal__form {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.nodes-add-modal__form .nodes-form-grid {
+  padding: 20px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.nodes-add-modal__actions {
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+  padding: 16px 20px;
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+  background: var(--panel);
+}
+
+/* Responsive Media Queries */
+@media (max-width: 1024px), (max-height: 768px) {
+  .nodes-form-grid,
+  .nodes-edit-form-grid {
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  }
+}
+
+@media (max-width: 1024px), (max-height: 768px) {
+  .nodes-page {
+    overflow: visible;
+    min-height: auto;
+  }
+  .nodes-content {
+    overflow: visible;
+    min-height: auto;
+  }
+  .nodes-page .page-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .nodes-page .page-meta {
+    align-self: flex-end;
+  }
+  /* Mobile/tablet: hide add card, show add button */
+  .nodes-add-card {
+    display: none !important;
+  }
+  .nodes-add-btn-mobile {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 12px 20px;
+    border-radius: 12px;
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+    background: rgba(141, 218, 213, 0.25);
+    color: var(--text);
+    border: 1px solid rgba(141, 218, 213, 0.5);
+    font-family: inherit;
+    transition: background 0.2s, border-color 0.2s;
+  }
+  .nodes-add-btn-mobile:hover {
+    background: rgba(141, 218, 213, 0.35);
+    border-color: rgba(141, 218, 213, 0.6);
+  }
+  [data-theme="light"] .nodes-add-btn-mobile {
+    background: rgba(27, 156, 133, 0.2);
+    border-color: rgba(27, 156, 133, 0.4);
+  }
+  [data-theme="light"] .nodes-add-btn-mobile:hover {
+    background: rgba(27, 156, 133, 0.3);
+    border-color: rgba(27, 156, 133, 0.5);
+  }
+  .nodes-add-card__header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .nodes-form-grid,
+  .nodes-edit-form-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 600px), (max-height: 520px) {
+  .nodes-page .page-title {
+    font-size: 1.2rem;
+  }
+  .nodes-input-coords {
+    max-width: none;
+  }
+  .nodes-list-item {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .nodes-list-item__actions {
+    justify-content: flex-end;
+  }
+  .nodes-btn {
+    padding: 12px 20px;
+    min-height: 44px;
+  }
+}
+
+@media (max-width: 480px), (max-height: 480px) {
+  .nodes-page .page-title {
+    font-size: 1rem;
+  }
+  .nodes-list-item {
+    padding: 10px 12px;
+  }
 }

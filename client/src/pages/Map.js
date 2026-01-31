@@ -3,8 +3,9 @@ import { MapContainer, TileLayer } from "react-leaflet";
 import MapMarkersOverlay from "../components/map/MapMarkersOverlay";
 import PageDateWithStatus from "../components/PageDateWithStatus";
 import api from "../services/api";
+import { useMQTTContext } from "../contexts/MQTTContext";
 import { calculateWQI } from "../utils/wqiCalculator";
-import { getNodes } from "../utils/nodesStorage";
+import { getNodes, loadNodes } from "../utils/nodesStorage";
 import "./Map.css";
 
 const FALLBACK_CENTER = [8.462591, 124.707831];
@@ -42,7 +43,8 @@ function normalizeReading(r) {
 }
 
 export default function Map() {
-  const [nodes, setNodes] = useState(getNodes);
+  const { isConnected: mqttConnected, latestReadingsByNode } = useMQTTContext();
+  const [nodes, setNodes] = useState(() => getNodes());
   const [currentMetrics, setCurrentMetrics] = useState({
     temperature: null,
     turbidity: null,
@@ -68,7 +70,10 @@ export default function Map() {
   }, [allNodes]);
 
   useEffect(() => {
-    const onFocus = () => setNodes(getNodes());
+    loadNodes().then(() => setNodes(getNodes()));
+  }, []);
+  useEffect(() => {
+    const onFocus = () => loadNodes().then(() => setNodes(getNodes()));
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
   }, []);
@@ -90,10 +95,28 @@ export default function Map() {
   }, []);
 
   useEffect(() => {
+    if (mqttConnected && Object.keys(latestReadingsByNode).length > 0) {
+      const readings = Object.values(latestReadingsByNode);
+      const latest = readings.reduce((a, b) => ((a._receivedAt ?? 0) >= (b._receivedAt ?? 0) ? a : b));
+      setCurrentMetrics((prev) => ({
+        ...prev,
+        temperature: latest.temperature ?? prev.temperature,
+        turbidity: latest.turbidity ?? prev.turbidity,
+        pH: latest.pH ?? latest.ph ?? prev.pH,
+        nh3: latest.nh3 ?? prev.nh3,
+        dissolvedOxygen: latest.dissolvedOxygen ?? prev.dissolvedOxygen,
+        wqi: latest.wqi ?? prev.wqi,
+        nodeId: latest.nodeId ?? prev.nodeId,
+      }));
+    }
+  }, [mqttConnected, latestReadingsByNode]);
+
+  useEffect(() => {
+    if (mqttConnected) return;
     fetchLatestReading();
     const interval = setInterval(fetchLatestReading, 60000);
     return () => clearInterval(interval);
-  }, [fetchLatestReading]);
+  }, [mqttConnected, fetchLatestReading]);
 
   const getStoredTestResults = useCallback((nodeId) => {
     try {
@@ -124,54 +147,10 @@ export default function Map() {
     }
   }, []);
 
-  const generateDummySensorTestResults = useCallback(
-    (nodeId) => {
-      const getResponseTime = () => `${Math.floor(Math.random() * 70) + 80}ms`;
-      const fmt = (v, decimals, unit) =>
-        v != null && !isNaN(v) ? `${Number(v).toFixed(decimals)}${unit}` : "N/A";
-      const m = currentMetrics;
-      const sensors = [
-        { name: "Temperature Sensor", key: "Temperature", value: fmt(m.temperature, 1, "°C"), unit: "°C" },
-        { name: "Turbidity Sensor", key: "Turbidity", value: fmt(m.turbidity, 1, " NTU"), unit: " NTU" },
-        { name: "pH Sensor", key: "pH", value: fmt(m.pH, 1, ""), unit: "" },
-        { name: "Dissolved Oxygen Sensor", key: "Dissolved Oxygen", value: fmt(m.dissolvedOxygen, 1, " mg/L"), unit: " mg/L" },
-        { name: "NH₃ Sensor", key: "NH₃", value: fmt(m.nh3, 2, " mg/L"), unit: " mg/L" },
-      ].map((s) => {
-        const hasData = s.value !== "N/A";
-        return {
-          name: s.name,
-          status: hasData ? "pass" : "fail",
-          value: s.value,
-          responseTime: hasData ? getResponseTime() : "Timeout",
-        };
-      });
-      const failCount = sensors.filter((s) => s.status === "fail").length;
-      let status = "success";
-      let message = "Sensor test completed successfully";
-      if (failCount === sensors.length) {
-        status = "error";
-        message = "All sensors failed - no data available";
-      } else if (failCount >= 2) {
-        status = "error";
-        message = `${failCount} sensors failed - missing data`;
-      } else if (failCount === 1) {
-        status = "warning";
-        message = "Sensor test completed with warnings - some data unavailable";
-      }
-      return {
-        nodeId,
-        status,
-        message,
-        timestamp: new Date().toISOString(),
-        sensors,
-      };
-    },
-    [currentMetrics]
-  );
-
   const handleSensorTest = useCallback(
-    async (nodeId, forceRun = false) => {
-      const id = nodeId ?? currentMetrics.nodeId ?? 1;
+    (nodeId, forceRun = false) => {
+      const id = nodeId ?? currentMetrics.nodeId;
+      if (!id) return;
       if (!forceRun) {
         const stored = getStoredTestResults(id);
         if (stored) {
@@ -181,30 +160,21 @@ export default function Map() {
           return;
         }
       }
-      setIsTestingSensor(true);
+      setIsTestingSensor(false);
+      setSensorTestResults({
+        nodeId: id,
+        status: "error",
+        message: "No sensor data yet.",
+        timestamp: new Date().toISOString(),
+        sensors: [],
+        empty: true,
+      });
       setIsSensorTestModalOpen(true);
-      try {
-        setTimeout(() => {
-          const results = generateDummySensorTestResults(id);
-          setSensorTestResults(results);
-          storeTestResults(id, results);
-          setIsTestingSensor(false);
-        }, 2000);
-      } catch (e) {
-        setSensorTestResults({
-          nodeId: id,
-          status: "error",
-          message: e.message || "Sensor test failed",
-          timestamp: new Date().toISOString(),
-          sensors: [],
-        });
-        setIsTestingSensor(false);
-      }
     },
-    [currentMetrics.nodeId, getStoredTestResults, generateDummySensorTestResults, storeTestResults]
+    [currentMetrics.nodeId, getStoredTestResults]
   );
 
-  const nodeIdForMarker = currentMetrics.nodeId ?? "N-001";
+  const nodeIdForMarker = currentMetrics.nodeId ?? null;
   const isTestingThisNode = isTestingSensor && (sensorTestResults?.nodeId === nodeIdForMarker || !sensorTestResults);
   const testStatusForNode = sensorTestResults?.nodeId === nodeIdForMarker ? sensorTestResults?.status : null;
 
@@ -242,7 +212,6 @@ export default function Map() {
       <header className="page-header">
         <div>
           <h1 className="page-title">Map &amp; Locations</h1>
-          <p className="page-subtitle">Sensor location and live water quality at a glance</p>
         </div>
         <PageDateWithStatus lastUpdated={lastUpdated} className="page-meta" />
       </header>
@@ -371,30 +340,36 @@ export default function Map() {
                       {new Date(sensorTestResults.timestamp).toLocaleString()}
                     </p>
                   </div>
-                  <div className="sensor-test-list">
-                    <h3>Sensor Status</h3>
-                    {sensorTestResults.sensors?.map((s, i) => (
-                      <div key={i} className="sensor-test-item">
-                        <div>
-                          <p className="sensor-test-item-name">{s.name}</p>
-                          <p className="sensor-test-item-response">Response: {s.responseTime}</p>
-                        </div>
-                        <div className="sensor-test-item-value">
-                          <span className={`sensor-test-badge sensor-test-badge--${s.status}`}>
-                            {s.status === "pass" ? "PASS" : "FAIL"}
-                          </span>
-                          <span>{s.value}</span>
-                        </div>
+                  {sensorTestResults.empty ? (
+                    <p className="sensor-test-empty-msg">Connect to HiveMQ and ensure the node is sending data.</p>
+                  ) : (
+                    <>
+                      <div className="sensor-test-list">
+                        <h3>Sensor Status</h3>
+                        {sensorTestResults.sensors?.map((s, i) => (
+                          <div key={i} className="sensor-test-item">
+                            <div>
+                              <p className="sensor-test-item-name">{s.name}</p>
+                              <p className="sensor-test-item-response">Response: {s.responseTime}</p>
+                            </div>
+                            <div className="sensor-test-item-value">
+                              <span className={`sensor-test-badge sensor-test-badge--${s.status}`}>
+                                {s.status === "pass" ? "PASS" : "FAIL"}
+                              </span>
+                              <span>{s.value}</span>
+                            </div>
+                          </div>
+                        ))}
                       </div>
-                    ))}
-                  </div>
-                  <button
-                    type="button"
-                    className="ghost-btn sensor-test-run-again"
-                    onClick={() => handleSensorTest(sensorTestResults.nodeId ?? nodeIdForMarker, true)}
-                  >
-                    Run Test Again
-                  </button>
+                      <button
+                        type="button"
+                        className="ghost-btn sensor-test-run-again"
+                        onClick={() => handleSensorTest(sensorTestResults.nodeId ?? nodeIdForMarker, true)}
+                      >
+                        Run Test Again
+                      </button>
+                    </>
+                  )}
                 </>
               ) : null}
             </div>

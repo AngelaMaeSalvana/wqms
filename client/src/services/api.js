@@ -1,4 +1,7 @@
-// API service for backend communication
+// API service: uses Supabase when REACT_APP_SUPABASE_* are set, else backend API
+import { isSupabaseEnabled } from '../lib/supabaseClient';
+import * as supabaseService from './supabaseService';
+
 const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
 
 class ApiService {
@@ -11,12 +14,9 @@ class ApiService {
       },
       ...options,
     };
-
     try {
       const response = await fetch(url, config);
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
+      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
       return await response.json();
     } catch (error) {
       console.error(`❌ API Error (${endpoint}):`, error);
@@ -24,69 +24,59 @@ class ApiService {
     }
   }
 
-  // Get latest reading
   async getLatestReading(nodeId = null) {
+    if (isSupabaseEnabled()) return supabaseService.getLatestReading(nodeId);
     const params = nodeId ? `?nodeId=${nodeId}` : '';
     return this.request(`/readings/latest${params}`);
   }
 
-  // Get readings by date range
   async getReadings({ startDate, endDate, nodeId, limit = 100 }) {
+    if (isSupabaseEnabled()) return supabaseService.getReadings({ startDate, endDate, nodeId, limit });
     const params = new URLSearchParams();
     if (startDate) params.append('startDate', startDate);
     if (endDate) params.append('endDate', endDate);
     if (nodeId) params.append('nodeId', nodeId);
     params.append('limit', limit);
-    
     return this.request(`/readings?${params.toString()}`);
   }
 
-  // Get daily summaries
   async getDailySummaries({ startDate, endDate, nodeId }) {
+    if (isSupabaseEnabled()) return supabaseService.getDailySummaries({ startDate, endDate, nodeId });
     const params = new URLSearchParams();
     if (startDate) params.append('startDate', startDate);
     if (endDate) params.append('endDate', endDate);
     if (nodeId) params.append('nodeId', nodeId);
-    
     return this.request(`/summaries/daily?${params.toString()}`);
   }
 
-  // Get water quality for specific date
   async getReadingByDate(date, nodeId = null) {
+    if (isSupabaseEnabled()) return supabaseService.getReadingByDate(date, nodeId);
     const params = nodeId ? `?nodeId=${nodeId}` : '';
     return this.request(`/readings/date/${date}${params}`);
   }
 
-  // Get alerts
   async getAlerts({ limit = 50, severity } = {}) {
+    if (isSupabaseEnabled()) return supabaseService.getAlerts({ limit, severity });
     const params = new URLSearchParams();
     if (limit) params.append('limit', limit);
     if (severity) params.append('severity', severity);
-    
     return this.request(`/alerts?${params.toString()}`);
   }
 
-  // POST: Store reading
   async postReading(reading) {
-    return this.request('/readings', {
-      method: 'POST',
-      body: JSON.stringify(reading),
-    });
+    if (isSupabaseEnabled()) return supabaseService.postReading(reading);
+    return this.request('/readings', { method: 'POST', body: JSON.stringify(reading) });
   }
 
-  // POST: Store alert
   async postAlert(alert) {
-    return this.request('/alerts', {
-      method: 'POST',
-      body: JSON.stringify(alert),
-    });
+    if (isSupabaseEnabled()) return supabaseService.postAlert(alert);
+    return this.request('/alerts', { method: 'POST', body: JSON.stringify(alert) });
   }
 
-  // Health check
   async healthCheck() {
+    if (isSupabaseEnabled()) return { status: 'ok', database: 'supabase' };
     return this.request('/health');
   }
 }
 
 export default new ApiService();
-

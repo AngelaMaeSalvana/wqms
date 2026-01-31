@@ -198,11 +198,133 @@
   }
   
   /* =========================
-     SMALL SCREENS
+     RESPONSIVE — SMALL SCREENS
   ========================= */
-  @media (max-width: 900px) {
+
+  /* Large desktops / smaller laptops */
+  @media (max-width: 1535px), (max-height: 900px) {
+    :root {
+      --sidenav-w: 240px;
+    }
     .side-nav {
       padding: 14px;
+    }
+  }
+
+  /* Standard desktops */
+  @media (max-width: 1280px), (max-height: 800px) {
+    :root {
+      --sidenav-w: 220px;
+    }
+    .side-nav {
+      padding: 12px;
+    }
+    .side-nav__item {
+      height: 44px;
+      padding: 0 10px;
+    }
+  }
+
+  /* Small laptops — icon-only to save space */
+  @media (max-width: 1024px), (max-height: 768px) {
+    :root {
+      --sidenav-w: 72px;
+    }
+    .side-nav {
+      width: var(--sidenav-w);
+      flex-basis: var(--sidenav-w);
+      padding: 12px 10px;
+    }
+    .side-nav__brand .brand__text,
+    .side-nav__label {
+      display: none;
+    }
+    .side-nav__item {
+      justify-content: center;
+      width: 48px;
+      height: 48px;
+      padding: 0;
+      margin: 0 auto;
+    }
+    .side-nav__collapse-btn {
+      display: none;
+    }
+    .side-nav__bottom,
+    .side-nav__hint {
+      display: none;
+    }
+  }
+
+  /* Tablets — keep icon-only */
+  @media (max-width: 768px), (max-height: 600px) {
+    :root {
+      --sidenav-w: 64px;
+    }
+    .side-nav {
+      padding: 10px 8px;
+    }
+    .side-nav__icon {
+      width: 28px;
+      height: 28px;
+      min-width: 28px;
+      min-height: 28px;
+    }
+    .side-nav__item {
+      width: 44px;
+      height: 44px;
+    }
+  }
+
+  /* Tablets portrait / large phones */
+  @media (max-width: 600px), (max-height: 520px) {
+    :root {
+      --sidenav-w: 60px;
+    }
+    .side-nav {
+      padding: 8px 6px;
+    }
+    .side-nav__item {
+      width: 48px;
+      height: 48px;
+      min-height: 48px;
+    }
+    .brand__logo {
+      width: 32px;
+      height: 32px;
+    }
+  }
+
+  /* Mobile phones */
+  @media (max-width: 480px), (max-height: 480px) {
+    :root {
+      --sidenav-w: 56px;
+    }
+    .side-nav {
+      padding: 8px 6px;
+    }
+    .side-nav__item {
+      width: 44px;
+      height: 44px;
+      min-height: 44px;
+    }
+  }
+
+  /* Small phones */
+  @media (max-width: 360px), (max-height: 420px) {
+    :root {
+      --sidenav-w: 52px;
+    }
+    .side-nav {
+      padding: 6px 4px;
+    }
+    .side-nav__item {
+      width: 40px;
+      height: 40px;
+      min-height: 40px;
+    }
+    .brand__logo {
+      width: 28px;
+      height: 28px;
     }
   }
   

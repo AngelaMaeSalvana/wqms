@@ -5,10 +5,11 @@ import { autoTable } from "jspdf-autotable";
 import "../utils/chartConfig";
 import { Line } from "react-chartjs-2";
 import PageDateWithStatus from "../components/PageDateWithStatus";
+import EmptyState from "../components/EmptyState";
 import CalendarCard from "../components/reports/calendar-card";
 import WqiDetailModal from "../components/reports/WqiDetailModal";
 import { getWQIClass, calculateWQI } from "../utils/wqiCalculator";
-import { getNodes } from "../utils/nodesStorage";
+import { getNodes, loadNodes } from "../utils/nodesStorage";
 import { getCrystalReport } from "../utils/crystalReportStorage";
 import "./Reports.css";
 
@@ -222,86 +223,9 @@ function buildRangePickerDays(year, month) {
   return days;
 }
 
-/** Generate mock min/avg/max data for the report chart. */
-function getReportChartData(parameterId, periodId, rangeStart, rangeEnd) {
-  const isWeek = periodId === "week";
-  let labels;
-  let n;
-  if (isWeek) {
-    // By week: one point per day from start day to end day of the period
-    labels = getDayLabelsInRange(rangeStart, rangeEnd);
-    n = labels.length;
-    if (n === 0 && rangeStart && rangeEnd) {
-      const s = new Date(rangeStart);
-      labels = [`${MONTH_SHORT[s.getMonth()]} ${s.getDate()}`];
-      n = 1;
-    } else if (n === 0) {
-      labels = ["Jan 18"];
-      n = 1;
-    }
-  } else {
-    labels = getWeeklyLabelsInRange(rangeStart, rangeEnd);
-    n = labels.length;
-    if (n === 0) {
-      labels = ["Jan 1 - Jan 7", "Jan 8 - Jan 14", "Jan 15 - Jan 21", "Jan 22 - Jan 31"];
-      n = 4;
-    }
-  }
-  const seed = parameterId.length * 7 + (isWeek ? 1 : 2);
-  const minArr = [];
-  const avgArr = [];
-  const maxArr = [];
-  for (let i = 0; i < n; i++) {
-    const v = (seed * (i + 1) + i * 11) % 100;
-    let baseMin = 0,
-      baseAvg = 0,
-      baseMax = 0;
-    switch (parameterId) {
-      case "temperature":
-        baseMin = 20 + (v % 8);
-        baseAvg = baseMin + 2;
-        baseMax = baseAvg + 3;
-        break;
-      case "pH":
-        baseMin = 6.2 + (v % 30) / 20;
-        baseAvg = baseMin + 0.3;
-        baseMax = baseAvg + 0.4;
-        break;
-      case "turbidity":
-        baseMin = (v % 15);
-        baseAvg = baseMin + 5;
-        baseMax = baseAvg + 10;
-        break;
-      case "dissolvedOxygen":
-        baseMin = 4 + (v % 4);
-        baseAvg = baseMin + 2;
-        baseMax = baseAvg + 2;
-        break;
-      case "nh3":
-        baseMin = (v % 20) / 100;
-        baseAvg = baseMin + 0.15;
-        baseMax = baseAvg + 0.2;
-        break;
-      case "flowRate":
-        baseMin = 8 + (v % 10);
-        baseAvg = baseMin + 4;
-        baseMax = baseAvg + 6;
-        break;
-      case "wqi":
-        baseMin = 40 + (v % 40);
-        baseAvg = baseMin + 25;
-        baseMax = Math.min(100, baseAvg + 30);
-        break;
-      default:
-        baseMin = v;
-        baseAvg = v + 10;
-        baseMax = v + 20;
-    }
-    minArr.push(Math.round(baseMin * 10) / 10);
-    avgArr.push(Math.round(baseAvg * 10) / 10);
-    maxArr.push(Math.round(baseMax * 10) / 10);
-  }
-  return { labels, minArr, avgArr, maxArr };
+/** Report chart data: empty until real data is available. */
+function getReportChartData() {
+  return { labels: [], minArr: [], avgArr: [], maxArr: [] };
 }
 
 const MONTH_NAMES = ["January", "February", "March", "April", "May", "June",
@@ -326,22 +250,10 @@ function buildCalendarDays(year, month) {
     const isToday = date.getTime() === today.getTime();
     const isFuture = date > today;
 
-    let wqi = null;
-    let params = null;
-    if (isCurrentMonth && !isFuture) {
-      const seed = date.getFullYear() * 372 + date.getMonth() * 31 + date.getDate();
-      params = {
-        temperature: 18 + (seed % 15),
-        pH: 6.2 + (seed % 30) / 10,
-        turbidity: seed % 40,
-        dissolvedOxygen: 3 + (seed % 10),
-        nh3: (seed % 50) / 100,
-        flowRate: (seed % 80) * 0.5,
-      };
-      wqi = calculateWQI(params);
-    }
-    const qualityData = wqi != null ? getWQIClass(wqi) : null;
-    const quality = qualityData?.quality ?? null;
+    const wqi = null;
+    const params = null;
+    const qualityData = null;
+    const quality = null;
 
     days.push({
       date,
@@ -383,13 +295,16 @@ export default function Reports() {
   const [tableSort, setTableSort] = useState("newest");
   const [tableNodeFilter, setTableNodeFilter] = useState("all");
   const [tablePage, setTablePage] = useState(1);
-  const [nodes, setNodes] = useState(getNodes);
+  const [nodes, setNodes] = useState(() => getNodes());
   const [exportOpen, setExportOpen] = useState(false);
 
   const TABLE_PAGE_SIZE = 7;
 
   useEffect(() => {
-    const onFocus = () => setNodes(getNodes());
+    loadNodes().then(() => setNodes(getNodes()));
+  }, []);
+  useEffect(() => {
+    const onFocus = () => loadNodes().then(() => setNodes(getNodes()));
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
   }, []);
@@ -472,57 +387,8 @@ export default function Reports() {
     return { start, end };
   }, [tableDateFrom, tableDateTo]);
 
-  /** All sensor data: one row per node per hour (saved every hour). Filtered by search/date; sorted. */
-  const sensorTableRows = useMemo(() => {
-    if (!tableDateRange || nodes.length === 0) return [];
-    const { start, end } = tableDateRange;
-    const rows = [];
-    const cursor = new Date(start);
-    cursor.setHours(0, 0, 0, 0);
-    const endTime = new Date(end);
-    endTime.setHours(23, 59, 59, 999);
-    while (cursor <= endTime) {
-      for (const node of nodes) {
-        const dateSeed = cursor.getFullYear() * 372 + cursor.getMonth() * 31 + cursor.getDate();
-        const hourSeed = cursor.getHours();
-        const nodeSeed = (node.id || "").split("").reduce((a, c) => a + c.charCodeAt(0), 0);
-        const seed = dateSeed + nodeSeed * 7 + hourSeed * 11;
-        const temperature = 18 + (seed % 15);
-        const pH = Math.round((6.2 + (seed % 30) / 10) * 10) / 10;
-        const turbidity = seed % 40;
-        const dissolvedOxygen = 3 + (seed % 10);
-        const nh3 = Math.round((seed % 50) / 100 * 100) / 100;
-        const flowRate = Math.round((seed % 80) * 0.5 * 10) / 10;
-        const wqi = calculateWQI({ temperature, turbidity, pH, nh3, dissolvedOxygen });
-        rows.push({
-          date: new Date(cursor),
-          nodeId: node.id,
-          nodeName: node.name || node.id,
-          temperature,
-          pH,
-          turbidity,
-          dissolvedOxygen,
-          nh3,
-          flowRate,
-          wqi: wqi != null ? Math.round(wqi) : null,
-        });
-      }
-      cursor.setTime(cursor.getTime() + 60 * 60 * 1000);
-    }
-    let filtered = rows;
-    if (search.trim()) {
-      const q = search.trim().toLowerCase();
-      filtered = filtered.filter((r) => rowMatchesSearch(r, q));
-    }
-    if (tableNodeFilter && tableNodeFilter !== "all") {
-      filtered = filtered.filter((r) => r.nodeId === tableNodeFilter);
-    }
-    const sorted =
-      tableSort === "oldest"
-        ? [...filtered].sort((a, b) => a.date.getTime() - b.date.getTime())
-        : [...filtered].sort((a, b) => b.date.getTime() - a.date.getTime());
-    return sorted;
-  }, [tableDateRange, nodes, search, tableNodeFilter, tableSort]);
+  /** Sensor data table: empty until real data is available (e.g. from API or stored readings). */
+  const sensorTableRows = useMemo(() => [], []);
 
   const totalRows = sensorTableRows.length;
   const totalPages = Math.max(1, Math.ceil(totalRows / TABLE_PAGE_SIZE));
@@ -765,7 +631,6 @@ export default function Reports() {
       <header className="page-header reports-page-header">
         <div>
           <h1 className="page-title">Reports</h1>
-          <p className="page-subtitle">Historical data and exports</p>
         </div>
         <PageDateWithStatus lastUpdated={lastUpdated} className="page-meta reports-header-meta" />
       </header>
@@ -775,7 +640,6 @@ export default function Reports() {
           <div className="card__header reports-chart-header">
             <div>
               <h2 className="card__title">Report chart</h2>
-              <p className="card__desc">Min, average, and max for the selected parameter</p>
             </div>
           </div>
           <div className="reports-chart-layout">
@@ -789,7 +653,15 @@ export default function Reports() {
                 </div>
               )}
               <div className="reports-chart-wrapper">
-                <MemoizedReportChart data={reportChartData} options={reportChartOptions} />
+                {reportChartData.labels?.length > 0 ? (
+                  <MemoizedReportChart data={reportChartData} options={reportChartOptions} />
+                ) : (
+                  <EmptyState
+                    icon="📈"
+                    title="No report data"
+                    message="Report data will appear when historical readings are available."
+                  />
+                )}
               </div>
             </div>
             <aside className="reports-chart-selectors" ref={dateRangePickerRef} aria-label="Chart filters">
@@ -1124,7 +996,7 @@ export default function Reports() {
                 {sensorTableRows.length === 0 ? (
                   <tr>
                     <td colSpan={10} className="reports-data-table-empty">
-                      No data. Select a date range (or use From/To above) and ensure nodes exist.
+                      No data yet. Sensor table will show readings when data is available from HiveMQ or the API.
                     </td>
                   </tr>
                 ) : (

@@ -1,15 +1,28 @@
 import React from "react";
 import { Outlet } from "react-router-dom";
 import SideNavigation from "./SideNavigation";
+import ConnectionStatus from "./ConnectionStatus";
+import { useMQTTContext } from "../contexts/MQTTContext";
 import "./layout.css";
 
 const Layout = () => {
+  const { isConnected, isConnecting, error, reconnect } = useMQTTContext();
+  const brokerUrl = process.env.REACT_APP_MQTT_WS_URL || process.env.REACT_APP_MQTT_URL || "HiveMQ Cloud";
+
   return (
     <div className="layout-container">
       <SideNavigation />
 
-      {/* This is where Dashboard/Reports/Maps/Alerts/Settings will render */}
       <main className="layout-main">
+        <div className="layout-main__header">
+          <ConnectionStatus
+            isConnected={isConnected}
+            isConnecting={isConnecting}
+            error={error}
+            onReconnect={reconnect}
+            brokerUrl={brokerUrl}
+          />
+        </div>
         <Outlet />
       </main>
     </div>

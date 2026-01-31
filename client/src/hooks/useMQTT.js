@@ -1,15 +1,17 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import mqtt from 'mqtt';
 
+// Local dev fallback when .env has no MQTT URL (browser needs ws/wss)
+const FALLBACK_URL = 'ws://localhost:9001';
+
 /**
- * Custom hook for MQTT connection and subscription
- * 
- * Based on the system architecture:
- * - Nodes → Microcontroller → MQTT Broker → Web Dashboard (Live Updates)
- * 
- * @param {string} brokerUrl - MQTT broker URL (default: process.env.REACT_APP_MQTT_URL or 'ws://localhost:9001')
- * @param {object} options - MQTT connection options
- * @returns {object} - { client, isConnected, error, subscribe, unsubscribe, reconnect }
+ * Custom hook for MQTT connection and subscription.
+ * Config from .env: REACT_APP_MQTT_WS_URL, REACT_APP_MQTT_USER, REACT_APP_MQTT_PASS
+ *
+ * Sensor node → LoRa → Forwarder → HiveMQ → WQMS dashboard
+ *
+ * @param {string} brokerUrl - Override URL (optional)
+ * @param {object} options - Override options (optional)
  */
 export const useMQTT = (brokerUrl = null, options = {}) => {
   const [isConnected, setIsConnected] = useState(false);
@@ -17,26 +19,20 @@ export const useMQTT = (brokerUrl = null, options = {}) => {
   const [error, setError] = useState(null);
   const clientRef = useRef(null);
 
-  // Default broker URL - supports both WebSocket (ws://) and TCP (mqtt://)
-  // For browser, use WebSocket: ws:// or wss://
-  // Priority: 1) brokerUrl param, 2) .env file, 3) default localhost
-  let url = brokerUrl || process.env.REACT_APP_MQTT_URL || 'ws://localhost:9001';
-  
-  // Ensure we're using localhost, not a placeholder
-  if (url.includes('your-mqtt-broker')) {
-    console.warn('⚠️ Detected placeholder URL, using localhost:9001 instead');
-    url = 'ws://localhost:9001';
-  }
+  const url = brokerUrl || process.env.REACT_APP_MQTT_WS_URL || process.env.REACT_APP_MQTT_URL || FALLBACK_URL;
+  const username = options.username ?? process.env.REACT_APP_MQTT_USER ?? '';
+  const password = options.password ?? process.env.REACT_APP_MQTT_PASS ?? '';
 
   useEffect(() => {
-    // MQTT connection options
     const mqttOptions = {
       clientId: `wqms-dashboard-${Math.random().toString(16).substr(2, 8)}`,
       clean: true,
       reconnectPeriod: 5000,
       connectTimeout: 30000,
-      protocolVersion: 4, // MQTT 3.1.1
+      protocolVersion: 4,
       protocolId: 'MQTT',
+      username: (url.startsWith('wss://') || url.startsWith('wss:')) && username ? username : undefined,
+      password: (url.startsWith('wss://') || url.startsWith('wss:')) && password ? password : undefined,
       ...options,
     };
 
@@ -99,7 +95,7 @@ export const useMQTT = (brokerUrl = null, options = {}) => {
         clientRef.current = null;
       }
     };
-  }, [url, JSON.stringify(options)]);
+  }, [url, username, password, JSON.stringify(options)]);
 
   const subscribe = useCallback((topics, callback) => {
     if (!clientRef.current || !clientRef.current.connected) {

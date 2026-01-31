@@ -1,0 +1,72 @@
+.database-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-family: 'Manrope', sans-serif;
+  transition: all 0.3s ease;
+}
+
+.database-status--checking {
+  background-color: rgba(255, 193, 7, 0.15);
+  border: 1px solid var(--warning, #ffc107);
+  color: var(--text);
+}
+
+.database-status--ok {
+  background-color: rgba(68, 211, 126, 0.2);
+  border: 1px solid var(--success);
+  color: var(--text);
+}
+
+.database-status--error {
+  background-color: rgba(212, 91, 91, 0.2);
+  border: 1px solid var(--danger);
+  color: var(--text);
+}
+
+.database-status__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.database-status--checking .database-status__dot {
+  background: var(--warning, #ffc107);
+  animation: db-pulse 1.5s ease-in-out infinite;
+}
+
+.database-status--ok .database-status__dot {
+  background: var(--success);
+}
+
+.database-status--error .database-status__dot {
+  background: var(--danger);
+  animation: db-pulse 2s ease-in-out infinite;
+}
+
+.database-status__label {
+  font-weight: 500;
+}
+
+.database-status__error {
+  margin-left: 4px;
+  font-size: 11px;
+  opacity: 0.95;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@keyframes db-pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
+}
