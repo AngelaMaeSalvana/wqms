@@ -41,9 +41,17 @@ This guide walks you through using **Supabase** as the database for WQMS, with t
 
 4. Add your existing MQTT vars if you use them:  
    `REACT_APP_MQTT_WS_URL`, `REACT_APP_MQTT_USER`, `REACT_APP_MQTT_PASS`.
-5. **Redeploy** so the new env vars are applied.
+5. **Apply to**: check **Production** (and **Preview** if you use branch deploys).
+6. **Redeploy**: Deployments → open the latest → ⋮ → **Redeploy** (or **Redeploy with existing Build Cache** off if you changed env vars and it still shows "Not connected").
 
 When these are set, the React app uses Supabase for readings, alerts, and nodes instead of (or in addition to) the backend API.
+
+### If Vercel still shows "DB: Not connected"
+
+- **Use exact names**: `REACT_APP_SUPABASE_URL` and `REACT_APP_SUPABASE_ANON_KEY` (Create React App only exposes `REACT_APP_*`). Do **not** use `NEXT_PUBLIC_SUPABASE_*` for this app.
+- **Apply to the right env**: If you only added vars to "Preview", Production builds won’t see them. Add to **Production** (and Preview if needed).
+- **Redeploy after adding vars**: Env vars are baked in at **build** time. After adding or changing them, trigger a new deployment.
+- **No typos**: URL should be like `https://htrqixgpmbncbkifizty.supabase.co` (no trailing slash). Anon key is the long JWT from Supabase → Settings → API → anon **public**.
 
 ## 5. Backend / MQTT ingestion (optional)
 

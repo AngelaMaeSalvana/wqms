@@ -35,7 +35,22 @@ const DatabaseStatus = () => {
       });
   }, []);
 
-  if (!isSupabaseEnabled()) return null;
+  if (!isSupabaseEnabled()) {
+    return (
+      <div
+        className="database-status database-status--none"
+        role="status"
+        aria-label="Supabase not connected"
+        title="Set REACT_APP_SUPABASE_URL and REACT_APP_SUPABASE_ANON_KEY in Vercel Environment Variables, then redeploy."
+      >
+        <span className="database-status__dot" />
+        <span className="database-status__label">DB: Not connected</span>
+        <span className="database-status__hint" title="Vercel: Settings → Environment Variables → add REACT_APP_SUPABASE_URL, REACT_APP_SUPABASE_ANON_KEY → Redeploy">
+          Vercel: add REACT_APP_SUPABASE_* and redeploy
+        </span>
+      </div>
+    );
+  }
 
   return (
     <div
