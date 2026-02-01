@@ -27,6 +27,24 @@ function toDateStr(d) {
   return `${y}-${m}-${day}`;
 }
 
+/** Today's date (YYYY-MM-DD) in Philippines (Asia/Manila) for Supabase date filtering. */
+function getTodayInPhilippinesDateStr() {
+  return new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Manila" });
+}
+
+function getCollectionIntervalMinutes() {
+  try {
+    const s = localStorage.getItem("wqms_collection_interval_minutes");
+    if (s == null) return 15;
+    const v = JSON.parse(s);
+    const n = typeof v === "number" ? v : parseInt(v, 10);
+    if (Number.isNaN(n) || n < 1 || n > 120) return 15;
+    return n;
+  } catch {
+    return 15;
+  }
+}
+
 export default function Dashboard() {
   const [nodes, setNodes] = useState([]);
   const [selectedNodeId, setSelectedNodeId] = useState("");
@@ -54,10 +72,10 @@ export default function Dashboard() {
     return () => window.removeEventListener("focus", onFocus);
   }, []);
 
-  // All data from Supabase/API only; no dummy/test/mock data.
+  // All data from Supabase/API only; no dummy/test/mock data. "Today" = Philippines (Asia/Manila) for Supabase.
   useEffect(() => {
     setReadingsLoaded(false);
-    const today = toDateStr(new Date());
+    const today = getTodayInPhilippinesDateStr();
     api.getReadings({ startDate: today, endDate: today, limit: 200 })
       .then((rows) => {
         setTodayReadings(Array.isArray(rows) ? rows : []);
@@ -106,7 +124,8 @@ export default function Dashboard() {
   handleRefreshRef.current = handleRefresh;
 
   useEffect(() => {
-    const intervalMs = 30 * 60 * 1000;
+    const minutes = getCollectionIntervalMinutes();
+    const intervalMs = minutes * 60 * 1000;
     autoRefreshIntervalRef.current = setInterval(() => handleRefreshRef.current(), intervalMs);
     return () => {
       if (autoRefreshIntervalRef.current) clearInterval(autoRefreshIntervalRef.current);
@@ -214,6 +233,18 @@ export default function Dashboard() {
     plugins: { legend: { position: "top" } },
     scales: { y: { beginAtZero: true } },
   }), []);
+
+  /** Latest sensor reading timestamp for the selected node (for Live Chart header). */
+  const lastSensorUpdate = useMemo(() => {
+    const nodeId = selectedNode?.id || null;
+    const list = (todayReadings || []).filter((r) => (r.node_id || r.nodeId) === nodeId);
+    if (list.length === 0) return null;
+    const latest = list.reduce((a, r) => {
+      const t = new Date(r.timestamp).getTime();
+      return t > (a ? new Date(a.timestamp).getTime() : 0) ? r : a;
+    }, null);
+    return latest ? latest.timestamp : null;
+  }, [selectedNode?.id, todayReadings]);
 
   const getStoredTestResults = useCallback((nodeId) => {
     try {
@@ -331,7 +362,7 @@ export default function Dashboard() {
           <WqiCard value={wqiValue} label={wqiLabel} />
         </section>
         <section className="dash__cell dash__cell--live">
-          <LiveChart todayData={todayData} todayChartOptions={todayChartOptions} />
+          <LiveChart todayData={todayData} todayChartOptions={todayChartOptions} lastSensorUpdate={lastSensorUpdate} />
         </section>
         <section className="dash__cell dash__cell--mini">
           <MiniMapCard

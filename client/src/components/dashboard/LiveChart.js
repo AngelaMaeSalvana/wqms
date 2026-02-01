@@ -22,7 +22,19 @@ const defaultOptions = {
   },
 };
 
-export function LiveChart({ todayData, todayChartOptions }) {
+const PH_TZ = "Asia/Manila";
+
+function formatLastUpdate(isoString) {
+  if (!isoString) return null;
+  try {
+    const d = new Date(isoString);
+    return d.toLocaleString("en-PH", { timeZone: PH_TZ, dateStyle: "short", timeStyle: "medium" });
+  } catch {
+    return null;
+  }
+}
+
+export function LiveChart({ todayData, todayChartOptions, lastSensorUpdate }) {
   const data = useMemo(() => {
     if (todayData && todayData.labels && todayData.datasets?.length) {
       return todayData;
@@ -69,8 +81,13 @@ export function LiveChart({ todayData, todayChartOptions }) {
   return (
     <div className="card card--fill live-chart-card">
       <div className="card__header live-chart-card__header">
-        <div>
+        <div className="live-chart-card__title-wrap">
           <h2 className="card__title">Live Chart</h2>
+          {lastSensorUpdate != null && (
+            <p className="live-chart-card__last-update" aria-live="polite" title="Stored in UTC; shown in Philippines time (Asia/Manila). Late UTC can appear as next calendar day in PH.">
+              Last sensor update: {formatLastUpdate(lastSensorUpdate)} (Philippines)
+            </p>
+          )}
         </div>
         {legendItems.length > 0 && (
           <div className="live-chart-legend" aria-hidden="true">

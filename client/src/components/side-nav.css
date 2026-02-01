@@ -51,13 +51,26 @@
     width: 36px;
     height: 36px;
     border-radius: 12px;
-  
+    overflow: hidden;
+
     display: flex;
     align-items: center;
     justify-content: center;
-  
+
     background: rgba(255, 255, 255, 0.06);
     border: 1px solid var(--border);
+  }
+
+  .brand__logo-img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    display: block;
+  }
+
+  [data-theme="light"] .brand__logo {
+    background: rgba(0, 0, 0, 0.06);
+    border-color: var(--border);
   }
   
   .brand__text {

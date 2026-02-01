@@ -45,19 +45,46 @@ This guide walks you through using **Supabase** as the database for WQMS, with t
 
 When these are set, the React app uses Supabase for readings, alerts, and nodes instead of (or in addition to) the backend API.
 
-## 5. Backend / MQTT ingestion (optional)
+## 5. LoRa → HiveMQ → Supabase → WQMS dashboard (Vercel)
+
+**Yes, this is possible.** End-to-end flow:
+
+```
+Sensor node → LoRa → Forwarder (Heltec LoRa32) → HiveMQ Cloud → Node server (bridge) → Supabase
+                                                                                           ↓
+WQMS dashboard (Vercel) ←─────────────────────────────────────────────────────────────── Supabase
+```
+
+- **Forwarder**: Your Arduino code receives LoRa packets, sends ACK, and publishes JSON to HiveMQ topic `water-quality/{nodeId}`. No change needed.
+- **Bridge**: The **Node server** in this repo subscribes to HiveMQ and inserts each message into Supabase. It must run **24/7** (e.g. **Railway**, **Render**, **Fly.io**). **Vercel is serverless** — you cannot run the MQTT subscriber on Vercel.
+- **Dashboard**: The React app on Vercel reads from Supabase. No backend needed for the frontend when using Supabase.
+
+**Server env vars for HiveMQ Cloud** (match your packet forwarder):
+
+| Variable | Example |
+|----------|---------|
+| `MQTT_URL` | `mqtts://YOUR_CLUSTER.s1.eu.hivemq.cloud:8883` |
+| `MQTT_USER` | `WaterQuality` |
+| `MQTT_PASS` | your HiveMQ password |
+| `SUPABASE_URL` | `https://YOUR_PROJECT.supabase.co` |
+| `SUPABASE_SERVICE_ROLE_KEY` | service_role key (server only) |
+
+Deploy the server to Railway/Render with these env vars; the dashboard on Vercel will show data from Supabase as soon as the forwarder publishes to HiveMQ.
+
+## 6. Backend / MQTT ingestion (optional)
 
 If you run the **Express server** (e.g. for MQTT → DB):
 
 - Set **server** env vars (locally or on your host, e.g. Railway/Render):
   - `SUPABASE_URL` = same Project URL
   - `SUPABASE_SERVICE_ROLE_KEY` = service_role key (never expose in the client)
-  - `MQTT_URL` (and `MQTT_USER` / `MQTT_PASS` if needed)
+  - `MQTT_URL` = `mqtts://YOUR_CLUSTER.s1.eu.hivemq.cloud:8883` for HiveMQ Cloud
+  - `MQTT_USER` and `MQTT_PASS` = HiveMQ credentials
 
 With these set, the server writes MQTT readings and alerts to Supabase instead of SQLite.  
 If you don’t set them, the server keeps using SQLite (`wqms.db`).
 
-## 6. Local development
+## 7. Local development
 
 **Client (React):**
 

@@ -380,6 +380,49 @@ function isSameDate(a, b) {
   return d1.getFullYear() === d2.getFullYear() && d1.getMonth() === d2.getMonth() && d1.getDate() === d2.getDate();
 }
 
+/** Aggregate sensor_readings by date into daily-summary shape for the chart. */
+function aggregateReadingsToDailySummaries(readings) {
+  const list = Array.isArray(readings) ? readings : [];
+  if (list.length === 0) return [];
+  const toDateStr = (r) => {
+    const t = typeof r.timestamp === "string" ? r.timestamp : (r.timestamp && r.timestamp.toISOString ? r.timestamp.toISOString() : "");
+    return t ? t.slice(0, 10) : "";
+  };
+  const byDate = {};
+  list.forEach((r) => {
+    const key = toDateStr(r);
+    if (!key) return;
+    if (!byDate[key]) byDate[key] = [];
+    byDate[key].push(r);
+  });
+  return Object.entries(byDate).map(([date, dayReadings]) => {
+    const n = dayReadings.length;
+    const sum = (get) => dayReadings.reduce((a, r) => a + (get(r) ?? 0), 0);
+    const avg = (get) => (n ? sum(get) / n : null);
+    const num = (get) => dayReadings.map(get).filter((v) => v != null);
+    const temps = num((r) => r.temperature);
+    const phs = num((r) => r.ph ?? r.pH);
+    const turbs = num((r) => r.turbidity);
+    const dos = num((r) => r.dissolved_oxygen ?? r.dissolvedOxygen ?? r.do);
+    const nh3s = num((r) => r.nh3 ?? r.NH3);
+    const wqis = num((r) => r.wqi ?? r.WQI);
+    return {
+      date,
+      node_id: dayReadings[0]?.node_id ?? dayReadings[0]?.nodeId,
+      location: dayReadings[0]?.location,
+      avg_temperature: temps.length ? temps.reduce((a, b) => a + b, 0) / temps.length : null,
+      avg_ph: phs.length ? phs.reduce((a, b) => a + b, 0) / phs.length : null,
+      avg_turbidity: turbs.length ? turbs.reduce((a, b) => a + b, 0) / turbs.length : null,
+      avg_dissolved_oxygen: dos.length ? dos.reduce((a, b) => a + b, 0) / dos.length : null,
+      avg_nh3: nh3s.length ? nh3s.reduce((a, b) => a + b, 0) / nh3s.length : null,
+      avg_wqi: wqis.length ? wqis.reduce((a, b) => a + b, 0) / wqis.length : null,
+      min_wqi: wqis.length ? Math.min(...wqis) : null,
+      max_wqi: wqis.length ? Math.max(...wqis) : null,
+      reading_count: n,
+    };
+  });
+}
+
 /** Bar segments: 0–33.3% Unsuitable, 33.3–66.7% Very Poor, 66.7–83.3% Poor, 83.3–100% Good/Excellent. */
 function wqiToBarPosition(wqi) {
   const s = Number(wqi);
@@ -400,9 +443,11 @@ export default function Reports() {
   const [tablePage, setTablePage] = useState(1);
   const [nodes, setNodes] = useState([]);
   const [exportOpen, setExportOpen] = useState(false);
-  const [reportSummaries, setReportSummaries] = useState([]);
   const [reportReadings, setReportReadings] = useState([]);
+  const [reportReadingsForChart, setReportReadingsForChart] = useState([]);
   const [calendarSummaries, setCalendarSummaries] = useState([]);
+  /** Daily summaries derived from sensor_readings for the chart. */
+  const reportSummaries = useMemo(() => aggregateReadingsToDailySummaries(reportReadingsForChart), [reportReadingsForChart]);
   const [reportParameter, setReportParameter] = useState(PARAMETER_OPTIONS[0].id);
   const [reportPeriod, setReportPeriod] = useState(PERIOD_OPTIONS[0].id);
   const [reportRangeStart, setReportRangeStart] = useState(() => getWeekRange(new Date()).start);
@@ -456,14 +501,14 @@ export default function Reports() {
     if (!reportRangeStart || !reportRangeEnd) return;
     const start = typeof reportRangeStart === "string" ? reportRangeStart : (reportRangeStart.getFullYear() + "-" + String(reportRangeStart.getMonth() + 1).padStart(2, "0") + "-" + String(reportRangeStart.getDate()).padStart(2, "0"));
     const end = typeof reportRangeEnd === "string" ? reportRangeEnd : (reportRangeEnd.getFullYear() + "-" + String(reportRangeEnd.getMonth() + 1).padStart(2, "0") + "-" + String(reportRangeEnd.getDate()).padStart(2, "0"));
-    api.getDailySummaries({ startDate: start, endDate: end }).then(setReportSummaries).catch(() => setReportSummaries([]));
+    api.getSensorReadings({ startDate: start, endDate: end, limit: 500 }).then((rows) => setReportReadingsForChart(Array.isArray(rows) ? rows : [])).catch(() => setReportReadingsForChart([]));
   }, [reportRangeStart, reportRangeEnd]);
 
   useEffect(() => {
     if (!tableDateRange?.start || !tableDateRange?.end) return;
     const start = tableDateRange.start.getFullYear() + "-" + String(tableDateRange.start.getMonth() + 1).padStart(2, "0") + "-" + String(tableDateRange.start.getDate()).padStart(2, "0");
     const end = tableDateRange.end.getFullYear() + "-" + String(tableDateRange.end.getMonth() + 1).padStart(2, "0") + "-" + String(tableDateRange.end.getDate()).padStart(2, "0");
-    api.getReadings({ startDate: start, endDate: end, limit: 500 }).then((rows) => setReportReadings(Array.isArray(rows) ? rows : [])).catch(() => setReportReadings([]));
+    api.getSensorReadings({ startDate: start, endDate: end, limit: 500 }).then((rows) => setReportReadings(Array.isArray(rows) ? rows : [])).catch(() => setReportReadings([]));
   }, [tableDateRange?.start?.getTime(), tableDateRange?.end?.getTime()]);
 
   useEffect(() => {
@@ -658,27 +703,6 @@ export default function Reports() {
       const line = (arr) => arr.map(escape).join(",");
       const csv = "\uFEFF" + [headerRow, ...dataRows].map(line).join("\r\n");
       downloadBlob(`${baseName}.xls`, new Blob([csv], { type: "application/vnd.ms-excel;charset=utf-8" }));
-    } else if (format === "rpt") {
-      let crystalReport = null;
-      try {
-        crystalReport = getCrystalReport();
-      } catch (_) {
-        crystalReport = null;
-      }
-      const rptLines = [
-        "WQMS REPORT",
-        "===========",
-        `Generated: ${new Date().toLocaleString()}`,
-        `Total records: ${rows.length}`,
-        crystalReport?.fileName ? `Report template: ${crystalReport.fileName}` : null,
-        `Filters: Node ${tableNodeFilter === "all" ? "All" : tableNodeFilter}, Search "${search || ""}", Date ${tableDateFrom || "(from)"} to ${tableDateTo || "(to)"}`,
-        "",
-        "COLUMNS: " + headerRow.join(" | "),
-        "-".repeat(80),
-        ...dataRows.map((r) => r.map((c) => String(c ?? "")).join(" | ")),
-      ].filter(Boolean);
-      const rpt = rptLines.join("\r\n");
-      downloadBlob(`${baseName}.rpt`, new Blob([rpt], { type: "text/plain;charset=utf-8" }));
     } else if (format === "pdf") {
       const crystalReport = getCrystalReport();
       const doc = new jsPDF({ orientation: "landscape" });
@@ -797,6 +821,7 @@ export default function Reports() {
       <header className="page-header reports-page-header">
         <div>
           <h1 className="page-title">Reports</h1>
+          <p className="reports-data-source">Data: sensor_readings (bridge test)</p>
         </div>
         <PageDateWithStatus lastUpdated={lastUpdated} className="page-meta reports-header-meta" />
       </header>
@@ -1119,9 +1144,6 @@ export default function Reports() {
               </button>
               <button type="button" role="menuitem" onClick={() => handleExport("excel")}>
                 Export as Excel
-              </button>
-              <button type="button" role="menuitem" onClick={() => handleExport("rpt")}>
-                Export as RPT
               </button>
             </div>
           )}

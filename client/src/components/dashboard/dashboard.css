@@ -610,6 +610,24 @@
   gap: 8px;
 }
 
+.live-chart-card__title-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.live-chart-card__title-wrap .card__title {
+  margin: 0;
+}
+
+.live-chart-card__last-update {
+  margin: 0;
+  font-size: 0.8rem;
+  font-weight: 400;
+  color: var(--text-muted);
+}
+
 .live-chart-card .card__desc {
   font-size: 0.75rem;
 }

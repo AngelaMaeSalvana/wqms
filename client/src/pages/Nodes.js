@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from "react";
 import PageDateWithStatus from "../components/PageDateWithStatus";
+import { isSupabaseEnabled } from "../lib/supabaseClient";
 import { getNodes, loadNodes, saveNodes } from "../utils/nodesStorage";
+import api from "../services/api";
 import "./Nodes.css";
 
 const emptyNode = () => ({
@@ -11,14 +13,17 @@ const emptyNode = () => ({
   coords: "",
 });
 
-/** Get next node ID from existing nodes (e.g. N-001, N-002 → N-003). */
+/** Get next node ID from existing nodes (e.g. N1, N2 → N3 or N-001 → N3). */
 function getNextNodeId(nodes) {
-  const prefix = "N-";
   const numericParts = nodes
-    .map((n) => n.id && n.id.startsWith(prefix) ? parseInt(n.id.slice(prefix.length), 10) : 0)
+    .map((n) => {
+      if (!n.id) return 0;
+      const m = n.id.match(/^N-?(\d+)$/i);
+      return m ? parseInt(m[1], 10) : 0;
+    })
     .filter((num) => !isNaN(num));
   const nextNum = numericParts.length > 0 ? Math.max(...numericParts) + 1 : 1;
-  return `${prefix}${String(nextNum).padStart(3, "0")}`;
+  return "N" + String(nextNum);
 }
 
 /** Parse "lat, lng" or "lat lng" (comma or space separated) into { lat, lng } or null. */
@@ -39,11 +44,32 @@ export default function Nodes() {
   const [editingId, setEditingId] = useState(null);
   const [editForm, setEditForm] = useState(emptyNode);
   const [showAddModal, setShowAddModal] = useState(false);
+  const [showDeactivated, setShowDeactivated] = useState(false);
   const [lastUpdated] = useState(() => new Date());
 
   useEffect(() => {
-    loadNodes().then(() => setNodes(getNodes()));
-  }, []);
+    if (!isSupabaseEnabled()) {
+      loadNodes().then(() => setNodes(getNodes()));
+      return;
+    }
+    if (showDeactivated) {
+      api.getNodesFromSupabase(true).then((fromDb) => {
+        const list = Array.isArray(fromDb) ? fromDb.map((r) => ({
+          id: r.id,
+          node_code: r.node_code ?? r.id,
+          name: r.name,
+          location: r.name ?? "",
+          status: r.status ?? "offline",
+          lat: r.lat,
+          lng: r.lng,
+          deactivated_at: r.deactivated_at,
+        })) : [];
+        setNodes(list);
+      }).catch(() => setNodes(getNodes()));
+    } else {
+      loadNodes().then(() => setNodes(getNodes()));
+    }
+  }, [showDeactivated]);
   useEffect(() => {
     const onFocus = () => loadNodes().then(() => setNodes(getNodes()));
     window.addEventListener("focus", onFocus);
@@ -69,12 +95,13 @@ export default function Nodes() {
     const name = newNode.name.trim();
     const location = newNode.location.trim();
     const parsed = parseCoordinates(newNode.coords);
-    if (!name || !location || !parsed) return;
+    if (!name || !parsed) return;
     if (nodes.some((n) => n.id === id)) return; // avoid duplicate ID
     const node = {
       id,
+      node_code: id,
       name,
-      location,
+      location: location || name,
       status: newNode.status || "online",
       lat: parsed.lat,
       lng: parsed.lng,
@@ -126,7 +153,22 @@ export default function Nodes() {
     setEditForm(emptyNode());
   };
 
-  const handleDelete = (nodeId) => {
+  const handleDelete = async (nodeId) => {
+    if (isSupabaseEnabled()) {
+      try {
+        await api.deactivateNode(nodeId);
+        await loadNodes();
+        setNodes(getNodes());
+        if (editingId === nodeId) {
+          setEditingId(null);
+          setEditForm(emptyNode());
+        }
+      } catch (e) {
+        console.error("Deactivate failed", e);
+        alert(e?.message || "Failed to deactivate node");
+      }
+      return;
+    }
     const next = nodes.filter((n) => n.id !== nodeId);
     setNodes(next);
     saveNodes(next);
@@ -136,11 +178,26 @@ export default function Nodes() {
     }
   };
 
+  const handleReactivate = async (nodeId) => {
+    if (!isSupabaseEnabled()) return;
+    try {
+      await api.reactivateNode(nodeId);
+      await loadNodes();
+      setNodes(getNodes());
+    } catch (e) {
+      console.error("Reactivate failed", e);
+      alert(e?.message || "Failed to reactivate node");
+    }
+  };
+
   return (
     <div className="nodes-page">
       <header className="page-header">
         <div>
           <h1 className="page-title">Nodes</h1>
+          {isSupabaseEnabled() && (
+            <p className="nodes-supabase-badge">Synced with Supabase (public.nodes)</p>
+          )}
         </div>
         <PageDateWithStatus lastUpdated={lastUpdated} className="page-meta" />
       </header>
@@ -242,8 +299,19 @@ export default function Nodes() {
           <div className="card__header">
             <h2 className="card__title">All nodes</h2>
             <p className="card__desc">
-              Edit or delete any node. Changes appear on the Map and Dashboard.
+              Edit or delete any node. With Supabase, Delete deactivates the node (data kept for reports).
             </p>
+            {isSupabaseEnabled() && (
+              <label className="nodes-show-deactivated">
+                <input
+                  type="checkbox"
+                  checked={showDeactivated}
+                  onChange={(e) => setShowDeactivated(e.target.checked)}
+                  aria-label="Show deactivated nodes"
+                />
+                <span>Show deactivated</span>
+              </label>
+            )}
           </div>
           <div className="card__body">
             <ul className="nodes-list">
@@ -319,30 +387,44 @@ export default function Nodes() {
                     </form>
                   </li>
                 ) : (
-                  <li key={n.id} className="nodes-list-item">
+                  <li key={n.id} className={`nodes-list-item ${n.deactivated_at ? "nodes-list-item--deactivated" : ""}`}>
                     <div className="nodes-list-item__info">
-                      <strong>{n.id}</strong> — {n.name} ({n.location})
+                      <strong>{n.node_code ?? n.id}</strong> — {n.name} {n.location ? `(${n.location})` : ""}
                       <span className="nodes-list-item__meta">
-                        {n.lat}, {n.lng} · {n.status}
+                        {n.lat != null && n.lng != null ? `${n.lat}, ${n.lng} · ` : ""}{n.status}
+                        {n.deactivated_at && " · Deactivated"}
                       </span>
                     </div>
                     <div className="nodes-list-item__actions">
-                      <button
-                        type="button"
-                        className="nodes-btn nodes-btn--secondary nodes-btn--small"
-                        onClick={() => handleEdit(n)}
-                        aria-label={`Edit ${n.id}`}
-                      >
-                        Edit
-                      </button>
-                      <button
-                        type="button"
-                        className="nodes-btn nodes-btn--danger nodes-btn--small"
-                        onClick={() => handleDelete(n.id)}
-                        aria-label={`Delete ${n.id}`}
-                      >
-                        Delete
-                      </button>
+                      {n.deactivated_at ? (
+                        <button
+                          type="button"
+                          className="nodes-btn nodes-btn--primary nodes-btn--small"
+                          onClick={() => handleReactivate(n.id)}
+                          aria-label={`Reactivate ${n.node_code ?? n.id}`}
+                        >
+                          Reactivate
+                        </button>
+                      ) : (
+                        <>
+                          <button
+                            type="button"
+                            className="nodes-btn nodes-btn--secondary nodes-btn--small"
+                            onClick={() => handleEdit(n)}
+                            aria-label={`Edit ${n.node_code ?? n.id}`}
+                          >
+                            Edit
+                          </button>
+                          <button
+                            type="button"
+                            className="nodes-btn nodes-btn--danger nodes-btn--small"
+                            onClick={() => handleDelete(n.id)}
+                            aria-label={`Delete ${n.node_code ?? n.id}`}
+                          >
+                            Delete
+                          </button>
+                        </>
+                      )}
                     </div>
                   </li>
                 )

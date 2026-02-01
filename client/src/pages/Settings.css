@@ -3,8 +3,10 @@
   flex-direction: column;
   gap: 12px;
   min-height: 0;
+  min-width: 0;
   flex: 1;
   overflow: hidden;
+  max-width: 100%;
 }
 
 .settings-page .page-header {
@@ -19,10 +21,12 @@
 .settings-page .settings-content {
   flex: 1;
   min-height: 0;
+  min-width: 0;
   overflow: auto;
   display: flex;
   flex-direction: column;
   gap: 16px;
+  max-width: 100%;
 }
 
 .settings-page .page-title {
@@ -48,12 +52,19 @@
 
 .settings-section {
   width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.settings-section .card__body {
+  min-width: 0;
 }
 
 .settings-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
   gap: 16px;
+  min-width: 0;
 }
 
 .settings-label {
@@ -66,6 +77,12 @@
 
 .settings-label span {
   font-weight: 500;
+}
+
+.settings-hint {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  margin-top: 2px;
 }
 
 .settings-input {
@@ -402,7 +419,7 @@
 /* Responsive Media Queries */
 @media (max-width: 1024px), (max-height: 768px) {
   .settings-grid {
-    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
   }
 }
 
@@ -423,7 +440,7 @@
     align-self: flex-end;
   }
   .settings-grid {
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: repeat(2, 1fr);
     gap: 12px;
   }
   .settings-option-row {

@@ -17,9 +17,11 @@ export default function SideNavigation() {
   return (
     <aside className={`side-nav ${collapsed ? "collapsed" : ""}`}>
       <div className="side-nav__top">
-        <div className="side-nav__brand" title="WQMS">
-          <span className="brand__logo">💧</span>
-          {!collapsed && <span className="brand__text">WQMS</span>}
+        <div className="side-nav__brand" title="AQUALENS">
+          <span className="brand__logo">
+            <img src="/logo.png" alt="AQUALENS" className="brand__logo-img" />
+          </span>
+          {!collapsed && <span className="brand__text">AQUALENS</span>}
         </div>
 
         <button

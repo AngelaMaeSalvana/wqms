@@ -24,6 +24,12 @@
   color: var(--text);
 }
 
+.nodes-supabase-badge {
+  font-size: 0.8rem;
+  color: var(--text-muted, #6c757d);
+  margin: 0;
+}
+
 .nodes-page .page-subtitle {
   font-size: 0.9rem;
   color: var(--text-muted);
@@ -293,6 +299,27 @@
   display: flex;
   gap: 8px;
   flex-shrink: 0;
+}
+
+.nodes-list-item--deactivated {
+  opacity: 0.75;
+}
+
+.nodes-list-item--deactivated .nodes-list-item__meta {
+  color: var(--text-muted);
+}
+
+.nodes-show-deactivated {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.9rem;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.nodes-show-deactivated input {
+  cursor: pointer;
 }
 
 .nodes-edit-form {

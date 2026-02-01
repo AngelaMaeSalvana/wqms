@@ -6,6 +6,8 @@ const db = require('./db');
 const app = express();
 const PORT = process.env.PORT || 5000;
 const MQTT_URL = process.env.MQTT_URL || 'mqtt://localhost:1883';
+const MQTT_USER = process.env.MQTT_USER || '';
+const MQTT_PASS = process.env.MQTT_PASS || '';
 
 app.use(cors());
 app.use(express.json());
@@ -14,24 +16,40 @@ if (!db.useSupabase()) {
   db.initializeSqlite().catch((err) => console.error('❌ SQLite init:', err));
 }
 
-// MQTT Client setup
+// MQTT Client setup (supports HiveMQ Cloud: mqtts + username/password)
 let mqttClient = null;
 
 function connectMQTT() {
-  console.log('🔌 Connecting to MQTT broker:', MQTT_URL);
-  mqttClient = mqtt.connect(MQTT_URL, {
+  const opts = {
     clientId: `wqms-backend-${Math.random().toString(16).substr(2, 8)}`,
     clean: true,
     reconnectPeriod: 5000,
     connectTimeout: 30000,
-  });
+  };
+  if (MQTT_USER) opts.username = MQTT_USER;
+  if (MQTT_PASS) opts.password = MQTT_PASS;
+  // HiveMQ Cloud uses TLS; rejectUnauthorized true for Let's Encrypt
+  if (MQTT_URL.startsWith('mqtts://')) {
+    opts.rejectUnauthorized = true;
+  }
+  console.log('🔌 Connecting to MQTT broker:', MQTT_URL.replace(/:[^:@]+@/, ':****@'));
+  mqttClient = mqtt.connect(MQTT_URL, opts);
 
   mqttClient.on('connect', () => {
     console.log('✅ MQTT Connected to broker');
-    mqttClient.subscribe('water-quality/+', { qos: 1 });
-    mqttClient.subscribe('sensor-data/+', { qos: 1 });
-    mqttClient.subscribe('alerts/+', { qos: 1 });
-    console.log('📡 Subscribed to MQTT topics');
+    // Bridge: subscribe to all water-quality topics (matches forwarder water-quality/{nodeId})
+    mqttClient.subscribe('water-quality/#', { qos: 1 }, (err) => {
+      if (err) console.error('❌ Subscribe error (water-quality/#):', err);
+      else console.log('📡 Subscribed to water-quality/#');
+    });
+    mqttClient.subscribe('sensor-data/+', { qos: 1 }, (err) => {
+      if (err) console.error('❌ Subscribe error (sensor-data/+):', err);
+      else console.log('📡 Subscribed to sensor-data/+');
+    });
+    mqttClient.subscribe('alerts/+', { qos: 1 }, (err) => {
+      if (err) console.error('❌ Subscribe error (alerts/+):', err);
+      else console.log('📡 Subscribed to alerts/+');
+    });
   });
 
   mqttClient.on('message', (topic, message) => {
@@ -47,9 +65,21 @@ function connectMQTT() {
   mqttClient.on('reconnect', () => console.log('🔄 MQTT Reconnecting...'));
 }
 
+// Forwarder publishes to water-quality/{nodeId} (e.g. water-quality/node1)
 function extractNodeIdFromTopic(topic) {
+  const parts = topic.split('/');
+  if (parts.length >= 2 && parts[0] === 'water-quality') return parts[1];
   const match = topic.match(/node(\d+)/i);
-  return match ? match[1] : '1';
+  return match ? (match[0].toLowerCase()) : 'node1';
+}
+
+/** Map node ID to nodes table format N1, N2, N3 (e.g. node1 → N1, N-001 → N1). */
+function normalizeNodeId(id) {
+  if (!id || typeof id !== 'string') return id;
+  const s = id.trim();
+  const m = s.match(/^N-?(\d+)$/i) || s.match(/^node(\d+)$/i);
+  if (m) return 'N' + String(parseInt(m[1], 10));
+  return s;
 }
 
 async function updateDailySummary(reading, nodeId) {
@@ -98,7 +128,10 @@ async function updateDailySummary(reading, nodeId) {
 async function handleMQTTMessage(topic, data) {
   if (topic.includes('water-quality') || topic.includes('sensor-data')) {
     const reading = data.sensorReading || data;
-    const nodeId = reading.nodeId || reading.node || extractNodeIdFromTopic(topic);
+    const rawId = reading.nodeId || reading.node || extractNodeIdFromTopic(topic);
+    const nodeId = normalizeNodeId(rawId);
+    // Forwarder adds timestamp (ISO); use it when present
+    const timestamp = reading.timestamp || data.timestamp || new Date().toISOString();
     const row = {
       node_id: nodeId,
       location: reading.location || 'Unknown',
@@ -108,7 +141,7 @@ async function handleMQTTMessage(topic, data) {
       nh3: reading.nh3 ?? reading.NH3,
       dissolved_oxygen: reading.dissolvedOxygen ?? reading.do,
       wqi: Math.round(reading.wqi || reading.WQI || 0),
-      timestamp: new Date().toISOString(),
+      timestamp,
     };
     const result = await db.insertReading(row);
     console.log(`💾 Stored reading from Node ${nodeId} (ID: ${result.lastID})`);

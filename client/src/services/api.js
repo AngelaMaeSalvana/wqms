@@ -40,6 +40,12 @@ class ApiService {
     return this.request(`/readings?${params.toString()}`);
   }
 
+  /** Sensor readings table (bridge / testing). Reports page uses this for now. */
+  async getSensorReadings({ startDate, endDate, nodeId, limit = 500 }) {
+    if (isSupabaseEnabled()) return supabaseService.getSensorReadings({ startDate, endDate, nodeId, limit });
+    return this.getReadings({ startDate, endDate, nodeId, limit });
+  }
+
   async getDailySummaries({ startDate, endDate, nodeId }) {
     if (isSupabaseEnabled()) return supabaseService.getDailySummaries({ startDate, endDate, nodeId });
     const params = new URLSearchParams();
@@ -71,6 +77,24 @@ class ApiService {
   async postAlert(alert) {
     if (isSupabaseEnabled()) return supabaseService.postAlert(alert);
     return this.request('/alerts', { method: 'POST', body: JSON.stringify(alert) });
+  }
+
+  /** Supabase only: load nodes including deactivated (for Nodes page). */
+  async getNodesFromSupabase(includeDeactivated = false) {
+    if (!isSupabaseEnabled()) return [];
+    return supabaseService.getNodesFromSupabase(includeDeactivated);
+  }
+
+  /** Supabase only: soft-delete node (set deactivated_at). */
+  async deactivateNode(nodeId) {
+    if (!isSupabaseEnabled()) throw new Error('Supabase not configured');
+    return supabaseService.deactivateNodeInSupabase(nodeId);
+  }
+
+  /** Supabase only: reactivate node (clear deactivated_at). */
+  async reactivateNode(nodeId) {
+    if (!isSupabaseEnabled()) throw new Error('Supabase not configured');
+    return supabaseService.reactivateNodeInSupabase(nodeId);
   }
 
   async healthCheck() {

@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from "react";
 import { useTheme } from "../contexts/ThemeContext";
-import { getCrystalReport, saveCrystalReport, clearCrystalReport } from "../utils/crystalReportStorage";
 import "./Settings.css";
 
 const FONT_OPTIONS = [
@@ -27,6 +26,12 @@ const DEFAULT_CALIBRATION = {
   nh3Offset: 0,
   flowRateOffset: 0,
 };
+
+const DEFAULT_COLLECTION_INTERVAL_MINUTES = 15;
+const COLLECTION_INTERVAL_MIN_LIMIT = 1;
+const COLLECTION_INTERVAL_MAX_LIMIT = 120;
+const DEFAULT_COLLECTION_INTERVAL_MIN = 1;
+const DEFAULT_COLLECTION_INTERVAL_MAX = 15;
 
 function loadFromStorage(key, fallback) {
   try {
@@ -56,8 +61,31 @@ export default function Settings() {
     ...DEFAULT_CALIBRATION,
     ...loadFromStorage("wqms_calibration", {}),
   }));
+  const [collectionIntervalMinutes, setCollectionIntervalMinutes] = useState(() => {
+    const v = loadFromStorage("wqms_collection_interval_minutes", DEFAULT_COLLECTION_INTERVAL_MINUTES);
+    const n = typeof v === "number" ? v : parseInt(v, 10);
+    if (isNaN(n) || n < COLLECTION_INTERVAL_MIN_LIMIT || n > COLLECTION_INTERVAL_MAX_LIMIT) {
+      return DEFAULT_COLLECTION_INTERVAL_MINUTES;
+    }
+    return n;
+  });
+  const [collectionIntervalMin, setCollectionIntervalMin] = useState(() => {
+    const v = loadFromStorage("wqms_collection_interval_min_minutes", DEFAULT_COLLECTION_INTERVAL_MIN);
+    const n = typeof v === "number" ? v : parseInt(v, 10);
+    if (isNaN(n) || n < COLLECTION_INTERVAL_MIN_LIMIT || n > COLLECTION_INTERVAL_MAX_LIMIT) {
+      return DEFAULT_COLLECTION_INTERVAL_MIN;
+    }
+    return n;
+  });
+  const [collectionIntervalMax, setCollectionIntervalMax] = useState(() => {
+    const v = loadFromStorage("wqms_collection_interval_max_minutes", DEFAULT_COLLECTION_INTERVAL_MAX);
+    const n = typeof v === "number" ? v : parseInt(v, 10);
+    if (isNaN(n) || n < COLLECTION_INTERVAL_MIN_LIMIT || n > COLLECTION_INTERVAL_MAX_LIMIT) {
+      return DEFAULT_COLLECTION_INTERVAL_MAX;
+    }
+    return n;
+  });
   const [saveFeedback, setSaveFeedback] = useState(null);
-  const [crystalReport, setCrystalReport] = useState(() => getCrystalReport());
 
   useEffect(() => {
     document.documentElement.setAttribute("data-font-size", fontSize);
@@ -82,36 +110,41 @@ export default function Settings() {
     }
   };
 
+  const updateCollectionInterval = (value) => {
+    const n = parseInt(value, 10);
+    if (!isNaN(n) && n >= COLLECTION_INTERVAL_MIN_LIMIT && n <= COLLECTION_INTERVAL_MAX_LIMIT) {
+      setCollectionIntervalMinutes(n);
+      saveToStorage("wqms_collection_interval_minutes", n);
+    }
+  };
+
+  const updateCollectionIntervalMin = (value) => {
+    const n = parseInt(value, 10);
+    if (!isNaN(n) && n >= COLLECTION_INTERVAL_MIN_LIMIT && n <= COLLECTION_INTERVAL_MAX_LIMIT) {
+      const newMin = Math.min(n, collectionIntervalMax);
+      setCollectionIntervalMin(newMin);
+      saveToStorage("wqms_collection_interval_min_minutes", newMin);
+    }
+  };
+
+  const updateCollectionIntervalMax = (value) => {
+    const n = parseInt(value, 10);
+    if (!isNaN(n) && n >= COLLECTION_INTERVAL_MIN_LIMIT && n <= COLLECTION_INTERVAL_MAX_LIMIT) {
+      const newMax = Math.max(n, collectionIntervalMin);
+      setCollectionIntervalMax(newMax);
+      saveToStorage("wqms_collection_interval_max_minutes", newMax);
+    }
+  };
+
   const handleSaveAll = () => {
     saveToStorage("wqms_thresholds", thresholds);
     saveToStorage("wqms_calibration", calibration);
+    saveToStorage("wqms_collection_interval_minutes", collectionIntervalMinutes);
+    saveToStorage("wqms_collection_interval_min_minutes", collectionIntervalMin);
+    saveToStorage("wqms_collection_interval_max_minutes", collectionIntervalMax);
     document.documentElement.setAttribute("data-font-size", fontSize);
     localStorage.setItem("fontPreference", fontSize);
     setSaveFeedback("Saved");
-    setTimeout(() => setSaveFeedback(null), 2000);
-  };
-
-  const handleCrystalReportImport = (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const name = file.name || "report.rpt";
-    if (!/\.rptx?$/i.test(name)) {
-      setSaveFeedback("Please select a .rpt or .rptx file");
-      setTimeout(() => setSaveFeedback(null), 3000);
-      e.target.value = "";
-      return;
-    }
-    saveCrystalReport({ fileName: name });
-    setCrystalReport(getCrystalReport());
-    setSaveFeedback("Report format imported");
-    setTimeout(() => setSaveFeedback(null), 2000);
-    e.target.value = "";
-  };
-
-  const handleClearCrystalReport = () => {
-    clearCrystalReport();
-    setCrystalReport(null);
-    setSaveFeedback("Report format cleared");
     setTimeout(() => setSaveFeedback(null), 2000);
   };
 
@@ -120,7 +153,7 @@ export default function Settings() {
       <header className="page-header">
         <div>
           <h1 className="page-title">Settings</h1>
-          <p className="page-subtitle">Calibration, thresholds, theme &amp; font</p>
+          <p className="page-subtitle">Calibration, thresholds, data collection, theme &amp; font</p>
         </div>
       </header>
 
@@ -292,6 +325,68 @@ export default function Settings() {
           </div>
         </section>
 
+        {/* Data collection frequency */}
+        <section className="settings-section card">
+          <div className="card__header">
+            <h2 className="card__title">Data collection &amp; updates</h2>
+            <p className="card__desc">
+              Set the allowed range (min/max) for data collection interval in minutes. Under normal or low-flow conditions the system uses the maximum interval; when flow rate rises it can increase frequency up to the minimum interval. Dashboard refresh uses the default interval.
+            </p>
+          </div>
+          <div className="card__body">
+            <div className="settings-grid">
+              <label className="settings-label">
+                <span>Default interval (minutes)</span>
+                <input
+                  type="number"
+                  min={COLLECTION_INTERVAL_MIN_LIMIT}
+                  max={COLLECTION_INTERVAL_MAX_LIMIT}
+                  step={1}
+                  className="settings-input"
+                  value={collectionIntervalMinutes}
+                  onChange={(e) => updateCollectionInterval(e.target.value)}
+                  aria-label="Default data collection interval in minutes"
+                />
+                <span className="settings-hint">
+                  Used for dashboard refresh. {COLLECTION_INTERVAL_MIN_LIMIT}–{COLLECTION_INTERVAL_MAX_LIMIT} min
+                </span>
+              </label>
+              <label className="settings-label">
+                <span>Minimum interval (minutes)</span>
+                <input
+                  type="number"
+                  min={COLLECTION_INTERVAL_MIN_LIMIT}
+                  max={COLLECTION_INTERVAL_MAX_LIMIT}
+                  step={1}
+                  className="settings-input"
+                  value={collectionIntervalMin}
+                  onChange={(e) => updateCollectionIntervalMin(e.target.value)}
+                  aria-label="Minimum data collection interval in minutes"
+                />
+                <span className="settings-hint">
+                  Fastest sampling (high flow). Must be ≤ maximum
+                </span>
+              </label>
+              <label className="settings-label">
+                <span>Maximum interval (minutes)</span>
+                <input
+                  type="number"
+                  min={COLLECTION_INTERVAL_MIN_LIMIT}
+                  max={COLLECTION_INTERVAL_MAX_LIMIT}
+                  step={1}
+                  className="settings-input"
+                  value={collectionIntervalMax}
+                  onChange={(e) => updateCollectionIntervalMax(e.target.value)}
+                  aria-label="Maximum data collection interval in minutes"
+                />
+                <span className="settings-hint">
+                  Slowest sampling (low flow). Must be ≥ minimum
+                </span>
+              </label>
+            </div>
+          </div>
+        </section>
+
         {/* Theme */}
         <section className="settings-section card">
           <div className="card__header">
@@ -348,48 +443,6 @@ export default function Settings() {
                   </button>
                 ))}
               </div>
-            </div>
-          </div>
-        </section>
-
-        {/* Crystal Report format */}
-        <section className="settings-section card">
-          <div className="card__header">
-            <h2 className="card__title">Crystal Report format</h2>
-            <p className="card__desc">Import a .rpt or .rptx template for use in Reports exports</p>
-          </div>
-          <div className="card__body">
-            <div className="settings-crystal-report">
-              <label className="settings-file-label">
-                <span className="settings-file-btn">Choose report file</span>
-                <input
-                  type="file"
-                  accept=".rpt,.rptx"
-                  className="settings-file-input"
-                  onChange={handleCrystalReportImport}
-                  aria-label="Import Crystal Report (.rpt or .rptx)"
-                />
-              </label>
-              {crystalReport ? (
-                <div className="settings-crystal-report-current">
-                  <span className="settings-crystal-report-name" title={crystalReport.importedAt}>
-                    {crystalReport.fileName}
-                  </span>
-                  <span className="settings-crystal-report-meta">
-                    Imported {crystalReport.importedAt ? new Date(crystalReport.importedAt).toLocaleDateString() : ""}
-                  </span>
-                  <button
-                    type="button"
-                    className="settings-crystal-report-clear"
-                    onClick={handleClearCrystalReport}
-                    aria-label="Clear Crystal Report template"
-                  >
-                    Clear
-                  </button>
-                </div>
-              ) : (
-                <p className="settings-crystal-report-empty">No report template selected</p>
-              )}
             </div>
           </div>
         </section>
