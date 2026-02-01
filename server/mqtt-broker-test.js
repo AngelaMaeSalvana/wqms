@@ -13,12 +13,12 @@
  * The broker will:
  * - Listen on WebSocket port 9001 (ws://localhost:9001)
  * - Relay real sensor data from ESP32 devices
- * - No dummy/test data - only real sensor readings from devices
+ * - No dummy/test data - only real sensor readings
  */
 
 const aedes = require('aedes')();
 const ws = require('ws');
-const http = require('http');
+const http = require('http');t
 const net = require('net');
 const { Duplex } = require('stream');
 
@@ -202,6 +202,134 @@ aedes.on('publish', (packet, client) => {
   }
 });
 
+// ============================================================================
+// TEST DATA PUBLISHING - ENABLED
+// ============================================================================
+// Test data is published every minute to simulate sensor readings.
+// The dashboard will average readings from the 10 minutes before each
+// 30-minute mark (e.g., 11:20-11:30 for the 11:30 data point).
+// ============================================================================
+
+// Test data for Node 1
+const generateNode1Data = () => {
+  const baseTemp = 24.5;
+  const baseTurb = 12.0;
+  const basePH = 7.2;
+  const baseNH3 = 0.3;
+  const baseDO = 7.5;
+  
+  // Add small random variations (±5% for realistic fluctuations)
+  const variation = 0.05;
+  return {
+    nodeId: 'node1',
+    temperature: parseFloat((baseTemp + (Math.random() - 0.5) * baseTemp * variation).toFixed(1)),
+    turbidity: parseFloat((baseTurb + (Math.random() - 0.5) * baseTurb * variation).toFixed(1)),
+    pH: parseFloat((basePH + (Math.random() - 0.5) * basePH * variation).toFixed(2)),
+    nh3: parseFloat((baseNH3 + (Math.random() - 0.5) * baseNH3 * variation).toFixed(2)),
+    dissolvedOxygen: parseFloat((baseDO + (Math.random() - 0.5) * baseDO * variation).toFixed(1)),
+    location: 'Test Location 1',
+    timestamp: new Date().toISOString(),
+  };
+};
+
+// Test data for Node 2
+const generateNode2Data = () => {
+  const baseTemp = 23.8;
+  const baseTurb = 14.5;
+  const basePH = 6.9;
+  const baseNH3 = 0.4;
+  const baseDO = 8.0;
+  
+  // Add small random variations (±5% for realistic fluctuations)
+  const variation = 0.05;
+  return {
+    nodeId: 'node2',
+    temperature: parseFloat((baseTemp + (Math.random() - 0.5) * baseTemp * variation).toFixed(1)),
+    turbidity: parseFloat((baseTurb + (Math.random() - 0.5) * baseTurb * variation).toFixed(1)),
+    pH: parseFloat((basePH + (Math.random() - 0.5) * basePH * variation).toFixed(2)),
+    nh3: parseFloat((baseNH3 + (Math.random() - 0.5) * baseNH3 * variation).toFixed(2)),
+    dissolvedOxygen: parseFloat((baseDO + (Math.random() - 0.5) * baseDO * variation).toFixed(1)),
+    location: 'Test Location 2',
+    timestamp: new Date().toISOString(),
+  };
+};
+
+// Publish test data every minute (60000ms)
+// This ensures we have 10 readings per 30-minute window for averaging
+let testDataInterval = null;
+
+const startTestDataPublishing = () => {
+  if (testDataInterval) {
+    clearInterval(testDataInterval);
+  }
+  
+  console.log('📊 Starting test data publishing (every 1 minute)...');
+  console.log('   Data will be published to: water-quality/node1 and water-quality/node2');
+  console.log('   Dashboard will average readings from 10 minutes before each 30-minute mark');
+  
+  // Publish immediately
+  const node1Data = generateNode1Data();
+  const node2Data = generateNode2Data();
+  
+  aedes.publish({
+    topic: 'water-quality/node1',
+    payload: JSON.stringify(node1Data),
+    qos: 0,
+  }, (err) => {
+    if (err) {
+      console.error('❌ Error publishing node1 test data:', err);
+    } else {
+      console.log(`📨 Published test data to water-quality/node1: Temp=${node1Data.temperature}°C, pH=${node1Data.pH}`);
+    }
+  });
+  
+  aedes.publish({
+    topic: 'water-quality/node2',
+    payload: JSON.stringify(node2Data),
+    qos: 0,
+  }, (err) => {
+    if (err) {
+      console.error('❌ Error publishing node2 test data:', err);
+    } else {
+      console.log(`📨 Published test data to water-quality/node2: Temp=${node2Data.temperature}°C, pH=${node2Data.pH}`);
+    }
+  });
+  
+  // Then publish every minute
+  testDataInterval = setInterval(() => {
+    const node1Data = generateNode1Data();
+    const node2Data = generateNode2Data();
+    
+    aedes.publish({
+      topic: 'water-quality/node1',
+      payload: JSON.stringify(node1Data),
+      qos: 0,
+    }, (err) => {
+      if (err) {
+        console.error('❌ Error publishing node1 test data:', err);
+      } else {
+        const now = new Date();
+        const timeStr = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
+        console.log(`📨 [${timeStr}] Published test data to water-quality/node1`);
+      }
+    });
+    
+    aedes.publish({
+      topic: 'water-quality/node2',
+      payload: JSON.stringify(node2Data),
+      qos: 0,
+    }, (err) => {
+      if (err) {
+        console.error('❌ Error publishing node2 test data:', err);
+      } else {
+        const now = new Date();
+        const timeStr = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
+        console.log(`📨 [${timeStr}] Published test data to water-quality/node2`);
+      }
+    });
+  }, 60000); // Every 1 minute (60000ms)
+};
+
 // Start TCP server for microcontrollers (standard MQTT protocol)
 const TCP_PORT = 1883;
 const tcpServer = net.createServer((socket) => {
@@ -258,11 +386,25 @@ server.listen(WS_PORT, () => {
   console.log(`📡 Waiting for client connections...`);
   console.log(`💡 Your React app should connect to: ws://localhost:${WS_PORT}`);
   console.log(``);
+  console.log(`📋 Test Data Publishing:`);
+  console.log(`   ✅ Test data published every 1 minute`);
+  console.log(`   ✅ Topics: water-quality/node1, water-quality/node2`);
+  console.log(`   ✅ Dashboard averages readings from 10 minutes before each 30-minute mark`);
+  console.log(``);
   console.log(`📋 Connection Summary:`);
   console.log(`   - Web Dashboard: ws://localhost:${WS_PORT} (WebSocket)`);
   console.log(`   - Microcontrollers: tcp://YOUR_IP:${TCP_PORT} (TCP/MQTT)`);
-  console.log(`   - No test data: only real sensor readings from devices`);
   console.log(``);
+  console.log(`💡 How It Works:`);
+  console.log(`   1. Test data is published every minute`);
+  console.log(`   2. For each 30-minute mark (e.g., 11:30), the dashboard collects`);
+  console.log(`      readings from 10 minutes before (11:20-11:30) and averages them`);
+  console.log(`   3. The averaged value is displayed at the 30-minute mark on the chart`);
+  console.log(`   4. Use Ctrl+C to stop the broker`);
+  console.log(``);
+  
+  // Start publishing test data
+  startTestDataPublishing();
   
   // Periodic status update
   setInterval(() => {

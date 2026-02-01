@@ -1,9 +1,8 @@
-// API service: uses REACT_APP_API_URL from .env, else localhost
-import { config } from '../config/env';
+// API service: uses Supabase when REACT_APP_SUPABASE_* are set, else backend API
 import { isSupabaseEnabled } from '../lib/supabaseClient';
 import * as supabaseService from './supabaseService';
 
-const API_BASE_URL = config.apiUrl || 'http://localhost:5000/api';
+const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
 
 class ApiService {
   async request(endpoint, options = {}) {

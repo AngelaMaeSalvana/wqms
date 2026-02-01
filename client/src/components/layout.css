@@ -17,15 +17,6 @@
   flex-direction: column;
 }
 
-.layout-main__header {
-  flex-shrink: 0;
-  margin-bottom: 8px;
-  display: flex;
-  justify-content: flex-end;
-  align-items: center;
-  gap: 12px;
-}
-
 /* Responsive layout padding */
 @media (max-width: 1535px), (max-height: 900px) {
   .layout-main {

@@ -1,10 +1,11 @@
 const STORAGE_KEY = "wqms_custom_nodes";
 
-// When Supabase is enabled, cache nodes from DB; getNodes() returns this after loadNodes().
 let nodesCache = null;
 
 /**
- * Returns the list of nodes: from Supabase cache if Supabase enabled and loaded, else localStorage.
+ * Returns the list of nodes: from in-memory cache (set by loadNodes) or localStorage.
+ * No seed/dummy data. Pages should use initial state [] and set nodes after loadNodes()
+ * so Supabase is the source when enabled (no flash of old localStorage).
  */
 export function getNodes() {
   if (nodesCache !== null) return nodesCache;
@@ -19,8 +20,8 @@ export function getNodes() {
 }
 
 /**
- * When Supabase is enabled: fetches nodes from DB, updates cache and localStorage, returns list.
- * When Supabase is disabled: resolves with getNodes() (localStorage).
+ * When Supabase is enabled: fetches nodes from DB, updates cache and localStorage.
+ * Otherwise: resolves with getNodes() (localStorage).
  */
 export async function loadNodes() {
   try {
@@ -36,7 +37,7 @@ export async function loadNodes() {
         lat: r.lat,
         lng: r.lng,
       })) : [];
-      nodesCache = list; // always use DB as source of truth (even if empty)
+      nodesCache = list;
       try {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
       } catch {

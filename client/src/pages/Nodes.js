@@ -34,7 +34,7 @@ function parseCoordinates(str) {
 }
 
 export default function Nodes() {
-  const [nodes, setNodes] = useState(() => getNodes());
+  const [nodes, setNodes] = useState([]);
   const [newNode, setNewNode] = useState(emptyNode);
   const [editingId, setEditingId] = useState(null);
   const [editForm, setEditForm] = useState(emptyNode);

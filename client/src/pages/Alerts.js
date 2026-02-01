@@ -28,8 +28,11 @@ function getRelativeTime(date) {
 
 export default function Alerts() {
   const lastUpdated = new Date();
-  const [nodes, setNodes] = useState(() => getNodes());
+  const [nodes, setNodes] = useState([]);
   const [search, setSearch] = useState("");
+  const [severityFilter, setSeverityFilter] = useState("all");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const [sortBy, setSortBy] = useState("newest");
   const [selectedAlert, setSelectedAlert] = useState(null);
   const [readIds, setReadIds] = useState(new Set());
@@ -43,9 +46,9 @@ export default function Alerts() {
     return () => window.removeEventListener("focus", onFocus);
   }, []);
 
-  const allAlerts = useMemo(() => buildAlertsForAllNodes(nodes), [nodes]);
+  const allAlerts = useMemo(() => buildAlertsForAllNodes(nodes, {}), [nodes]);
 
-  const alerts = useMemo(() => {
+  const filteredAlerts = useMemo(() => {
     let list = [...allAlerts];
     const q = search.trim().toLowerCase();
     if (q) {
@@ -58,6 +61,19 @@ export default function Alerts() {
           (a.type && a.type.toLowerCase().includes(q))
       );
     }
+    if (severityFilter && severityFilter !== "all") {
+      list = list.filter((a) => (a.severity || "info").toLowerCase() === severityFilter.toLowerCase());
+    }
+    if (dateFrom) {
+      const from = new Date(dateFrom);
+      from.setHours(0, 0, 0, 0);
+      list = list.filter((a) => (a.timestamp ? new Date(a.timestamp) : new Date(a.createdAt)) >= from);
+    }
+    if (dateTo) {
+      const to = new Date(dateTo);
+      to.setHours(23, 59, 59, 999);
+      list = list.filter((a) => (a.timestamp ? new Date(a.timestamp) : new Date(a.createdAt)) <= to);
+    }
     if (sortBy === "oldest") {
       list.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
     } else if (sortBy === "severity") {
@@ -67,7 +83,7 @@ export default function Alerts() {
       list.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
     }
     return list;
-  }, [allAlerts, search, sortBy]);
+  }, [allAlerts, search, severityFilter, dateFrom, dateTo, sortBy]);
 
   return (
     <div className="alerts-page">
@@ -88,6 +104,31 @@ export default function Alerts() {
           aria-label="Search alerts"
         />
         <select
+          className="metric-select"
+          aria-label="Severity filter"
+          value={severityFilter}
+          onChange={(e) => setSeverityFilter(e.target.value)}
+        >
+          <option value="all">All severities</option>
+          <option value="high">High</option>
+          <option value="medium">Medium</option>
+          <option value="low">Low</option>
+        </select>
+        <input
+          type="date"
+          className="date-input"
+          aria-label="From date"
+          value={dateFrom}
+          onChange={(e) => setDateFrom(e.target.value)}
+        />
+        <input
+          type="date"
+          className="date-input"
+          aria-label="To date"
+          value={dateTo}
+          onChange={(e) => setDateTo(e.target.value)}
+        />
+        <select
           className="metric-select alerts-sort"
           aria-label="Sort by"
           value={sortBy}
@@ -101,14 +142,14 @@ export default function Alerts() {
 
       <section className="alerts-grid card alerts-notifications-panel">
         <div className="card__body alerts-notifications-body">
-          {alerts.length === 0 ? (
+          {filteredAlerts.length === 0 ? (
             <div className="alerts-grid-placeholder">
-              {search.trim() ? "No alerts match your search." : "No alerts. Alerts are generated from threshold breaches, node status (offline/testing), and maintenance due."}
+              No alerts match your filters. Alerts are generated from threshold breaches, node status (offline/testing), and maintenance due.
             </div>
           ) : (
             <>
               <ul className="alerts-tab-list alerts-notifications-list" aria-label="Alerts list">
-                {alerts.map((a) => {
+                {filteredAlerts.map((a) => {
                   const alertId = a.id || a.timestamp;
                   const isUnread = !readIds.has(alertId);
                   return (
@@ -134,11 +175,11 @@ export default function Alerts() {
                   );
                 })}
               </ul>
-              {alerts.some((a) => !readIds.has(a.id || a.timestamp)) && (
+              {filteredAlerts.some((a) => !readIds.has(a.id || a.timestamp)) && (
                 <button
                   type="button"
                   className="alerts-mark-all-read"
-                  onClick={() => setReadIds(new Set(alerts.map((a) => a.id || a.timestamp)))}
+                  onClick={() => setReadIds(new Set(filteredAlerts.map((a) => a.id || a.timestamp)))}
                 >
                   Mark all as read
                 </button>

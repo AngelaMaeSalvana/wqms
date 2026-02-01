@@ -5,12 +5,12 @@ import { autoTable } from "jspdf-autotable";
 import "../utils/chartConfig";
 import { Line } from "react-chartjs-2";
 import PageDateWithStatus from "../components/PageDateWithStatus";
-import EmptyState from "../components/EmptyState";
 import CalendarCard from "../components/reports/calendar-card";
 import WqiDetailModal from "../components/reports/WqiDetailModal";
 import { getWQIClass, calculateWQI } from "../utils/wqiCalculator";
 import { getNodes, loadNodes } from "../utils/nodesStorage";
 import { getCrystalReport } from "../utils/crystalReportStorage";
+import api from "../services/api";
 import "./Reports.css";
 
 const MemoizedReportChart = memo(function MemoizedReportChart({ data, options }) {
@@ -223,21 +223,108 @@ function buildRangePickerDays(year, month) {
   return days;
 }
 
-/** Report chart data: empty until real data is available. */
-function getReportChartData() {
-  return { labels: [], minArr: [], avgArr: [], maxArr: [] };
+/** Build report chart from API daily summaries only. No mock data. */
+function buildReportChartFromSummaries(parameterId, periodId, rangeStart, rangeEnd, summaries) {
+  const list = Array.isArray(summaries) ? summaries : [];
+  const isWeek = periodId === "week";
+  const labels = isWeek ? getDayLabelsInRange(rangeStart, rangeEnd) : getWeeklyLabelsInRange(rangeStart, rangeEnd);
+  const n = labels.length || 1;
+  if (list.length === 0) {
+    return {
+      labels: labels.length ? labels : ["No data"],
+      minArr: Array(n).fill(null),
+      avgArr: Array(n).fill(null),
+      maxArr: Array(n).fill(null),
+    };
+  }
+  const toDateStr = (d) => (typeof d === "string" ? d : (d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0")));
+  const byDate = {};
+  list.forEach((s) => {
+    const key = toDateStr(s.date);
+    if (!byDate[key]) byDate[key] = [];
+    byDate[key].push(s);
+  });
+  const paramMap = {
+    temperature: (s) => s.avg_temperature,
+    pH: (s) => s.avg_ph,
+    turbidity: (s) => s.avg_turbidity,
+    dissolvedOxygen: (s) => s.avg_dissolved_oxygen,
+    nh3: (s) => s.avg_nh3,
+    wqi: (s) => s.avg_wqi,
+    flowRate: () => null,
+  };
+  const getVal = paramMap[parameterId] || (() => null);
+  const minArr = [];
+  const avgArr = [];
+  const maxArr = [];
+  if (isWeek) {
+    const cursor = new Date(rangeStart);
+    const end = new Date(rangeEnd);
+    cursor.setHours(0, 0, 0, 0);
+    end.setHours(0, 0, 0, 0);
+    while (cursor <= end) {
+      const key = toDateStr(cursor);
+      const vals = (byDate[key] || []).map(getVal).filter((v) => v != null);
+      if (vals.length === 0) {
+        minArr.push(null);
+        avgArr.push(null);
+        maxArr.push(null);
+      } else {
+        minArr.push(Math.round(Math.min(...vals) * 10) / 10);
+        avgArr.push(Math.round((vals.reduce((a, b) => a + b, 0) / vals.length) * 10) / 10);
+        maxArr.push(Math.round(Math.max(...vals) * 10) / 10);
+      }
+      cursor.setDate(cursor.getDate() + 1);
+    }
+  } else {
+    let weekStart = new Date(rangeStart);
+    const end = new Date(rangeEnd);
+    weekStart.setHours(0, 0, 0, 0);
+    end.setHours(23, 59, 59, 999);
+    while (weekStart <= end) {
+      const weekEnd = new Date(weekStart);
+      weekEnd.setDate(weekStart.getDate() + 6);
+      const segEnd = weekEnd > end ? end : weekEnd;
+      const vals = list
+        .filter((s) => {
+          const d = typeof s.date === "string" ? new Date(s.date) : new Date(s.date);
+          return d >= weekStart && d <= segEnd;
+        })
+        .map(getVal)
+        .filter((v) => v != null);
+      if (vals.length === 0) {
+        minArr.push(null);
+        avgArr.push(null);
+        maxArr.push(null);
+      } else {
+        minArr.push(Math.round(Math.min(...vals) * 10) / 10);
+        avgArr.push(Math.round((vals.reduce((a, b) => a + b, 0) / vals.length) * 10) / 10);
+        maxArr.push(Math.round(Math.max(...vals) * 10) / 10);
+      }
+      weekStart.setDate(weekStart.getDate() + 7);
+    }
+  }
+  return { labels, minArr, avgArr, maxArr };
 }
 
 const MONTH_NAMES = ["January", "February", "March", "April", "May", "June",
   "July", "August", "September", "October", "November", "December"];
 
-function buildCalendarDays(year, month) {
+/** Calendar days from API daily summaries only. No mock data. */
+function buildCalendarDays(year, month, summaries = []) {
   const first = new Date(year, month, 1);
   const last = new Date(year, month + 1, 0);
   const startPad = first.getDay();
   const daysInMonth = last.getDate();
   const today = new Date();
   today.setHours(0, 0, 0, 0);
+  const toDateStr = (d) => (typeof d === "string" ? d : (d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0")));
+  const byDate = {};
+  (Array.isArray(summaries) ? summaries : []).forEach((s) => {
+    const key = toDateStr(s.date);
+    if (!byDate[key]) byDate[key] = [];
+    byDate[key].push(s);
+  });
 
   const days = [];
   const totalCells = Math.ceil((startPad + daysInMonth) / 7) * 7;
@@ -250,10 +337,26 @@ function buildCalendarDays(year, month) {
     const isToday = date.getTime() === today.getTime();
     const isFuture = date > today;
 
-    const wqi = null;
-    const params = null;
-    const qualityData = null;
-    const quality = null;
+    let wqi = null;
+    let params = null;
+    if (isCurrentMonth && !isFuture) {
+      const key = toDateStr(date);
+      const daySummaries = byDate[key] || [];
+      if (daySummaries.length > 0) {
+        const firstS = daySummaries[0];
+        params = {
+          temperature: firstS.avg_temperature,
+          pH: firstS.avg_ph,
+          turbidity: firstS.avg_turbidity,
+          dissolvedOxygen: firstS.avg_dissolved_oxygen,
+          nh3: firstS.avg_nh3,
+          flowRate: null,
+        };
+        wqi = firstS.avg_wqi != null ? Math.round(firstS.avg_wqi) : calculateWQI(params);
+      }
+    }
+    const qualityData = wqi != null ? getWQIClass(wqi) : null;
+    const quality = qualityData?.quality ?? null;
 
     days.push({
       date,
@@ -295,20 +398,11 @@ export default function Reports() {
   const [tableSort, setTableSort] = useState("newest");
   const [tableNodeFilter, setTableNodeFilter] = useState("all");
   const [tablePage, setTablePage] = useState(1);
-  const [nodes, setNodes] = useState(() => getNodes());
+  const [nodes, setNodes] = useState([]);
   const [exportOpen, setExportOpen] = useState(false);
-
-  const TABLE_PAGE_SIZE = 7;
-
-  useEffect(() => {
-    loadNodes().then(() => setNodes(getNodes()));
-  }, []);
-  useEffect(() => {
-    const onFocus = () => loadNodes().then(() => setNodes(getNodes()));
-    window.addEventListener("focus", onFocus);
-    return () => window.removeEventListener("focus", onFocus);
-  }, []);
-
+  const [reportSummaries, setReportSummaries] = useState([]);
+  const [reportReadings, setReportReadings] = useState([]);
+  const [calendarSummaries, setCalendarSummaries] = useState([]);
   const [reportParameter, setReportParameter] = useState(PARAMETER_OPTIONS[0].id);
   const [reportPeriod, setReportPeriod] = useState(PERIOD_OPTIONS[0].id);
   const [reportRangeStart, setReportRangeStart] = useState(() => getWeekRange(new Date()).start);
@@ -322,6 +416,63 @@ export default function Reports() {
   const dateRangeButtonRef = useRef(null);
   const dateRangeOverlayRef = useRef(null);
   const [overlayPosition, setOverlayPosition] = useState({ top: 0, right: 0 });
+  const [calendarView, setCalendarView] = useState(() => {
+    const d = new Date();
+    return { year: d.getFullYear(), month: d.getMonth() };
+  });
+  const [selectedDay, setSelectedDay] = useState(null);
+  const [modalOpen, setModalOpen] = useState(false);
+  const exportRef = useRef(null);
+
+  const TABLE_PAGE_SIZE = 7;
+
+  /** Effective date range for table: when From/To are set, use them; otherwise default last 7 days. */
+  const tableDateRange = useMemo(() => {
+    if (tableDateFrom && tableDateTo) {
+      const start = new Date(tableDateFrom);
+      start.setHours(0, 0, 0, 0);
+      const end = new Date(tableDateTo);
+      end.setHours(23, 59, 59, 999);
+      return { start, end };
+    }
+    const end = new Date();
+    end.setHours(23, 59, 59, 999);
+    const start = new Date();
+    start.setDate(start.getDate() - 6);
+    start.setHours(0, 0, 0, 0);
+    return { start, end };
+  }, [tableDateFrom, tableDateTo]);
+
+  useEffect(() => {
+    loadNodes().then(() => setNodes(getNodes()));
+  }, []);
+  useEffect(() => {
+    const onFocus = () => loadNodes().then(() => setNodes(getNodes()));
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, []);
+
+  useEffect(() => {
+    if (!reportRangeStart || !reportRangeEnd) return;
+    const start = typeof reportRangeStart === "string" ? reportRangeStart : (reportRangeStart.getFullYear() + "-" + String(reportRangeStart.getMonth() + 1).padStart(2, "0") + "-" + String(reportRangeStart.getDate()).padStart(2, "0"));
+    const end = typeof reportRangeEnd === "string" ? reportRangeEnd : (reportRangeEnd.getFullYear() + "-" + String(reportRangeEnd.getMonth() + 1).padStart(2, "0") + "-" + String(reportRangeEnd.getDate()).padStart(2, "0"));
+    api.getDailySummaries({ startDate: start, endDate: end }).then(setReportSummaries).catch(() => setReportSummaries([]));
+  }, [reportRangeStart, reportRangeEnd]);
+
+  useEffect(() => {
+    if (!tableDateRange?.start || !tableDateRange?.end) return;
+    const start = tableDateRange.start.getFullYear() + "-" + String(tableDateRange.start.getMonth() + 1).padStart(2, "0") + "-" + String(tableDateRange.start.getDate()).padStart(2, "0");
+    const end = tableDateRange.end.getFullYear() + "-" + String(tableDateRange.end.getMonth() + 1).padStart(2, "0") + "-" + String(tableDateRange.end.getDate()).padStart(2, "0");
+    api.getReadings({ startDate: start, endDate: end, limit: 500 }).then((rows) => setReportReadings(Array.isArray(rows) ? rows : [])).catch(() => setReportReadings([]));
+  }, [tableDateRange?.start?.getTime(), tableDateRange?.end?.getTime()]);
+
+  useEffect(() => {
+    const start = new Date(calendarView.year, calendarView.month, 1);
+    const end = new Date(calendarView.year, calendarView.month + 1, 0);
+    const startStr = start.getFullYear() + "-" + String(start.getMonth() + 1).padStart(2, "0") + "-" + String(start.getDate()).padStart(2, "0");
+    const endStr = end.getFullYear() + "-" + String(end.getMonth() + 1).padStart(2, "0") + "-" + String(end.getDate()).padStart(2, "0");
+    api.getDailySummaries({ startDate: startStr, endDate: endStr }).then(setCalendarSummaries).catch(() => setCalendarSummaries([]));
+  }, [calendarView.year, calendarView.month]);
 
   useEffect(() => {
     if (!dateRangePickerOpen || !dateRangeButtonRef.current) return;
@@ -342,20 +493,13 @@ export default function Reports() {
     };
   }, [dateRangePickerOpen]);
 
-  const [calendarView, setCalendarView] = useState(() => {
-    const d = new Date();
-    return { year: d.getFullYear(), month: d.getMonth() };
-  });
-  const [selectedDay, setSelectedDay] = useState(null);
-  const [modalOpen, setModalOpen] = useState(false);
-  const exportRef = useRef(null);
-
   const reportChartData = useMemo(() => {
-    const { labels, minArr, avgArr, maxArr } = getReportChartData(
+    const { labels, minArr, avgArr, maxArr } = buildReportChartFromSummaries(
       reportParameter,
       reportPeriod,
       reportRangeStart,
-      reportRangeEnd
+      reportRangeEnd,
+      reportSummaries
     );
     const param = PARAMETER_OPTIONS.find((p) => p.id === reportParameter);
     const unit = param?.unit ?? "";
@@ -367,28 +511,50 @@ export default function Reports() {
         { label: `Max${unit}`, data: maxArr, borderColor: "#d45b5b", backgroundColor: "rgba(212, 91, 91, 0.1)", fill: false, borderDash: [4, 2] },
       ],
     };
-  }, [reportParameter, reportPeriod, reportRangeStart, reportRangeEnd]);
+  }, [reportParameter, reportPeriod, reportRangeStart, reportRangeEnd, reportSummaries]);
 
-  /** Effective date range for table: when From/To are set, use them; otherwise show all data (default wide range). */
-  const tableDateRange = useMemo(() => {
-    if (tableDateFrom && tableDateTo) {
-      const start = new Date(tableDateFrom);
-      start.setHours(0, 0, 0, 0);
-      const end = new Date(tableDateTo);
-      end.setHours(23, 59, 59, 999);
-      return { start, end };
+  /** Table rows from API/Supabase readings only. No mock data. */
+  const sensorTableRows = useMemo(() => {
+    const list = Array.isArray(reportReadings) ? reportReadings : [];
+    const nodeMap = {};
+    nodes.forEach((n) => { nodeMap[n.id] = n.name || n.id; });
+    const rows = list.map((r) => {
+      const d = typeof r.timestamp === "string" ? new Date(r.timestamp) : new Date(r.timestamp);
+      const nodeId = r.node_id || r.nodeId || "1";
+      const wqi = r.wqi != null ? Math.round(r.wqi) : calculateWQI({
+        temperature: r.temperature,
+        turbidity: r.turbidity,
+        pH: r.ph ?? r.pH,
+        nh3: r.nh3 ?? r.NH3,
+        dissolvedOxygen: r.dissolved_oxygen ?? r.dissolvedOxygen ?? r.do,
+      });
+      return {
+        date: d,
+        nodeId,
+        nodeName: nodeMap[nodeId] || nodeId,
+        temperature: r.temperature ?? null,
+        pH: r.ph ?? r.pH ?? null,
+        turbidity: r.turbidity ?? null,
+        dissolvedOxygen: r.dissolved_oxygen ?? r.dissolvedOxygen ?? r.do ?? null,
+        nh3: r.nh3 ?? r.NH3 ?? null,
+        flowRate: r.flowRate ?? null,
+        wqi: wqi != null ? Math.round(wqi) : null,
+      };
+    });
+    let filtered = rows;
+    if (search.trim()) {
+      const q = search.trim().toLowerCase();
+      filtered = filtered.filter((r) => rowMatchesSearch(r, q));
     }
-    // No date filters: default last 7 days to keep table fast (use From/To for longer ranges)
-    const end = new Date();
-    end.setHours(23, 59, 59, 999);
-    const start = new Date();
-    start.setDate(start.getDate() - 6);
-    start.setHours(0, 0, 0, 0);
-    return { start, end };
-  }, [tableDateFrom, tableDateTo]);
-
-  /** Sensor data table: empty until real data is available (e.g. from API or stored readings). */
-  const sensorTableRows = useMemo(() => [], []);
+    if (tableNodeFilter && tableNodeFilter !== "all") {
+      filtered = filtered.filter((r) => r.nodeId === tableNodeFilter);
+    }
+    const sorted =
+      tableSort === "oldest"
+        ? [...filtered].sort((a, b) => a.date.getTime() - b.date.getTime())
+        : [...filtered].sort((a, b) => b.date.getTime() - a.date.getTime());
+    return sorted;
+  }, [reportReadings, nodes, search, tableNodeFilter, tableSort]);
 
   const totalRows = sensorTableRows.length;
   const totalPages = Math.max(1, Math.ceil(totalRows / TABLE_PAGE_SIZE));
@@ -429,8 +595,8 @@ export default function Reports() {
   );
 
   const calendarDays = useMemo(
-    () => buildCalendarDays(calendarView.year, calendarView.month),
-    [calendarView.year, calendarView.month]
+    () => buildCalendarDays(calendarView.year, calendarView.month, calendarSummaries),
+    [calendarView.year, calendarView.month, calendarSummaries]
   );
 
   const handlePrevMonth = () => {
@@ -653,15 +819,7 @@ export default function Reports() {
                 </div>
               )}
               <div className="reports-chart-wrapper">
-                {reportChartData.labels?.length > 0 ? (
-                  <MemoizedReportChart data={reportChartData} options={reportChartOptions} />
-                ) : (
-                  <EmptyState
-                    icon="📈"
-                    title="No report data"
-                    message="Report data will appear when historical readings are available."
-                  />
-                )}
+                <MemoizedReportChart data={reportChartData} options={reportChartOptions} />
               </div>
             </div>
             <aside className="reports-chart-selectors" ref={dateRangePickerRef} aria-label="Chart filters">
@@ -996,7 +1154,7 @@ export default function Reports() {
                 {sensorTableRows.length === 0 ? (
                   <tr>
                     <td colSpan={10} className="reports-data-table-empty">
-                      No data yet. Sensor table will show readings when data is available from HiveMQ or the API.
+                      No data. Select a date range (or use From/To above) and ensure nodes exist.
                     </td>
                   </tr>
                 ) : (

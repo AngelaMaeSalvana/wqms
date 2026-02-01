@@ -1,5 +1,5 @@
 import React from "react";
-import EmptyState from "../EmptyState";
+import { MetricSkeleton } from "../LoadingSkeleton";
 import "./dashboard.css";
 
 const PARAMS = [
@@ -33,7 +33,7 @@ function StatBlock({ label, low, avg, high, unit, colorClass }) {
   );
 }
 
-export function TodayCard({ todayStats, selectedNode }) {
+export function TodayCard({ todayStats, selectedNode, readingsLoaded = false }) {
   const hasStats =
     todayStats &&
     (todayStats.temperature || todayStats.turbidity || todayStats.ph ||
@@ -47,12 +47,17 @@ export function TodayCard({ todayStats, selectedNode }) {
         </div>
       </div>
       <div className="card__body card__body--fill">
-        {!hasStats ? (
-          <EmptyState
-            icon="📋"
-            title="No data yet"
-            message="Today’s stats will appear when live sensor data is received via HiveMQ."
-          />
+        {!hasStats && readingsLoaded ? (
+          <div className="today-card-empty" aria-live="polite">
+            <p>No data from database yet.</p>
+            <p className="today-card-empty-hint">Readings come from Supabase or MQTT. Add data in Nodes or wait for sensor uploads.</p>
+          </div>
+        ) : !hasStats ? (
+          <div className="today-stats-skeleton">
+            {[1, 2, 3, 4, 5, 6].map((i) => (
+              <MetricSkeleton key={i} />
+            ))}
+          </div>
         ) : (
           <div className="today-stats-grid">
             {PARAMS.map(({ key, label, unit, color }) => {

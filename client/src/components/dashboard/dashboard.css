@@ -42,12 +42,6 @@
 }
 
 /* Node status pills */
-.node-status-wrap {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-}
-
 .node-status-pill {
   display: inline-block;
   padding: 4px 12px;
@@ -84,12 +78,6 @@
 .node-status-pill--failed {
   background: rgba(212, 91, 91, 0.2);
   color: var(--danger);
-}
-
-.node-status-pill--live {
-  background: rgba(27, 156, 133, 0.2);
-  color: var(--primary, #1b9c85);
-  font-weight: 600;
   border: 1px solid rgba(212, 91, 91, 0.4);
 }
 
@@ -189,6 +177,22 @@
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+.today-card-empty {
+  padding: 24px 16px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+.today-card-empty p {
+  margin: 0 0 8px 0;
+}
+
+.today-card-empty-hint {
+  font-size: 0.8rem;
+  opacity: 0.9;
 }
 
 .today-stat-block {
