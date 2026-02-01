@@ -41,11 +41,11 @@ const DatabaseStatus = () => {
     const hasUrl = !!config.supabase.url;
     const hasKey = !!config.supabase.anonKey;
     const missing = [];
-    if (!hasUrl) missing.push('NEXT_PUBLIC_SUPABASE_URL');
-    if (!hasKey) missing.push('NEXT_PUBLIC_SUPABASE_ANON_KEY');
+    if (!hasUrl) missing.push('REACT_APP_SUPABASE_URL');
+    if (!hasKey) missing.push('REACT_APP_SUPABASE_PUBLISHABLE_DEFAULT_KEY');
     const hint = missing.length
-      ? `Missing in build: ${missing.join(', ')}. In Vercel add these (or REACT_APP_*), then Redeploy with "Clear cache".`
-      : 'Vercel: add NEXT_PUBLIC_SUPABASE_URL & NEXT_PUBLIC_SUPABASE_ANON_KEY (or REACT_APP_*) for Production, then Redeploy with "Clear cache".';
+      ? `Missing in build: ${missing.join(', ')}. In Vercel add these (Supabase → Connect → Create React App), then Redeploy with "Clear cache".`
+      : 'Vercel: add REACT_APP_SUPABASE_URL & REACT_APP_SUPABASE_PUBLISHABLE_DEFAULT_KEY for Production, then Redeploy with "Clear cache".';
     return (
       <div
         className="database-status database-status--none"

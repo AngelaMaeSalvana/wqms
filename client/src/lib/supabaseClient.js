@@ -1,6 +1,6 @@
 /**
  * Supabase client for WQMS.
- * Reads URL and anon key from .env (REACT_APP_* or NEXT_PUBLIC_*).
+ * Uses REACT_APP_SUPABASE_URL and REACT_APP_SUPABASE_PUBLISHABLE_DEFAULT_KEY (Supabase → Connect → Create React App).
  */
 import { createClient } from '@supabase/supabase-js';
 import { config } from '../config/env';

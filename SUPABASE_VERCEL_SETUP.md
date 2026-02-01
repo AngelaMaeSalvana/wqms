@@ -22,24 +22,22 @@ This guide walks you through using **Supabase** as the database for WQMS, with t
 
 ## 3. Get your Supabase keys
 
-1. In Supabase Dashboard go to **Settings → API**.
-2. Note:
-   - **Project URL** → use as `NEXT_PUBLIC_SUPABASE_URL` (or `REACT_APP_SUPABASE_URL`) on the client, and `SUPABASE_URL` on the server
-   - **anon public** key → use as `NEXT_PUBLIC_SUPABASE_ANON_KEY` (or `REACT_APP_SUPABASE_ANON_KEY`) on the client
-   - **service_role** key → `SUPABASE_SERVICE_ROLE_KEY` (server only; keep secret)
+1. In Supabase Dashboard go to **Connect** (or **Settings → API**).
+2. Choose **App Frameworks** → **React** → **Create React App** → **supabase-js**. Supabase shows the exact env var names:
+   - **REACT_APP_SUPABASE_URL** = your Project URL (e.g. `https://xxx.supabase.co`)
+   - **REACT_APP_SUPABASE_PUBLISHABLE_DEFAULT_KEY** = the publishable key (starts with `sb_publishable_...`)
+3. For the server: **SUPABASE_URL** and **SUPABASE_SERVICE_ROLE_KEY** (Settings → API; keep service_role secret).
 
 ## 4. Configure Vercel (client)
 
 1. In [Vercel](https://vercel.com), open your project (the **client** app).
 2. **Settings → Environment Variables**.
-3. Add (you can use the **exact names Supabase shows** for Next.js):
+3. Add the **exact names** Supabase shows for Create React App:
 
-   | Name                            | Value                    | Environment   |
-   |---------------------------------|--------------------------|---------------|
-   | `NEXT_PUBLIC_SUPABASE_URL`      | `https://xxx.supabase.co`| All           |
-   | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | your anon key            | All           |
-
-   Or use `REACT_APP_SUPABASE_URL` and `REACT_APP_SUPABASE_ANON_KEY` instead; both work.
+   | Name                                    | Value                    | Environment   |
+   |-----------------------------------------|--------------------------|---------------|
+   | `REACT_APP_SUPABASE_URL`                | `https://xxx.supabase.co`| All           |
+   | `REACT_APP_SUPABASE_PUBLISHABLE_DEFAULT_KEY` | your publishable key     | All           |
 
 4. Add your existing MQTT vars if you use them:  
    `REACT_APP_MQTT_WS_URL`, `REACT_APP_MQTT_USER`, `REACT_APP_MQTT_PASS`.
@@ -50,12 +48,12 @@ When these are set, the React app uses Supabase for readings, alerts, and nodes 
 
 ### If Vercel still shows "DB: Not connected"
 
-The app UI shows **which** variable is missing (e.g. "Missing: NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY"). Use that to fix the right one.
+The app UI shows **which** variable is missing (e.g. "Missing: REACT_APP_SUPABASE_URL, REACT_APP_SUPABASE_PUBLISHABLE_DEFAULT_KEY"). Use that to fix the right one.
 
-- **Names**: Use `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` (same as Supabase’s Next.js snippet) or `REACT_APP_SUPABASE_URL` and `REACT_APP_SUPABASE_ANON_KEY`. Both work.
+- **Names**: Use the exact names from Supabase → Connect → App Frameworks → React / Create React App: `REACT_APP_SUPABASE_URL` and `REACT_APP_SUPABASE_PUBLISHABLE_DEFAULT_KEY`.
 - **Apply to the right env**: If you only added vars to "Preview", Production builds won’t see them. Add to **Production** (and Preview if needed).
 - **Clear cache and redeploy** (most important): Env vars are baked in at **build** time. Vercel may reuse a cached build from before you added the vars. In Vercel: **Deployments** → latest deployment → **⋮** → **Redeploy** → turn **ON** "Clear build cache" → confirm. Wait for the new build.
-- **No typos**: URL like `https://xxxx.supabase.co` (no trailing slash). Anon key = long JWT from Supabase → Settings → API → anon **public** (no extra spaces when pasting).
+- **No typos**: URL like `https://xxxx.supabase.co` (no trailing slash). Publishable key = value from Supabase → Connect (starts with `sb_publishable_...`; no extra spaces when pasting).
 
 ## 5. Backend / MQTT ingestion (optional)
 
@@ -74,7 +72,7 @@ If you don’t set them, the server keeps using SQLite (`wqms.db`).
 **Client (React):**
 
 - Copy `client/.env.example` to `client/.env`.
-- Set `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` (or `REACT_APP_*`).
+- Set `REACT_APP_SUPABASE_URL` and `REACT_APP_SUPABASE_PUBLISHABLE_DEFAULT_KEY` (from Supabase → Connect → Create React App).
 - Run `npm start` in `client/`.
 
 **Server (optional):**
@@ -87,7 +85,7 @@ If you don’t set them, the server keeps using SQLite (`wqms.db`).
 
 | Where        | Env vars |
 |--------------|----------|
-| **Vercel (client)** | `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` (or `REACT_APP_*`) |
+| **Vercel (client)** | `REACT_APP_SUPABASE_URL`, `REACT_APP_SUPABASE_PUBLISHABLE_DEFAULT_KEY` |
 | **Server**   | `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` (and MQTT vars if used) |
 
 - **Database**: Run `supabase/schema.sql` once in the Supabase SQL Editor.
