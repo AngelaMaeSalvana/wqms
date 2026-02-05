@@ -1,0 +1,3 @@
+# For cloud deploy: run the MQTT bridge (not the Express server).
+# Railway / Render: set start command to "npm run bridge" or use this file.
+worker: node bridge.js

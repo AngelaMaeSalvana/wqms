@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS sensor_readings (
   ph real,
   nh3 real,
   dissolved_oxygen real,
+  flow_rate real,
   wqi integer,
   timestamp timestamptz NOT NULL DEFAULT now(),
   created_at timestamptz DEFAULT now()

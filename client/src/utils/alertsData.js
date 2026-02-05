@@ -32,7 +32,6 @@ function getThresholds() {
 export function buildAlertsForAllNodes(nodes = [], readingsByNode = {}) {
   const thresholds = getThresholds();
   const alerts = [];
-  let id = 0;
   const now = Date.now();
 
   for (const node of nodes) {
@@ -42,7 +41,7 @@ export function buildAlertsForAllNodes(nodes = [], readingsByNode = {}) {
 
     if (node.status === "offline") {
       alerts.push({
-        id: `alert-${++id}`,
+        id: `node-offline-${nodeId}`,
         nodeId,
         nodeName,
         type: "node",
@@ -56,7 +55,7 @@ export function buildAlertsForAllNodes(nodes = [], readingsByNode = {}) {
 
     if (node.status === "testing") {
       alerts.push({
-        id: `alert-${++id}`,
+        id: `node-testing-${nodeId}`,
         nodeId,
         nodeName,
         type: "node",
@@ -74,7 +73,7 @@ export function buildAlertsForAllNodes(nodes = [], readingsByNode = {}) {
     if (temp != null && (temp < thresholds.temperatureMin || temp > thresholds.temperatureMax)) {
       const which = temp < thresholds.temperatureMin ? "below minimum" : "above maximum";
       alerts.push({
-        id: `alert-${++id}`,
+        id: `threshold-${nodeId}-temperature`,
         nodeId,
         nodeName,
         type: "threshold",
@@ -93,7 +92,7 @@ export function buildAlertsForAllNodes(nodes = [], readingsByNode = {}) {
     const ph = readings.pH ?? readings.ph;
     if (ph != null && (ph < thresholds.pHMin || ph > thresholds.pHMax)) {
       alerts.push({
-        id: `alert-${++id}`,
+        id: `threshold-${nodeId}-pH`,
         nodeId,
         nodeName,
         type: "threshold",
@@ -112,7 +111,7 @@ export function buildAlertsForAllNodes(nodes = [], readingsByNode = {}) {
     const turbidity = readings.turbidity ?? readings.turb;
     if (turbidity != null && turbidity > thresholds.turbidityMax) {
       alerts.push({
-        id: `alert-${++id}`,
+        id: `threshold-${nodeId}-turbidity`,
         nodeId,
         nodeName,
         type: "threshold",
@@ -130,7 +129,7 @@ export function buildAlertsForAllNodes(nodes = [], readingsByNode = {}) {
     const doVal = readings.dissolvedOxygen ?? readings.dissolved_oxygen ?? readings.do ?? readings.DO;
     if (doVal != null && doVal < thresholds.dissolvedOxygenMin) {
       alerts.push({
-        id: `alert-${++id}`,
+        id: `threshold-${nodeId}-dissolvedOxygen`,
         nodeId,
         nodeName,
         type: "threshold",
@@ -148,7 +147,7 @@ export function buildAlertsForAllNodes(nodes = [], readingsByNode = {}) {
     const nh3 = readings.nh3 ?? readings.NH3;
     if (nh3 != null && nh3 > thresholds.nh3Max) {
       alerts.push({
-        id: `alert-${++id}`,
+        id: `threshold-${nodeId}-nh3`,
         nodeId,
         nodeName,
         type: "threshold",
@@ -167,7 +166,7 @@ export function buildAlertsForAllNodes(nodes = [], readingsByNode = {}) {
     const daysSinceMaintenance = lastMaintenance ? (now - lastMaintenance) / (24 * 60 * 60 * 1000) : 35;
     if (daysSinceMaintenance >= 30) {
       alerts.push({
-        id: `alert-${++id}`,
+        id: `maintenance-${nodeId}`,
         nodeId,
         nodeName,
         type: "maintenance",

@@ -17,17 +17,22 @@ export default function App() {
   return (
     <ErrorBoundary>
       <BrowserRouter>
-        <Routes>
-          <Route element={<Layout />}>
-            <Route path="/" element={<Navigate to="/dashboard" replace />} />
-            <Route path="/dashboard" element={<Dashboard />} />
-            <Route path="/reports" element={<Reports />} />
-            <Route path="/map" element={<Map />} />
-            <Route path="/nodes" element={<Nodes />} />
-            <Route path="/alerts" element={<Alerts />} />
-            <Route path="/settings" element={<Settings />} />
-          </Route>
-        </Routes>
+        <>
+          <Routes>
+            <Route element={<Layout />}>
+              <Route path="/" element={<Navigate to="/dashboard" replace />} />
+              <Route path="/dashboard" element={<Dashboard />} />
+              <Route path="/reports" element={<Reports />} />
+              <Route path="/map" element={<Map />} />
+              <Route path="/nodes" element={<Nodes />} />
+              <Route path="/alerts" element={<Alerts />} />
+              <Route path="/settings" element={<Settings />} />
+            </Route>
+          </Routes>
+          <span className="app-dev-notice" aria-hidden="true">
+            This app is still in development phase
+          </span>
+        </>
       </BrowserRouter>
     </ErrorBoundary>
   );

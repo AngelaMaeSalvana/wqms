@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { createPortal } from 'react-dom';
 import { calculateWQI, getQualityRatings } from '../utils/wqiCalculator';
 import './ManualInput.css';
 
@@ -154,7 +155,7 @@ const ManualInput = ({ onSave, onClose }) => {
     setSelectedTime(getCurrentTime());
   };
 
-  return (
+  return createPortal(
     <div className="manual-input-modal" role="dialog" aria-modal="true" aria-labelledby="manual-input-title">
       <div className="manual-input-content">
         <header className="manual-input-header">
@@ -388,7 +389,8 @@ const ManualInput = ({ onSave, onClose }) => {
           )}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };
 

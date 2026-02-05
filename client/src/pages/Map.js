@@ -1,23 +1,18 @@
 import React, { useState, useEffect, useCallback, useMemo } from "react";
+import { createPortal } from "react-dom";
 import { MapContainer, TileLayer } from "react-leaflet";
 import MapMarkersOverlay from "../components/map/MapMarkersOverlay";
 import PageDateWithStatus from "../components/PageDateWithStatus";
 import api from "../services/api";
-import { calculateWQI } from "../utils/wqiCalculator";
+import { calculateWQI, getWQIClass } from "../utils/wqiCalculator";
 import { getNodes, loadNodes } from "../utils/nodesStorage";
+import { useSensorTest, getStoredTestResults } from "../hooks/useSensorTest";
+import { applyCalibration } from "../utils/calibration";
+import { PageLoader } from "../components/LoadingSkeleton";
 import "./Map.css";
 
 const FALLBACK_CENTER = [8.462591, 124.707831];
 const DEFAULT_ZOOM = 11;
-
-function getWQIClass(wqi) {
-  if (wqi == null || isNaN(wqi)) return { class: "N/A", label: "No Data", quality: "muted" };
-  if (wqi < 50) return { class: "I", label: "Excellent", quality: "excellent" };
-  if (wqi <= 100) return { class: "II", label: "Good", quality: "good" };
-  if (wqi <= 200) return { class: "III", label: "Poor", quality: "poor" };
-  if (wqi <= 300) return { class: "IV", label: "Very Poor", quality: "very-poor" };
-  return { class: "V", label: "Unsuitable", quality: "unsuitable" };
-}
 
 function normalizeReading(r) {
   if (!r) return null;
@@ -41,8 +36,12 @@ function normalizeReading(r) {
   };
 }
 
+const MAP_NODES_PAGE_SIZE = 3;
+
 export default function Map() {
   const [nodes, setNodes] = useState([]);
+  const [mapNodesPage, setMapNodesPage] = useState(1);
+  const [nodesLoaded, setNodesLoaded] = useState(false);
   const [currentMetrics, setCurrentMetrics] = useState({
     temperature: null,
     turbidity: null,
@@ -52,10 +51,22 @@ export default function Map() {
     wqi: null,
     nodeId: null,
   });
-  const [isSensorTestModalOpen, setIsSensorTestModalOpen] = useState(false);
-  const [sensorTestResults, setSensorTestResults] = useState(null);
-  const [isTestingSensor, setIsTestingSensor] = useState(false);
   const [lastUpdated] = useState(() => new Date());
+
+  const getReadingsForNode = useCallback(
+    (nodeId) =>
+      currentMetrics.nodeId === nodeId
+        ? {
+            temperature: currentMetrics.temperature,
+            ph: currentMetrics.pH,
+            turbidity: currentMetrics.turbidity,
+            dissolvedOxygen: currentMetrics.dissolvedOxygen,
+            nh3: currentMetrics.nh3,
+          }
+        : {},
+    [currentMetrics]
+  );
+  const sensorTest = useSensorTest(getReadingsForNode);
 
   const allNodes = useMemo(() => nodes, [nodes]);
   const mapCenter = useMemo(() => {
@@ -68,7 +79,7 @@ export default function Map() {
   }, [allNodes]);
 
   useEffect(() => {
-    loadNodes().then(() => setNodes(getNodes()));
+    loadNodes().then(() => setNodes(getNodes())).finally(() => setNodesLoaded(true));
   }, []);
   useEffect(() => {
     const onFocus = () => loadNodes().then(() => setNodes(getNodes()));
@@ -79,7 +90,8 @@ export default function Map() {
   const fetchLatestReading = useCallback(async () => {
     try {
       const r = await api.getLatestReading();
-      const norm = normalizeReading(r);
+      const calibrated = applyCalibration(r);
+      const norm = normalizeReading(calibrated);
       if (norm) {
         setCurrentMetrics((prev) => ({
           ...prev,
@@ -98,147 +110,138 @@ export default function Map() {
     return () => clearInterval(interval);
   }, [fetchLatestReading]);
 
-  const getStoredTestResults = useCallback((nodeId) => {
-    try {
-      const key = `sensorTest_${nodeId}`;
-      const stored = localStorage.getItem(key);
-      if (stored) {
-        const data = JSON.parse(stored);
-        const testDate = new Date(data.date);
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        testDate.setHours(0, 0, 0, 0);
-        if (testDate.getTime() === today.getTime()) return data.results;
-      }
-    } catch (e) {
-      console.warn("getStoredTestResults", e);
-    }
-    return null;
-  }, []);
-
-  const storeTestResults = useCallback((nodeId, results) => {
-    try {
-      localStorage.setItem(
-        `sensorTest_${nodeId}`,
-        JSON.stringify({ date: new Date().toISOString(), results })
-      );
-    } catch (e) {
-      console.warn("storeTestResults", e);
-    }
-  }, []);
-
-  /** Sensor test from real data only (currentMetrics from API/MQTT). No mock values. */
-  const buildSensorTestFromReadings = useCallback(
-    (nodeId) => {
-      const fmt = (v, decimals, unit) =>
-        v != null && !isNaN(v) ? `${Number(v).toFixed(decimals)}${unit}` : "N/A";
-      const m = currentMetrics;
-      const sensors = [
-        { name: "Temperature Sensor", key: "Temperature", value: fmt(m.temperature, 1, "°C"), unit: "°C" },
-        { name: "Turbidity Sensor", key: "Turbidity", value: fmt(m.turbidity, 1, " NTU"), unit: " NTU" },
-        { name: "pH Sensor", key: "pH", value: fmt(m.pH, 1, ""), unit: "" },
-        { name: "Dissolved Oxygen Sensor", key: "Dissolved Oxygen", value: fmt(m.dissolvedOxygen, 1, " mg/L"), unit: " mg/L" },
-        { name: "NH₃ Sensor", key: "NH₃", value: fmt(m.nh3, 2, " mg/L"), unit: " mg/L" },
-      ].map((s) => {
-        const hasData = s.value !== "N/A";
-        return {
-          name: s.name,
-          status: hasData ? "pass" : "fail",
-          value: s.value,
-          responseTime: hasData ? "—" : "No data",
-        };
-      });
-      const failCount = sensors.filter((s) => s.status === "fail").length;
-      let status = "success";
-      let message = "Sensor test completed successfully";
-      if (failCount === sensors.length) {
-        status = "error";
-        message = "No sensor data available. Data comes from MQTT or Supabase.";
-      } else if (failCount >= 2) {
-        status = "error";
-        message = `${failCount} sensors have no data`;
-      } else if (failCount === 1) {
-        status = "warning";
-        message = "Sensor test completed with warnings - some data unavailable";
-      }
-      return {
-        nodeId,
-        status,
-        message,
-        timestamp: new Date().toISOString(),
-        sensors,
-      };
-    },
-    [currentMetrics]
-  );
-
   const handleSensorTest = useCallback(
     async (nodeId, forceRun = false) => {
       const id = nodeId ?? currentMetrics.nodeId ?? 1;
+      if (!id) return;
       if (!forceRun) {
         const stored = getStoredTestResults(id);
         if (stored) {
-          setSensorTestResults(stored);
-          setIsSensorTestModalOpen(true);
-          setIsTestingSensor(false);
+          sensorTest.runTest(id, false);
           return;
         }
       }
-      setIsTestingSensor(true);
-      setIsSensorTestModalOpen(true);
       try {
-        setTimeout(() => {
-          const results = buildSensorTestFromReadings(id);
-          setSensorTestResults(results);
-          storeTestResults(id, results);
-          setIsTestingSensor(false);
-        }, 500);
+        const r = await api.getLatestReading(id);
+        const calibrated = applyCalibration(r);
+        const readings = {
+          temperature: calibrated.temperature ?? calibrated.temp ?? null,
+          ph: calibrated.pH ?? calibrated.ph ?? null,
+          turbidity: calibrated.turbidity ?? null,
+          dissolvedOxygen: calibrated.dissolved_oxygen ?? calibrated.dissolvedOxygen ?? calibrated.do ?? null,
+          nh3: calibrated.nh3 ?? calibrated.NH3 ?? null,
+        };
+        sensorTest.runTest(id, true, readings);
       } catch (e) {
-        setSensorTestResults({
-          nodeId: id,
-          status: "error",
-          message: e.message || "Sensor test failed",
-          timestamp: new Date().toISOString(),
-          sensors: [],
-        });
-        setIsTestingSensor(false);
+        sensorTest.runTest(id, true, {});
       }
     },
-    [currentMetrics.nodeId, getStoredTestResults, buildSensorTestFromReadings, storeTestResults]
+    [currentMetrics.nodeId, sensorTest]
   );
 
   const nodeIdForMarker = currentMetrics.nodeId ?? "N-001";
-  const isTestingThisNode = isTestingSensor && (sensorTestResults?.nodeId === nodeIdForMarker || !sensorTestResults);
-  const testStatusForNode = sensorTestResults?.nodeId === nodeIdForMarker ? sensorTestResults?.status : null;
+  const isTestingThisNode = sensorTest.isTesting && (sensorTest.results?.nodeId === nodeIdForMarker || !sensorTest.results);
+  const testStatusForNode = sensorTest.results?.nodeId === nodeIdForMarker ? sensorTest.results?.status : null;
 
   const mapMarkers = allNodes.filter((n) => n.lat != null && n.lng != null).map((n) => {
     const stored = getStoredTestResults(n.id);
-    const statusForNode = sensorTestResults?.nodeId === n.id ? sensorTestResults?.status : stored?.status ?? null;
+    const statusForNode = sensorTest.results?.nodeId === n.id ? sensorTest.results?.status : stored?.status ?? null;
     return {
       key: n.id,
       lat: n.lat,
       lng: n.lng,
       nodeId: n.id,
       onTestSensor: handleSensorTest,
-      isTesting: isTestingSensor && (sensorTestResults?.nodeId === n.id || !sensorTestResults),
+      isTesting: sensorTest.isTesting && (sensorTest.results?.nodeId === n.id || !sensorTest.results),
       testStatus: statusForNode,
     };
   });
 
+  const [mapTableSort, setMapTableSort] = useState({ column: "node", direction: "asc" });
+  const [mapNodesSearch, setMapNodesSearch] = useState("");
+
   const nodesTableData = allNodes.map((n) => {
     const stored = getStoredTestResults(n.id);
-    const result = sensorTestResults?.nodeId === n.id ? sensorTestResults : stored;
+    const result = sensorTest.results?.nodeId === n.id ? sensorTest.results : stored;
     let repairStatus = "Not tested";
     if (result?.status === "success") repairStatus = "OK";
     else if (result?.status === "warning") repairStatus = "Needs repair";
     else if (result?.status === "error") repairStatus = "Needs fix";
+    const lastTestTs = result?.timestamp ? new Date(result.timestamp).getTime() : 0;
     return {
       ...n,
       lastTest: result ? new Date(result.timestamp).toLocaleString() : "—",
+      lastTestTimestamp: lastTestTs,
       repairStatus,
       resultStatus: result?.status ?? null,
     };
   });
+
+  const filteredNodesTableData = useMemo(() => {
+    const q = mapNodesSearch.trim().toLowerCase();
+    if (!q) return nodesTableData;
+    return nodesTableData.filter(
+      (row) =>
+        (row.id && row.id.toLowerCase().includes(q)) ||
+        (row.name && row.name.toLowerCase().includes(q)) ||
+        (row.location && row.location.toLowerCase().includes(q))
+    );
+  }, [nodesTableData, mapNodesSearch]);
+
+  const sortedNodesTableData = useMemo(() => {
+    const { column, direction } = mapTableSort;
+    return [...filteredNodesTableData].sort((a, b) => {
+      let cmp = 0;
+      if (column === "node") cmp = String(a.name || a.id).localeCompare(String(b.name || b.id));
+      else if (column === "location") cmp = String(a.location || "").localeCompare(String(b.location || ""));
+      else if (column === "coordinates") {
+        const va = a.lat != null && a.lng != null ? `${a.lat},${a.lng}` : "";
+        const vb = b.lat != null && b.lng != null ? `${b.lat},${b.lng}` : "";
+        cmp = va.localeCompare(vb);
+      } else if (column === "lastTest") cmp = (a.lastTestTimestamp ?? 0) - (b.lastTestTimestamp ?? 0);
+      else if (column === "sensorStatus") {
+        const order = { success: 0, warning: 1, error: 2, null: 3 };
+        const oa = order[a.resultStatus ?? "null"] ?? 3;
+        const ob = order[b.resultStatus ?? "null"] ?? 3;
+        cmp = oa - ob;
+      }
+      return direction === "asc" ? cmp : -cmp;
+    });
+  }, [filteredNodesTableData, mapTableSort]);
+
+  const mapNodesTotal = sortedNodesTableData.length;
+  const mapNodesTotalPages = Math.max(1, Math.ceil(mapNodesTotal / MAP_NODES_PAGE_SIZE));
+  const mapNodesPageClamped = Math.min(mapNodesPage, mapNodesTotalPages);
+
+  useEffect(() => {
+    if (mapNodesPage > mapNodesTotalPages) setMapNodesPage(Math.max(1, mapNodesTotalPages));
+  }, [mapNodesTotalPages, mapNodesPage]);
+
+  useEffect(() => {
+    setMapNodesPage(1);
+  }, [mapNodesSearch]);
+
+  const paginatedNodesTableData = useMemo(
+    () =>
+      sortedNodesTableData.slice(
+        (mapNodesPageClamped - 1) * MAP_NODES_PAGE_SIZE,
+        mapNodesPageClamped * MAP_NODES_PAGE_SIZE
+      ),
+    [sortedNodesTableData, mapNodesPageClamped]
+  );
+
+  if (!nodesLoaded) {
+    return (
+      <div className="map-page">
+        <PageLoader />
+      </div>
+    );
+  }
+
+  const goToMapNodesPage = (page) => {
+    const p = Math.max(1, Math.min(page, mapNodesTotalPages));
+    setMapNodesPage(p);
+  };
 
   return (
     <div className="map-page">
@@ -270,24 +273,97 @@ export default function Map() {
       </section>
 
       <section className="card map-nodes-card">
-        <header className="section-header">
+        <header className="section-header map-nodes-card__header">
           <h2 className="card__title">All Nodes — Location &amp; Sensor Status</h2>
+          <input
+            type="search"
+            className="map-nodes-search"
+            placeholder="Search nodes…"
+            value={mapNodesSearch}
+            onChange={(e) => setMapNodesSearch(e.target.value)}
+            aria-label="Search nodes"
+          />
         </header>
         <div className="map-nodes-card__body">
           <div className="map-nodes-table-wrap">
             <table className="map-nodes-table" role="table">
               <thead>
                 <tr>
-                  <th>Node</th>
-                  <th>Location</th>
-                  <th>Coordinates</th>
-                  <th>Last test</th>
-                  <th>Sensor status</th>
+                  <th>
+                    <button
+                      type="button"
+                      className={`map-th-btn ${mapTableSort.column === "node" ? "map-th-btn--active" : ""}`}
+                      onClick={() =>
+                        setMapTableSort((s) => ({
+                          column: "node",
+                          direction: s.column === "node" && s.direction === "asc" ? "desc" : "asc",
+                        }))
+                      }
+                    >
+                      Node {mapTableSort.column === "node" && (mapTableSort.direction === "asc" ? "↑" : "↓")}
+                    </button>
+                  </th>
+                  <th>
+                    <button
+                      type="button"
+                      className={`map-th-btn ${mapTableSort.column === "location" ? "map-th-btn--active" : ""}`}
+                      onClick={() =>
+                        setMapTableSort((s) => ({
+                          column: "location",
+                          direction: s.column === "location" && s.direction === "asc" ? "desc" : "asc",
+                        }))
+                      }
+                    >
+                      Location {mapTableSort.column === "location" && (mapTableSort.direction === "asc" ? "↑" : "↓")}
+                    </button>
+                  </th>
+                  <th>
+                    <button
+                      type="button"
+                      className={`map-th-btn ${mapTableSort.column === "coordinates" ? "map-th-btn--active" : ""}`}
+                      onClick={() =>
+                        setMapTableSort((s) => ({
+                          column: "coordinates",
+                          direction: s.column === "coordinates" && s.direction === "asc" ? "desc" : "asc",
+                        }))
+                      }
+                    >
+                      Coordinates {mapTableSort.column === "coordinates" && (mapTableSort.direction === "asc" ? "↑" : "↓")}
+                    </button>
+                  </th>
+                  <th>
+                    <button
+                      type="button"
+                      className={`map-th-btn ${mapTableSort.column === "lastTest" ? "map-th-btn--active" : ""}`}
+                      onClick={() =>
+                        setMapTableSort((s) => ({
+                          column: "lastTest",
+                          direction: s.column === "lastTest" && s.direction === "asc" ? "desc" : "asc",
+                        }))
+                      }
+                    >
+                      Last test {mapTableSort.column === "lastTest" && (mapTableSort.direction === "asc" ? "↑" : "↓")}
+                    </button>
+                  </th>
+                  <th>
+                    <button
+                      type="button"
+                      className={`map-th-btn ${mapTableSort.column === "sensorStatus" ? "map-th-btn--active" : ""}`}
+                      onClick={() =>
+                        setMapTableSort((s) => ({
+                          column: "sensorStatus",
+                          direction: s.column === "sensorStatus" && s.direction === "asc" ? "desc" : "asc",
+                        }))
+                      }
+                    >
+                      Sensor status {mapTableSort.column === "sensorStatus" && (mapTableSort.direction === "asc" ? "↑" : "↓")}
+                    </button>
+                  </th>
                   <th aria-label="Actions" />
                 </tr>
               </thead>
               <tbody>
-                {nodesTableData.map((row) => (
+                {paginatedNodesTableData.map((row) => (
                   <tr key={row.id}>
                     <td>
                       <span className="map-nodes-table__node-name">{row.name}</span>
@@ -323,13 +399,45 @@ export default function Map() {
               </tbody>
             </table>
           </div>
+          {mapNodesTotalPages > 1 && (
+            <div className="map-nodes-pagination">
+              <span className="map-nodes-pagination__info">
+                Page {mapNodesPageClamped} of {mapNodesTotalPages}
+                {mapNodesTotal > 0 && (
+                  <span className="map-nodes-pagination__count">
+                    {" "}({mapNodesTotal} node{mapNodesTotal !== 1 ? "s" : ""})
+                  </span>
+                )}
+              </span>
+              <div className="map-nodes-pagination__btns">
+                <button
+                  type="button"
+                  className="map-nodes-pagination__btn"
+                  onClick={() => goToMapNodesPage(mapNodesPageClamped - 1)}
+                  disabled={mapNodesPageClamped <= 1}
+                  aria-label="Previous page"
+                >
+                  Previous
+                </button>
+                <button
+                  type="button"
+                  className="map-nodes-pagination__btn"
+                  onClick={() => goToMapNodesPage(mapNodesPageClamped + 1)}
+                  disabled={mapNodesPageClamped >= mapNodesTotalPages}
+                  aria-label="Next page"
+                >
+                  Next
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </section>
 
-      {isSensorTestModalOpen && (
+      {sensorTest.isOpen && createPortal(
         <div
           className="map-modal-overlay"
-          onClick={() => setIsSensorTestModalOpen(false)}
+          onClick={sensorTest.close}
           role="presentation"
         >
           <div
@@ -344,38 +452,38 @@ export default function Map() {
               <button
                 type="button"
                 className="ghost-btn"
-                onClick={() => setIsSensorTestModalOpen(false)}
+                onClick={sensorTest.close}
                 aria-label="Close"
               >
                 ×
               </button>
             </header>
             <div className="sensor-test-modal-body">
-              {isTestingSensor ? (
+              {sensorTest.isTesting ? (
                 <div className="sensor-test-loading">
                   <span className="sensor-test-loading-icon">⚙️</span>
                   <p>Testing sensors...</p>
                 </div>
-              ) : sensorTestResults ? (
+              ) : sensorTest.results ? (
                 <>
                   <div
-                    className={`sensor-test-summary sensor-test-summary--${sensorTestResults.status}`}
+                    className={`sensor-test-summary sensor-test-summary--${sensorTest.results.status}`}
                   >
                     <span className="sensor-test-summary-icon">
-                      {sensorTestResults.status === "success"
+                      {sensorTest.results.status === "success"
                         ? "✅"
-                        : sensorTestResults.status === "warning"
+                        : sensorTest.results.status === "warning"
                         ? "⚠️"
                         : "❌"}
                     </span>
-                    <p className="sensor-test-summary-message">{sensorTestResults.message}</p>
+                    <p className="sensor-test-summary-message">{sensorTest.results.message}</p>
                     <p className="sensor-test-summary-time">
-                      {new Date(sensorTestResults.timestamp).toLocaleString()}
+                      {new Date(sensorTest.results.timestamp).toLocaleString()}
                     </p>
                   </div>
                   <div className="sensor-test-list">
                     <h3>Sensor Status</h3>
-                    {sensorTestResults.sensors?.map((s, i) => (
+                    {sensorTest.results.sensors?.map((s, i) => (
                       <div key={i} className="sensor-test-item">
                         <div>
                           <p className="sensor-test-item-name">{s.name}</p>
@@ -393,7 +501,7 @@ export default function Map() {
                   <button
                     type="button"
                     className="ghost-btn sensor-test-run-again"
-                    onClick={() => handleSensorTest(sensorTestResults.nodeId ?? nodeIdForMarker, true)}
+                    onClick={() => handleSensorTest(sensorTest.results.nodeId ?? nodeIdForMarker, true)}
                   >
                     Run Test Again
                   </button>
@@ -401,7 +509,8 @@ export default function Map() {
               ) : null}
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
+import { createPortal } from "react-dom";
 import PageDateWithStatus from "../components/PageDateWithStatus";
 import { isSupabaseEnabled } from "../lib/supabaseClient";
 import { getNodes, loadNodes, saveNodes } from "../utils/nodesStorage";
-import api from "../services/api";
+import { PageLoader } from "../components/LoadingSkeleton";
 import "./Nodes.css";
 
 const emptyNode = () => ({
@@ -11,6 +12,7 @@ const emptyNode = () => ({
   location: "",
   status: "online",
   coords: "",
+  lastMaintenance: "",
 });
 
 /** Get next node ID from existing nodes (e.g. N1, N2 → N3 or N-001 → N3). */
@@ -38,38 +40,22 @@ function parseCoordinates(str) {
   return { lat, lng };
 }
 
+const NODES_PAGE_SIZE = 8;
+
 export default function Nodes() {
   const [nodes, setNodes] = useState([]);
+  const [nodesPage, setNodesPage] = useState(1);
   const [newNode, setNewNode] = useState(emptyNode);
   const [editingId, setEditingId] = useState(null);
   const [editForm, setEditForm] = useState(emptyNode);
   const [showAddModal, setShowAddModal] = useState(false);
-  const [showDeactivated, setShowDeactivated] = useState(false);
+  const [nodesSearch, setNodesSearch] = useState("");
   const [lastUpdated] = useState(() => new Date());
+  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    if (!isSupabaseEnabled()) {
-      loadNodes().then(() => setNodes(getNodes()));
-      return;
-    }
-    if (showDeactivated) {
-      api.getNodesFromSupabase(true).then((fromDb) => {
-        const list = Array.isArray(fromDb) ? fromDb.map((r) => ({
-          id: r.id,
-          node_code: r.node_code ?? r.id,
-          name: r.name,
-          location: r.name ?? "",
-          status: r.status ?? "offline",
-          lat: r.lat,
-          lng: r.lng,
-          deactivated_at: r.deactivated_at,
-        })) : [];
-        setNodes(list);
-      }).catch(() => setNodes(getNodes()));
-    } else {
-      loadNodes().then(() => setNodes(getNodes()));
-    }
-  }, [showDeactivated]);
+    loadNodes().then(() => setNodes(getNodes())).finally(() => setIsLoading(false));
+  }, []);
   useEffect(() => {
     const onFocus = () => loadNodes().then(() => setNodes(getNodes()));
     window.addEventListener("focus", onFocus);
@@ -89,22 +75,56 @@ export default function Nodes() {
   const nextNodeId = getNextNodeId(nodes);
   const addFormId = newNode.id.trim() || nextNodeId;
 
+  const filteredNodes = useMemo(() => {
+    const q = nodesSearch.trim().toLowerCase();
+    if (!q) return nodes;
+    return nodes.filter(
+      (n) =>
+        (n.id && n.id.toLowerCase().includes(q)) ||
+        (n.name && n.name.toLowerCase().includes(q)) ||
+        (n.location && n.location.toLowerCase().includes(q))
+    );
+  }, [nodes, nodesSearch]);
+
+  const nodesTotalPages = Math.max(1, Math.ceil(filteredNodes.length / NODES_PAGE_SIZE));
+  const nodesPageClamped = Math.min(nodesPage, nodesTotalPages);
+  const paginatedNodes = filteredNodes.slice(
+    (nodesPageClamped - 1) * NODES_PAGE_SIZE,
+    nodesPageClamped * NODES_PAGE_SIZE
+  );
+
+  useEffect(() => {
+    if (nodesPage > nodesTotalPages) setNodesPage(Math.max(1, nodesTotalPages));
+  }, [nodesTotalPages, nodesPage]);
+
+  useEffect(() => {
+    setNodesPage(1);
+  }, [nodesSearch]);
+
+  if (isLoading) {
+    return (
+      <div className="nodes-page">
+        <PageLoader />
+      </div>
+    );
+  }
+
   const handleAdd = (e) => {
     e.preventDefault();
     const id = addFormId;
     const name = newNode.name.trim();
     const location = newNode.location.trim();
     const parsed = parseCoordinates(newNode.coords);
-    if (!name || !parsed) return;
+    if (!name || !location || !parsed) return;
     if (nodes.some((n) => n.id === id)) return; // avoid duplicate ID
     const node = {
       id,
-      node_code: id,
       name,
-      location: location || name,
+      location,
       status: newNode.status || "online",
       lat: parsed.lat,
       lng: parsed.lng,
+      lastMaintenance: newNode.lastMaintenance ? new Date(newNode.lastMaintenance).toISOString() : null,
     };
     const next = [...nodes, node];
     setNodes(next);
@@ -117,12 +137,14 @@ export default function Nodes() {
     setEditingId(node.id);
     const lat = node.lat != null ? node.lat : "";
     const lng = node.lng != null ? node.lng : "";
+    const lastM = node.lastMaintenance ?? node.last_maintenance;
     setEditForm({
       id: node.id,
       name: node.name,
       location: node.location,
       status: node.status || "online",
       coords: lat !== "" && lng !== "" ? `${lat}, ${lng}` : "",
+      lastMaintenance: lastM ? (typeof lastM === "string" ? lastM.slice(0, 10) : new Date(lastM).toISOString().slice(0, 10)) : "",
     });
   };
 
@@ -140,6 +162,7 @@ export default function Nodes() {
       status: editForm.status || "online",
       lat: parsed.lat,
       lng: parsed.lng,
+      lastMaintenance: editForm.lastMaintenance ? new Date(editForm.lastMaintenance + "T00:00:00Z").toISOString() : null,
     };
     const next = nodes.map((n) => (n.id === editingId ? node : n));
     setNodes(next);
@@ -153,22 +176,7 @@ export default function Nodes() {
     setEditForm(emptyNode());
   };
 
-  const handleDelete = async (nodeId) => {
-    if (isSupabaseEnabled()) {
-      try {
-        await api.deactivateNode(nodeId);
-        await loadNodes();
-        setNodes(getNodes());
-        if (editingId === nodeId) {
-          setEditingId(null);
-          setEditForm(emptyNode());
-        }
-      } catch (e) {
-        console.error("Deactivate failed", e);
-        alert(e?.message || "Failed to deactivate node");
-      }
-      return;
-    }
+  const handleDelete = (nodeId) => {
     const next = nodes.filter((n) => n.id !== nodeId);
     setNodes(next);
     saveNodes(next);
@@ -178,28 +186,18 @@ export default function Nodes() {
     }
   };
 
-  const handleReactivate = async (nodeId) => {
-    if (!isSupabaseEnabled()) return;
-    try {
-      await api.reactivateNode(nodeId);
-      await loadNodes();
-      setNodes(getNodes());
-    } catch (e) {
-      console.error("Reactivate failed", e);
-      alert(e?.message || "Failed to reactivate node");
-    }
-  };
-
   return (
     <div className="nodes-page">
-      <header className="page-header">
+      <header className="page-header nodes-page-header">
         <div>
           <h1 className="page-title">Nodes</h1>
           {isSupabaseEnabled() && (
-            <p className="nodes-supabase-badge">Synced with Supabase (public.nodes)</p>
+            <p className="nodes-supabase-badge">Synced with database</p>
           )}
         </div>
-        <PageDateWithStatus lastUpdated={lastUpdated} className="page-meta" />
+        <div className="nodes-header-actions">
+          <PageDateWithStatus lastUpdated={lastUpdated} className="page-meta" />
+        </div>
       </header>
 
       {/* Mobile: Add node button (visible only on small screens) */}
@@ -283,7 +281,7 @@ export default function Nodes() {
                     type="text"
                     inputMode="decimal"
                     className="nodes-input nodes-input-coords"
-                    placeholder="e.g. 8.52, 124.70  (paste from Google Maps: right‑click map → coordinates)"
+                    placeholder="e.g. 8.52, 124.70"
                     value={newNode.coords}
                     onChange={(e) => setNewNode((n) => ({ ...n, coords: e.target.value }))}
                     aria-label="Coordinates"
@@ -297,25 +295,24 @@ export default function Nodes() {
         {/* All nodes list */}
         <section className="nodes-section card nodes-list-card">
           <div className="card__header">
-            <h2 className="card__title">All nodes</h2>
-            <p className="card__desc">
-              Edit or delete any node. With Supabase, Delete deactivates the node (data kept for reports).
-            </p>
-            {isSupabaseEnabled() && (
-              <label className="nodes-show-deactivated">
-                <input
-                  type="checkbox"
-                  checked={showDeactivated}
-                  onChange={(e) => setShowDeactivated(e.target.checked)}
-                  aria-label="Show deactivated nodes"
-                />
-                <span>Show deactivated</span>
-              </label>
-            )}
+            <div>
+              <h2 className="card__title">All nodes</h2>
+              <p className="card__desc">
+                Edit or delete any node. Changes appear on the Map and Dashboard.
+              </p>
+            </div>
+            <input
+              type="search"
+              className="nodes-search"
+              placeholder="Search nodes…"
+              value={nodesSearch}
+              onChange={(e) => setNodesSearch(e.target.value)}
+              aria-label="Search nodes"
+            />
           </div>
           <div className="card__body">
             <ul className="nodes-list">
-              {nodes.map((n) =>
+              {paginatedNodes.map((n) =>
                 editingId === n.id ? (
                   <li key={n.id} className="nodes-list-item nodes-list-item--editing">
                     <form className="nodes-edit-form" onSubmit={handleSaveEdit}>
@@ -375,6 +372,16 @@ export default function Nodes() {
                             aria-label="Coordinates"
                           />
                         </label>
+                        <label className="nodes-label">
+                          <span>Last maintenance</span>
+                          <input
+                            type="date"
+                            className="nodes-input"
+                            value={editForm.lastMaintenance}
+                            onChange={(e) => setEditForm((f) => ({ ...f, lastMaintenance: e.target.value }))}
+                            aria-label="Last maintenance date"
+                          />
+                        </label>
                       </div>
                       <div className="nodes-edit-form-actions">
                         <button type="button" className="nodes-btn nodes-btn--secondary" onClick={handleCancelEdit}>
@@ -387,58 +394,77 @@ export default function Nodes() {
                     </form>
                   </li>
                 ) : (
-                  <li key={n.id} className={`nodes-list-item ${n.deactivated_at ? "nodes-list-item--deactivated" : ""}`}>
+                  <li key={n.id} className="nodes-list-item">
                     <div className="nodes-list-item__info">
-                      <strong>{n.node_code ?? n.id}</strong> — {n.name} {n.location ? `(${n.location})` : ""}
+                      <strong>{n.id}</strong> — {n.name} ({n.location})
                       <span className="nodes-list-item__meta">
-                        {n.lat != null && n.lng != null ? `${n.lat}, ${n.lng} · ` : ""}{n.status}
-                        {n.deactivated_at && " · Deactivated"}
+                        {n.lat}, {n.lng} · {n.status}
+                        {n.lastMaintenance || n.last_maintenance
+                          ? ` · Last maintenance: ${new Date(n.lastMaintenance || n.last_maintenance).toLocaleDateString()}`
+                          : ""}
                       </span>
                     </div>
                     <div className="nodes-list-item__actions">
-                      {n.deactivated_at ? (
-                        <button
-                          type="button"
-                          className="nodes-btn nodes-btn--primary nodes-btn--small"
-                          onClick={() => handleReactivate(n.id)}
-                          aria-label={`Reactivate ${n.node_code ?? n.id}`}
-                        >
-                          Reactivate
-                        </button>
-                      ) : (
-                        <>
-                          <button
-                            type="button"
-                            className="nodes-btn nodes-btn--secondary nodes-btn--small"
-                            onClick={() => handleEdit(n)}
-                            aria-label={`Edit ${n.node_code ?? n.id}`}
-                          >
-                            Edit
-                          </button>
-                          <button
-                            type="button"
-                            className="nodes-btn nodes-btn--danger nodes-btn--small"
-                            onClick={() => handleDelete(n.id)}
-                            aria-label={`Delete ${n.node_code ?? n.id}`}
-                          >
-                            Delete
-                          </button>
-                        </>
-                      )}
+                      <button
+                        type="button"
+                        className="nodes-btn nodes-btn--secondary nodes-btn--small"
+                        onClick={() => handleEdit(n)}
+                        aria-label={`Edit ${n.id}`}
+                      >
+                        Edit
+                      </button>
+                      <button
+                        type="button"
+                        className="nodes-btn nodes-btn--danger nodes-btn--small"
+                        onClick={() => handleDelete(n.id)}
+                        aria-label={`Delete ${n.id}`}
+                      >
+                        Deactivate
+                      </button>
                     </div>
                   </li>
                 )
               )}
             </ul>
-            {nodes.length === 0 && (
-              <p className="nodes-empty">No nodes yet. Add one above to see it on the Map and Dashboard.</p>
+            {filteredNodes.length === 0 && (
+              <p className="nodes-empty">{nodes.length === 0 ? "No nodes yet." : "No nodes match your search."}</p>
+            )}
+            {filteredNodes.length > 0 && nodesTotalPages > 1 && (
+              <div className="nodes-pagination">
+                <span className="nodes-pagination__info">
+                  Page {nodesPageClamped} of {nodesTotalPages}
+                  <span className="nodes-pagination__count">
+                    {" "}({filteredNodes.length} node{filteredNodes.length !== 1 ? "s" : ""})
+                  </span>
+                </span>
+                <div className="nodes-pagination__btns">
+                  <button
+                    type="button"
+                    className="nodes-pagination__btn"
+                    onClick={() => setNodesPage((p) => Math.max(1, p - 1))}
+                    disabled={nodesPageClamped <= 1}
+                    aria-label="Previous page"
+                  >
+                    Previous
+                  </button>
+                  <button
+                    type="button"
+                    className="nodes-pagination__btn"
+                    onClick={() => setNodesPage((p) => Math.min(nodesTotalPages, p + 1))}
+                    disabled={nodesPageClamped >= nodesTotalPages}
+                    aria-label="Next page"
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
             )}
           </div>
         </section>
       </div>
 
       {/* Mobile: Add node modal */}
-      {showAddModal && (
+      {showAddModal && createPortal(
         <div
           className="nodes-add-modal-overlay"
           onClick={() => setShowAddModal(false)}
@@ -515,7 +541,7 @@ export default function Nodes() {
                     type="text"
                     inputMode="decimal"
                     className="nodes-input nodes-input-coords"
-                    placeholder="e.g. 8.52, 124.70  (paste from Google Maps: right‑click map → coordinates)"
+                    placeholder="e.g. 8.52, 124.70"
                     value={newNode.coords}
                     onChange={(e) => setNewNode((n) => ({ ...n, coords: e.target.value }))}
                     aria-label="Coordinates"
@@ -532,7 +558,8 @@ export default function Nodes() {
               </div>
             </form>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

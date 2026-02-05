@@ -1397,6 +1397,23 @@ body,
   box-shadow: 0 2px 8px rgba(40, 167, 69, 0.3);
 }
 
+/* Development phase notice (lower right) */
+.app-dev-notice {
+  position: fixed;
+  bottom: 12px;
+  right: 16px;
+  z-index: 999;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.35);
+  pointer-events: none;
+  user-select: none;
+}
+
+[data-theme="light"] .app-dev-notice {
+  color: rgba(0, 0, 0, 0.35);
+}
+
 /* Error Boundary */
 .error-boundary {
   display: flex;

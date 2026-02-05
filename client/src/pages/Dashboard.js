@@ -1,4 +1,5 @@
 import React, { useMemo, useState, useEffect, useRef, useCallback } from "react";
+import { createPortal } from "react-dom";
 import NodeSelector from "../components/dashboard/NodeSelector";
 import NodeStatus from "../components/dashboard/NodeStatus";
 import TodayCard from "../components/dashboard/TodayCard";
@@ -9,11 +10,21 @@ import AlertsSummaryCard from "../components/dashboard/AlertsSummaryCard";
 import PageDateWithStatus from "../components/PageDateWithStatus";
 import { calculateWQI, getWQIClass } from "../utils/wqiCalculator";
 import { buildAlertsForAllNodes } from "../utils/alertsData";
-import { exportToJSON, exportToCSV, formatAlertsForExport } from "../utils/exportData";
 import { getNodes, loadNodes } from "../utils/nodesStorage";
 import api from "../services/api";
+import { useSensorTest } from "../hooks/useSensorTest";
+import { applyCalibrationToReadings } from "../utils/calibration";
+import { PageLoader } from "../components/LoadingSkeleton";
 import "../pages/Map.css";
 import "./Dashboard.css";
+
+/** Severity order for sort: Critical (high) first, then Warning (medium), then Info (low/info). */
+function getSeverityOrder(severity) {
+  const s = (severity || "info").toLowerCase();
+  if (s === "high") return 0;
+  if (s === "medium") return 1;
+  return 2;
+}
 
 function formatDateShort(d) {
   if (!d) return "—";
@@ -27,44 +38,29 @@ function toDateStr(d) {
   return `${y}-${m}-${day}`;
 }
 
-/** Today's date (YYYY-MM-DD) in Philippines (Asia/Manila) for Supabase date filtering. */
-function getTodayInPhilippinesDateStr() {
-  return new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Manila" });
-}
-
-function getCollectionIntervalMinutes() {
-  try {
-    const s = localStorage.getItem("wqms_collection_interval_minutes");
-    if (s == null) return 15;
-    const v = JSON.parse(s);
-    const n = typeof v === "number" ? v : parseInt(v, 10);
-    if (Number.isNaN(n) || n < 1 || n > 120) return 15;
-    return n;
-  } catch {
-    return 15;
-  }
-}
-
 export default function Dashboard() {
   const [nodes, setNodes] = useState([]);
   const [selectedNodeId, setSelectedNodeId] = useState("");
   const [todayReadings, setTodayReadings] = useState([]);
   const [readingsByNode, setReadingsByNode] = useState({});
   const [readingsLoaded, setReadingsLoaded] = useState(false);
+  const [nodesLoaded, setNodesLoaded] = useState(false);
   const [lastUpdated, setLastUpdated] = useState(() => new Date());
   const [isLoadingAlerts] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [isSensorTestModalOpen, setIsSensorTestModalOpen] = useState(false);
-  const [sensorTestResults, setSensorTestResults] = useState(null);
-  const [isTestingSensor, setIsTestingSensor] = useState(false);
   const autoRefreshIntervalRef = useRef(null);
 
+  const getReadingsForNode = useCallback((nodeId) => readingsByNode[nodeId] || {}, [readingsByNode]);
+  const sensorTest = useSensorTest(getReadingsForNode);
+
   useEffect(() => {
-    loadNodes().then(() => {
-      const list = getNodes();
-      setNodes(list);
-      setSelectedNodeId((id) => (id && list.some((n) => n.id === id) ? id : list[0]?.id ?? ""));
-    });
+    loadNodes()
+      .then(() => {
+        const list = getNodes();
+        setNodes(list);
+        setSelectedNodeId((id) => (id && list.some((n) => n.id === id) ? id : list[0]?.id ?? ""));
+      })
+      .finally(() => setNodesLoaded(true));
   }, []);
   useEffect(() => {
     const onFocus = () => loadNodes().then(() => setNodes(getNodes()));
@@ -72,15 +68,16 @@ export default function Dashboard() {
     return () => window.removeEventListener("focus", onFocus);
   }, []);
 
-  // All data from Supabase/API only; no dummy/test/mock data. "Today" = Philippines (Asia/Manila) for Supabase.
+  // All data from Supabase/API only; no dummy/test/mock data.
   useEffect(() => {
     setReadingsLoaded(false);
-    const today = getTodayInPhilippinesDateStr();
+    const today = toDateStr(new Date());
     api.getReadings({ startDate: today, endDate: today, limit: 200 })
       .then((rows) => {
-        setTodayReadings(Array.isArray(rows) ? rows : []);
+        const list = applyCalibrationToReadings(Array.isArray(rows) ? rows : []);
+        setTodayReadings(list);
         const byNode = {};
-        (Array.isArray(rows) ? rows : []).forEach((r) => {
+        list.forEach((r) => {
           const nid = r.node_id || r.nodeId || "1";
           if (!byNode[nid] || new Date(r.timestamp) > new Date(byNode[nid].timestamp)) {
             byNode[nid] = {
@@ -93,6 +90,7 @@ export default function Dashboard() {
               do: r.dissolved_oxygen,
               nh3: r.nh3,
               NH3: r.nh3,
+              flowRate: r.flow_rate ?? r.flowRate,
             };
           }
         });
@@ -105,7 +103,34 @@ export default function Dashboard() {
       .finally(() => setReadingsLoaded(true));
   }, [lastUpdated]);
 
-  const alerts = useMemo(() => buildAlertsForAllNodes(nodes, readingsByNode), [nodes, readingsByNode]);
+  const builtAlerts = useMemo(() => buildAlertsForAllNodes(nodes, readingsByNode), [nodes, readingsByNode]);
+
+  const sensorTestAlerts = useMemo(() => {
+    const res = sensorTest.results;
+    if (!res || res.status === "success") return [];
+    const nodeName = nodes.find((n) => n.id === res.nodeId)?.name || res.nodeId || "Unknown node";
+    const severity = res.status === "error" ? "high" : "medium";
+    return [
+      {
+        id: `sensor-test-${res.nodeId}-${res.timestamp || Date.now()}`,
+        nodeId: res.nodeId,
+        nodeName,
+        type: "sensor_test",
+        title: "Sensor test failed",
+        detail: res.message || "One or more sensors have no data or failed.",
+        severity,
+        timestamp: typeof res.timestamp === "string" ? new Date(res.timestamp).getTime() : Date.now(),
+        createdAt: res.timestamp || new Date().toISOString(),
+      },
+    ];
+  }, [sensorTest.results, nodes]);
+
+  const alerts = useMemo(() => {
+    const combined = [...builtAlerts, ...sensorTestAlerts];
+    return combined.sort(
+      (a, b) => getSeverityOrder(a.severity) - getSeverityOrder(b.severity) || (b.timestamp || 0) - (a.timestamp || 0)
+    );
+  }, [builtAlerts, sensorTestAlerts]);
 
   const selectedNode = useMemo(
     () => nodes.find((n) => n.id === selectedNodeId) || nodes[0],
@@ -124,21 +149,23 @@ export default function Dashboard() {
   handleRefreshRef.current = handleRefresh;
 
   useEffect(() => {
-    const minutes = getCollectionIntervalMinutes();
-    const intervalMs = minutes * 60 * 1000;
+    let defaultIntervalMinutes = 15;
+    try {
+      const stored = localStorage.getItem("wqms_data_collection");
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        const n = parseInt(parsed.defaultIntervalMinutes, 10);
+        if (!isNaN(n) && n >= 1 && n <= 120) defaultIntervalMinutes = n;
+      }
+    } catch {
+      // use 15
+    }
+    const intervalMs = defaultIntervalMinutes * 60 * 1000;
     autoRefreshIntervalRef.current = setInterval(() => handleRefreshRef.current(), intervalMs);
     return () => {
       if (autoRefreshIntervalRef.current) clearInterval(autoRefreshIntervalRef.current);
     };
   }, []);
-
-  const handleExportJson = (data) => {
-    exportToJSON(formatAlertsForExport(data || alerts), "wqms-alerts");
-  };
-
-  const handleExportCsv = (data) => {
-    exportToCSV(formatAlertsForExport(data || alerts), "wqms-alerts");
-  };
 
   /** Today's data from API/Supabase only. One point per reading for selected node. */
   const todayData = useMemo(() => {
@@ -234,107 +261,22 @@ export default function Dashboard() {
     scales: { y: { beginAtZero: true } },
   }), []);
 
-  /** Latest sensor reading timestamp for the selected node (for Live Chart header). */
-  const lastSensorUpdate = useMemo(() => {
-    const nodeId = selectedNode?.id || null;
-    const list = (todayReadings || []).filter((r) => (r.node_id || r.nodeId) === nodeId);
-    if (list.length === 0) return null;
-    const latest = list.reduce((a, r) => {
-      const t = new Date(r.timestamp).getTime();
-      return t > (a ? new Date(a.timestamp).getTime() : 0) ? r : a;
-    }, null);
-    return latest ? latest.timestamp : null;
-  }, [selectedNode?.id, todayReadings]);
-
-  const getStoredTestResults = useCallback((nodeId) => {
-    try {
-      const key = `sensorTest_${nodeId}`;
-      const stored = localStorage.getItem(key);
-      if (stored) {
-        const data = JSON.parse(stored);
-        const testDate = new Date(data.date);
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        testDate.setHours(0, 0, 0, 0);
-        if (testDate.getTime() === today.getTime()) return data.results;
-      }
-    } catch (e) {
-      console.warn("getStoredTestResults", e);
-    }
-    return null;
-  }, []);
-
-  const storeTestResults = useCallback((nodeId, results) => {
-    try {
-      localStorage.setItem(
-        `sensorTest_${nodeId}`,
-        JSON.stringify({ date: new Date().toISOString(), results })
-      );
-    } catch (e) {
-      console.warn("storeTestResults", e);
-    }
-  }, []);
-
-  /** Sensor test from real data only (todayStats from API/Supabase). No mock values. */
-  const buildSensorTestFromReadings = useCallback((nodeId) => {
-    const fmt = (v, decimals, unit) =>
-      v != null && !isNaN(v) ? `${Number(v).toFixed(decimals)}${unit}` : "N/A";
-    const s = todayStats || {};
-    const sensors = [
-      { name: "Temperature Sensor", value: fmt(s.temperature?.avg, 1, "°C") },
-      { name: "Turbidity Sensor", value: fmt(s.turbidity?.avg, 1, " NTU") },
-      { name: "pH Sensor", value: fmt(s.ph?.avg, 1, "") },
-      { name: "Dissolved Oxygen Sensor", value: fmt(s.dissolvedOxygen?.avg, 1, " mg/L") },
-      { name: "NH₃ Sensor", value: fmt(s.nh3?.avg, 2, " mg/L") },
-    ].map((sen) => {
-      const hasData = sen.value !== "N/A";
-      return {
-        name: sen.name,
-        status: hasData ? "pass" : "fail",
-        value: sen.value,
-        responseTime: hasData ? "—" : "No data",
-      };
-    });
-    const failCount = sensors.filter((x) => x.status === "fail").length;
-    let status = "success";
-    let message = "Sensor test completed successfully";
-    if (failCount === sensors.length) {
-      status = "error";
-      message = "No sensor data available. Data comes from MQTT or Supabase.";
-    } else if (failCount >= 2) {
-      status = "error";
-      message = `${failCount} sensors have no data`;
-    } else if (failCount === 1) {
-      status = "warning";
-      message = "Sensor test completed with warnings - some data unavailable";
-    }
-    return { nodeId, status, message, timestamp: new Date().toISOString(), sensors };
-  }, [todayStats]);
+  const isPageLoading = !nodesLoaded || !readingsLoaded;
 
   const handleSensorTest = useCallback(
     (nodeId, forceRun = false) => {
-      const id = nodeId ?? selectedNode?.id;
-      if (!id) return;
-      if (!forceRun) {
-        const stored = getStoredTestResults(id);
-        if (stored) {
-          setSensorTestResults(stored);
-          setIsSensorTestModalOpen(true);
-          setIsTestingSensor(false);
-          return;
-        }
-      }
-      setIsTestingSensor(true);
-      setIsSensorTestModalOpen(true);
-      setTimeout(() => {
-        const results = buildSensorTestFromReadings(id);
-        setSensorTestResults(results);
-        storeTestResults(id, results);
-        setIsTestingSensor(false);
-      }, 500);
+      sensorTest.runTest(nodeId ?? selectedNode?.id, forceRun);
     },
-    [selectedNode?.id, getStoredTestResults, buildSensorTestFromReadings, storeTestResults]
+    [selectedNode?.id, sensorTest]
   );
+
+  if (isPageLoading) {
+    return (
+      <div className="dash">
+        <PageLoader />
+      </div>
+    );
+  }
 
   return (
     <div className="dash">
@@ -362,34 +304,29 @@ export default function Dashboard() {
           <WqiCard value={wqiValue} label={wqiLabel} />
         </section>
         <section className="dash__cell dash__cell--live">
-          <LiveChart todayData={todayData} todayChartOptions={todayChartOptions} lastSensorUpdate={lastSensorUpdate} />
+          <LiveChart todayData={todayData} todayChartOptions={todayChartOptions} />
         </section>
         <section className="dash__cell dash__cell--mini">
           <MiniMapCard
             nodes={nodes}
             selectedNode={selectedNode}
             onTestSensor={handleSensorTest}
-            isTestingSensor={isTestingSensor}
-            sensorTestResults={sensorTestResults}
+            isTestingSensor={sensorTest.isTesting}
+            sensorTestResults={sensorTest.results}
           />
         </section>
         <section className="dash__cell dash__cell--alerts">
           <AlertsSummaryCard
             alerts={alerts}
-            recentAlerts={alerts.slice(0, 5)}
             isLoadingAlerts={isLoadingAlerts}
-            lastUpdated={lastUpdated}
-            onExportJson={handleExportJson}
-            onExportCsv={handleExportCsv}
-            formatDateShort={formatDateShort}
           />
         </section>
       </div>
 
-      {isSensorTestModalOpen && (
+      {sensorTest.isOpen && createPortal(
         <div
           className="map-modal-overlay"
-          onClick={() => setIsSensorTestModalOpen(false)}
+          onClick={sensorTest.close}
           role="presentation"
         >
           <div
@@ -404,38 +341,38 @@ export default function Dashboard() {
               <button
                 type="button"
                 className="ghost-btn"
-                onClick={() => setIsSensorTestModalOpen(false)}
+                onClick={sensorTest.close}
                 aria-label="Close"
               >
                 ×
               </button>
             </header>
             <div className="sensor-test-modal-body">
-              {isTestingSensor ? (
+              {sensorTest.isTesting ? (
                 <div className="sensor-test-loading">
                   <span className="sensor-test-loading-icon">⚙️</span>
                   <p>Testing sensors...</p>
                 </div>
-              ) : sensorTestResults ? (
+              ) : sensorTest.results ? (
                 <>
                   <div
-                    className={`sensor-test-summary sensor-test-summary--${sensorTestResults.status}`}
+                    className={`sensor-test-summary sensor-test-summary--${sensorTest.results.status}`}
                   >
                     <span className="sensor-test-summary-icon">
-                      {sensorTestResults.status === "success"
+                      {sensorTest.results.status === "success"
                         ? "✅"
-                        : sensorTestResults.status === "warning"
+                        : sensorTest.results.status === "warning"
                         ? "⚠️"
                         : "❌"}
                     </span>
-                    <p className="sensor-test-summary-message">{sensorTestResults.message}</p>
+                    <p className="sensor-test-summary-message">{sensorTest.results.message}</p>
                     <p className="sensor-test-summary-time">
-                      {new Date(sensorTestResults.timestamp).toLocaleString()}
+                      {new Date(sensorTest.results.timestamp).toLocaleString()}
                     </p>
                   </div>
                   <div className="sensor-test-list">
                     <h3>Sensor Status</h3>
-                    {sensorTestResults.sensors?.map((s, i) => (
+                    {sensorTest.results.sensors?.map((s, i) => (
                       <div key={i} className="sensor-test-item">
                         <div>
                           <p className="sensor-test-item-name">{s.name}</p>
@@ -453,7 +390,7 @@ export default function Dashboard() {
                   <button
                     type="button"
                     className="ghost-btn sensor-test-run-again"
-                    onClick={() => handleSensorTest(sensorTestResults.nodeId, true)}
+                    onClick={() => handleSensorTest(sensorTest.results.nodeId, true)}
                   >
                     Run Test Again
                   </button>
@@ -461,7 +398,8 @@ export default function Dashboard() {
               ) : null}
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

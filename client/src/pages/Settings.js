@@ -27,11 +27,12 @@ const DEFAULT_CALIBRATION = {
   flowRateOffset: 0,
 };
 
-const DEFAULT_COLLECTION_INTERVAL_MINUTES = 15;
-const COLLECTION_INTERVAL_MIN_LIMIT = 1;
-const COLLECTION_INTERVAL_MAX_LIMIT = 120;
-const DEFAULT_COLLECTION_INTERVAL_MIN = 1;
-const DEFAULT_COLLECTION_INTERVAL_MAX = 15;
+const DEFAULT_DATA_COLLECTION = {
+  defaultIntervalMinutes: 15,
+  minIntervalMinutes: 1,
+  maxIntervalMinutes: 15,
+  readingsLimit: 500,
+};
 
 function loadFromStorage(key, fallback) {
   try {
@@ -61,31 +62,12 @@ export default function Settings() {
     ...DEFAULT_CALIBRATION,
     ...loadFromStorage("wqms_calibration", {}),
   }));
-  const [collectionIntervalMinutes, setCollectionIntervalMinutes] = useState(() => {
-    const v = loadFromStorage("wqms_collection_interval_minutes", DEFAULT_COLLECTION_INTERVAL_MINUTES);
-    const n = typeof v === "number" ? v : parseInt(v, 10);
-    if (isNaN(n) || n < COLLECTION_INTERVAL_MIN_LIMIT || n > COLLECTION_INTERVAL_MAX_LIMIT) {
-      return DEFAULT_COLLECTION_INTERVAL_MINUTES;
-    }
-    return n;
-  });
-  const [collectionIntervalMin, setCollectionIntervalMin] = useState(() => {
-    const v = loadFromStorage("wqms_collection_interval_min_minutes", DEFAULT_COLLECTION_INTERVAL_MIN);
-    const n = typeof v === "number" ? v : parseInt(v, 10);
-    if (isNaN(n) || n < COLLECTION_INTERVAL_MIN_LIMIT || n > COLLECTION_INTERVAL_MAX_LIMIT) {
-      return DEFAULT_COLLECTION_INTERVAL_MIN;
-    }
-    return n;
-  });
-  const [collectionIntervalMax, setCollectionIntervalMax] = useState(() => {
-    const v = loadFromStorage("wqms_collection_interval_max_minutes", DEFAULT_COLLECTION_INTERVAL_MAX);
-    const n = typeof v === "number" ? v : parseInt(v, 10);
-    if (isNaN(n) || n < COLLECTION_INTERVAL_MIN_LIMIT || n > COLLECTION_INTERVAL_MAX_LIMIT) {
-      return DEFAULT_COLLECTION_INTERVAL_MAX;
-    }
-    return n;
-  });
+  const [dataCollection, setDataCollection] = useState(() => ({
+    ...DEFAULT_DATA_COLLECTION,
+    ...loadFromStorage("wqms_data_collection", {}),
+  }));
   const [saveFeedback, setSaveFeedback] = useState(null);
+  const [activeTab, setActiveTab] = useState("system"); // "system" | "preferences"
 
   useEffect(() => {
     document.documentElement.setAttribute("data-font-size", fontSize);
@@ -110,38 +92,19 @@ export default function Settings() {
     }
   };
 
-  const updateCollectionInterval = (value) => {
+  const updateDataCollection = (key, value) => {
     const n = parseInt(value, 10);
-    if (!isNaN(n) && n >= COLLECTION_INTERVAL_MIN_LIMIT && n <= COLLECTION_INTERVAL_MAX_LIMIT) {
-      setCollectionIntervalMinutes(n);
-      saveToStorage("wqms_collection_interval_minutes", n);
-    }
-  };
-
-  const updateCollectionIntervalMin = (value) => {
-    const n = parseInt(value, 10);
-    if (!isNaN(n) && n >= COLLECTION_INTERVAL_MIN_LIMIT && n <= COLLECTION_INTERVAL_MAX_LIMIT) {
-      const newMin = Math.min(n, collectionIntervalMax);
-      setCollectionIntervalMin(newMin);
-      saveToStorage("wqms_collection_interval_min_minutes", newMin);
-    }
-  };
-
-  const updateCollectionIntervalMax = (value) => {
-    const n = parseInt(value, 10);
-    if (!isNaN(n) && n >= COLLECTION_INTERVAL_MIN_LIMIT && n <= COLLECTION_INTERVAL_MAX_LIMIT) {
-      const newMax = Math.max(n, collectionIntervalMin);
-      setCollectionIntervalMax(newMax);
-      saveToStorage("wqms_collection_interval_max_minutes", newMax);
+    if (!isNaN(n) && n >= 0) {
+      const next = { ...dataCollection, [key]: n };
+      setDataCollection(next);
+      saveToStorage("wqms_data_collection", next);
     }
   };
 
   const handleSaveAll = () => {
     saveToStorage("wqms_thresholds", thresholds);
     saveToStorage("wqms_calibration", calibration);
-    saveToStorage("wqms_collection_interval_minutes", collectionIntervalMinutes);
-    saveToStorage("wqms_collection_interval_min_minutes", collectionIntervalMin);
-    saveToStorage("wqms_collection_interval_max_minutes", collectionIntervalMax);
+    saveToStorage("wqms_data_collection", dataCollection);
     document.documentElement.setAttribute("data-font-size", fontSize);
     localStorage.setItem("fontPreference", fontSize);
     setSaveFeedback("Saved");
@@ -153,16 +116,49 @@ export default function Settings() {
       <header className="page-header">
         <div>
           <h1 className="page-title">Settings</h1>
-          <p className="page-subtitle">Calibration, thresholds, data collection, theme &amp; font</p>
+          <p className="page-subtitle">Calibration, thresholds, theme &amp; font</p>
         </div>
       </header>
 
+      <div className="settings-tabs" role="tablist" aria-label="Settings categories">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === "system"}
+          aria-controls="settings-panel-system"
+          id="tab-system"
+          className={`settings-tab ${activeTab === "system" ? "settings-tab--active" : ""}`}
+          onClick={() => setActiveTab("system")}
+        >
+          Calibration, Threshold &amp; Data
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === "preferences"}
+          aria-controls="settings-panel-preferences"
+          id="tab-preferences"
+          className={`settings-tab ${activeTab === "preferences" ? "settings-tab--active" : ""}`}
+          onClick={() => setActiveTab("preferences")}
+        >
+          User Preferences
+        </button>
+      </div>
+
       <div className="settings-content">
-        {/* Calibration */}
-        <section className="settings-section card">
+        {/* Tab panel: Calibration, Threshold, Data Collection */}
+        <div
+          id="settings-panel-system"
+          role="tabpanel"
+          aria-labelledby="tab-system"
+          hidden={activeTab !== "system"}
+          className="settings-tab-panel"
+        >
+          {/* Calibration */}
+          <section className="settings-section card">
           <div className="card__header">
             <h2 className="card__title">Calibration</h2>
-            <p className="card__desc">Sensor calibration offsets (applied to readings)</p>
+            <p className="card__desc">Sensor calibration offsets. Applied to displayed readings across the app.</p>
           </div>
           <div className="card__body">
             <div className="settings-grid">
@@ -325,12 +321,12 @@ export default function Settings() {
           </div>
         </section>
 
-        {/* Data collection frequency */}
+        {/* Data collection & updates */}
         <section className="settings-section card">
           <div className="card__header">
             <h2 className="card__title">Data collection &amp; updates</h2>
             <p className="card__desc">
-              Set the allowed range (min/max) for data collection interval in minutes. Under normal or low-flow conditions the system uses the maximum interval; when flow rate rises it can increase frequency up to the minimum interval. Dashboard refresh uses the default interval.
+              Data collection interval settings.
             </p>
           </div>
           <div className="card__body">
@@ -339,54 +335,83 @@ export default function Settings() {
                 <span>Default interval (minutes)</span>
                 <input
                   type="number"
-                  min={COLLECTION_INTERVAL_MIN_LIMIT}
-                  max={COLLECTION_INTERVAL_MAX_LIMIT}
-                  step={1}
+                  min={1}
+                  max={120}
                   className="settings-input"
-                  value={collectionIntervalMinutes}
-                  onChange={(e) => updateCollectionInterval(e.target.value)}
+                  value={dataCollection.defaultIntervalMinutes ?? 15}
+                  onChange={(e) => updateDataCollection("defaultIntervalMinutes", e.target.value)}
                   aria-label="Default data collection interval in minutes"
                 />
-                <span className="settings-hint">
-                  Used for dashboard refresh. {COLLECTION_INTERVAL_MIN_LIMIT}–{COLLECTION_INTERVAL_MAX_LIMIT} min
-                </span>
+                <span className="settings-helper">1–120 min</span>
               </label>
               <label className="settings-label">
                 <span>Minimum interval (minutes)</span>
                 <input
                   type="number"
-                  min={COLLECTION_INTERVAL_MIN_LIMIT}
-                  max={COLLECTION_INTERVAL_MAX_LIMIT}
-                  step={1}
+                  min={1}
+                  max={120}
                   className="settings-input"
-                  value={collectionIntervalMin}
-                  onChange={(e) => updateCollectionIntervalMin(e.target.value)}
-                  aria-label="Minimum data collection interval in minutes"
+                  value={dataCollection.minIntervalMinutes ?? 1}
+                  onChange={(e) => updateDataCollection("minIntervalMinutes", e.target.value)}
+                  aria-label="Minimum sampling interval in minutes"
                 />
-                <span className="settings-hint">
-                  Fastest sampling (high flow). Must be ≤ maximum
-                </span>
+                <span className="settings-helper">≤ max</span>
               </label>
               <label className="settings-label">
                 <span>Maximum interval (minutes)</span>
                 <input
                   type="number"
-                  min={COLLECTION_INTERVAL_MIN_LIMIT}
-                  max={COLLECTION_INTERVAL_MAX_LIMIT}
-                  step={1}
+                  min={1}
+                  max={120}
                   className="settings-input"
-                  value={collectionIntervalMax}
-                  onChange={(e) => updateCollectionIntervalMax(e.target.value)}
-                  aria-label="Maximum data collection interval in minutes"
+                  value={dataCollection.maxIntervalMinutes ?? 15}
+                  onChange={(e) => updateDataCollection("maxIntervalMinutes", e.target.value)}
+                  aria-label="Maximum sampling interval in minutes"
                 />
-                <span className="settings-hint">
-                  Slowest sampling (low flow). Must be ≥ minimum
-                </span>
+                <span className="settings-helper">≥ min</span>
+              </label>
+              <label className="settings-label">
+                <span>Readings limit</span>
+                <input
+                  type="number"
+                  min={100}
+                  max={2000}
+                  className="settings-input"
+                  value={dataCollection.readingsLimit ?? 500}
+                  onChange={(e) => updateDataCollection("readingsLimit", e.target.value)}
+                  aria-label="Maximum readings to load"
+                />
+                <span className="settings-helper">100–2000</span>
               </label>
             </div>
           </div>
         </section>
 
+          <div className="settings-actions">
+            <button
+              type="button"
+              className="settings-save-btn"
+              onClick={handleSaveAll}
+              aria-label="Save all settings"
+            >
+              Save settings
+            </button>
+            {saveFeedback && (
+              <span className="settings-save-feedback" role="status">
+                {saveFeedback}
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* Tab panel: User Preferences (Theme & Font) */}
+        <div
+          id="settings-panel-preferences"
+          role="tabpanel"
+          aria-labelledby="tab-preferences"
+          hidden={activeTab !== "preferences"}
+          className="settings-tab-panel"
+        >
         {/* Theme */}
         <section className="settings-section card">
           <div className="card__header">
@@ -447,20 +472,21 @@ export default function Settings() {
           </div>
         </section>
 
-        <div className="settings-actions">
-          <button
-            type="button"
-            className="settings-save-btn"
-            onClick={handleSaveAll}
-            aria-label="Save all settings"
-          >
-            Save settings
-          </button>
-          {saveFeedback && (
-            <span className="settings-save-feedback" role="status">
-              {saveFeedback}
-            </span>
-          )}
+          <div className="settings-actions">
+            <button
+              type="button"
+              className="settings-save-btn"
+              onClick={handleSaveAll}
+              aria-label="Save all settings"
+            >
+              Save settings
+            </button>
+            {saveFeedback && (
+              <span className="settings-save-feedback" role="status">
+                {saveFeedback}
+              </span>
+            )}
+          </div>
         </div>
       </div>
     </div>

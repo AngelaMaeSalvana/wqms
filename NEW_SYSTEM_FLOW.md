@@ -93,34 +93,6 @@ Nodes → Microcontroller → MQTT Broker → Web Dashboard (Live Updates)
 - MQTT broker immediately streams data to Web Dashboard for live updates
 - Simultaneously, Backend subscribes to MQTT for data storage
 
-## Adaptive Data Collection and Live Updates
-
-The system uses **adaptive data collection** and **live update frequency** based on flow rate conditions at each sensor node’s location. This balances data quality and responsiveness with power consumption, network usage, and storage.
-
-### Live Updates (No Manual Refresh)
-
-- The **dashboard supports continuous/live updates**. New data is reflected automatically as it becomes available—no manual page refresh is required.
-- The dashboard receives live data via MQTT and can also poll the Backend API at a configurable interval to stay in sync with stored readings.
-
-### Default Interval (Normal or Low-Flow)
-
-- Under **normal or low-flow conditions**, the default **data collection and update interval is every 15 minutes** at the sensor node.
-- This default optimizes battery life, LoRa bandwidth, and database size while still providing useful trend data.
-
-### Adaptive Frequency (High Flow)
-
-- When **flow rate increases** (indicating higher variability or more dynamic water conditions), the system **automatically increases** data collection and update frequency at the node.
-- More frequent samples during high-flow periods improve detection of short-lived pollution or rapid changes in water quality.
-
-### Return to Default (Stable or Decreasing Flow)
-
-- When **flow rate stabilizes or decreases**, the system **returns to the default interval** (e.g. 15 minutes).
-- This reduces power consumption, network usage, and data storage while maintaining adequate monitoring under calmer conditions.
-
-### User-Configurable Interval (Dashboard)
-
-- In **Settings**, users can set the **data collection frequency in minutes** (e.g. default 15). This preference is used by the dashboard for how often it refreshes data from the backend when not relying solely on live MQTT updates, and can inform or align with node configuration where supported.
-
 ### Historical Data Path
 ```
 Web Dashboard → Backend → Database

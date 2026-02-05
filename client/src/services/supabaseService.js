@@ -1,80 +1,47 @@
 /**
  * WQMS data layer using Supabase.
  * Used when Supabase env vars are set (Vercel + Supabase).
- * Schema: nodes (id, node_code, name, lat, lng, status, last_seen_at, deactivated_at),
- *         sensor_readings (recorded_at, node_id text), alerts (triggered_at, message).
- * Date ranges (startDate/endDate) are interpreted as Philippines (Asia/Manila) calendar dates.
  */
 import { supabase, isSupabaseEnabled } from '../lib/supabaseClient';
 
-const PH_OFFSET = '+08:00'; // Asia/Manila, no DST
-
-/** Convert a YYYY-MM-DD date in Philippines to UTC ISO range for Supabase queries. */
-function phDateToUtcRange(dateStr) {
-  const start = new Date(`${dateStr}T00:00:00${PH_OFFSET}`).toISOString();
-  const end = new Date(`${dateStr}T23:59:59.999${PH_OFFSET}`).toISOString();
-  return { start, end };
-}
-
-/** Normalize a reading row so UI sees timestamp + flowRate. */
-function normalizeReading(row) {
-  if (!row) return row;
-  return {
-    ...row,
-    timestamp: row.recorded_at ?? row.timestamp,
-    flowRate: row.flow_rate ?? row.flowRate,
-  };
-}
-
-// --- Readings (sensor_readings: recorded_at, node_id text) ---
+// --- Readings ---
 
 export async function getLatestReading(nodeId = null) {
   if (!isSupabaseEnabled()) return null;
   let q = supabase
-    .from('sensor_readings')
+    .from('water_quality_readings')
     .select('*')
-    .order('recorded_at', { ascending: false })
+    .order('timestamp', { ascending: false })
     .limit(1);
   if (nodeId) q = q.eq('node_id', nodeId);
   const { data, error } = await q.maybeSingle();
   if (error) throw new Error(error.message);
-  return normalizeReading(data) || {};
+  return data || {};
 }
 
 export async function getReadings({ startDate, endDate, nodeId, limit = 100 }) {
   if (!isSupabaseEnabled()) return [];
-  let q = supabase.from('sensor_readings').select('*');
-  if (startDate) {
-    const { start } = phDateToUtcRange(startDate);
-    q = q.gte('recorded_at', start);
-  }
-  if (endDate) {
-    const { end } = phDateToUtcRange(endDate);
-    q = q.lte('recorded_at', end);
-  }
+  let q = supabase.from('water_quality_readings').select('*');
+  if (startDate) q = q.gte('timestamp', `${startDate}T00:00:00.000Z`);
+  if (endDate) q = q.lte('timestamp', `${endDate}T23:59:59.999Z`);
   if (nodeId) q = q.eq('node_id', nodeId);
-  q = q.order('recorded_at', { ascending: false }).limit(limit);
+  q = q.order('timestamp', { ascending: false }).limit(limit);
   const { data, error } = await q;
   if (error) throw new Error(error.message);
-  return (data || []).map(normalizeReading);
+  return data || [];
 }
 
+/** Sensor readings table (bridge / testing). Same shape as getReadings. */
 export async function getSensorReadings({ startDate, endDate, nodeId, limit = 500 }) {
-  return getReadings({ startDate, endDate, nodeId, limit });
-}
-
-/** Map daily_summaries columns (temperature_avg, etc.) to UI shape (avg_temperature, etc.). */
-function normalizeDailySummary(row) {
-  if (!row) return row;
-  return {
-    ...row,
-    avg_temperature: row.temperature_avg ?? row.avg_temperature,
-    avg_ph: row.ph_avg ?? row.avg_ph,
-    avg_turbidity: row.turbidity_avg ?? row.avg_turbidity,
-    avg_dissolved_oxygen: row.dissolved_oxygen_avg ?? row.avg_dissolved_oxygen,
-    avg_nh3: row.nh3_avg ?? row.avg_nh3,
-    avg_wqi: row.wqi_avg ?? row.avg_wqi,
-  };
+  if (!isSupabaseEnabled()) return [];
+  let q = supabase.from('sensor_readings').select('*');
+  if (startDate) q = q.gte('timestamp', `${startDate}T00:00:00.000Z`);
+  if (endDate) q = q.lte('timestamp', `${endDate}T23:59:59.999Z`);
+  if (nodeId) q = q.eq('node_id', nodeId);
+  q = q.order('timestamp', { ascending: false }).limit(limit);
+  const { data, error } = await q;
+  if (error) throw new Error(error.message);
+  return data || [];
 }
 
 export async function getDailySummaries({ startDate, endDate, nodeId }) {
@@ -88,40 +55,42 @@ export async function getDailySummaries({ startDate, endDate, nodeId }) {
   if (nodeId) q = q.eq('node_id', nodeId);
   const { data, error } = await q;
   if (error) throw new Error(error.message);
-  return (data || []).map(normalizeDailySummary);
+  return data || [];
 }
 
 export async function getReadingByDate(date, nodeId = null) {
   if (!isSupabaseEnabled()) return null;
-  const { start, end } = phDateToUtcRange(date);
+  const start = `${date}T00:00:00.000Z`;
+  const end = `${date}T23:59:59.999Z`;
   let q = supabase
-    .from('sensor_readings')
+    .from('water_quality_readings')
     .select('*')
-    .gte('recorded_at', start)
-    .lte('recorded_at', end)
-    .order('recorded_at', { ascending: false })
+    .gte('timestamp', start)
+    .lte('timestamp', end)
+    .order('timestamp', { ascending: false })
     .limit(1);
   if (nodeId) q = q.eq('node_id', nodeId);
   const { data, error } = await q.maybeSingle();
   if (error) throw new Error(error.message);
-  return normalizeReading(data) || {};
+  return data || {};
 }
 
 export async function postReading(reading) {
   if (!isSupabaseEnabled()) throw new Error('Supabase not configured');
   const row = {
-    node_id: reading.nodeId ?? reading.node ?? '1',
-    recorded_at: reading.recorded_at ?? reading.timestamp ?? new Date().toISOString(),
-    temperature: reading.temperature ?? null,
-    turbidity: reading.turbidity ?? null,
-    ph: reading.pH ?? reading.ph ?? null,
-    nh3: reading.nh3 ?? reading.NH3 ?? null,
-    dissolved_oxygen: reading.dissolvedOxygen ?? reading.do ?? reading.dissolved_oxygen ?? null,
-    flow_rate: reading.flow_rate ?? reading.flowRate ?? null,
-    wqi: reading.wqi != null || reading.WQI != null ? Math.round(reading.wqi ?? reading.WQI ?? 0) : null,
+    node_id: reading.nodeId || reading.node || '1',
+    location: reading.location || 'Unknown',
+    temperature: reading.temperature,
+    turbidity: reading.turbidity,
+    ph: reading.pH ?? reading.ph,
+    nh3: reading.nh3 ?? reading.NH3,
+    dissolved_oxygen: reading.dissolvedOxygen ?? reading.do,
+    flow_rate: reading.flowRate ?? reading.flow_rate ?? null,
+    wqi: Math.round(reading.wqi ?? reading.WQI ?? 0),
+    timestamp: reading.timestamp || new Date().toISOString(),
   };
   const { data, error } = await supabase
-    .from('sensor_readings')
+    .from('water_quality_readings')
     .insert(row)
     .select('id')
     .single();
@@ -129,37 +98,36 @@ export async function postReading(reading) {
   return { success: true, id: data?.id, message: 'Reading stored successfully' };
 }
 
-// --- Alerts (triggered_at, message, type, severity) ---
+// --- Alerts ---
 
 export async function getAlerts({ limit = 50, severity } = {}) {
   if (!isSupabaseEnabled()) return [];
   let q = supabase
     .from('alerts')
     .select('*')
-    .order('triggered_at', { ascending: false })
+    .order('timestamp', { ascending: false })
     .limit(limit);
   if (severity) q = q.eq('severity', severity);
   const { data, error } = await q;
   if (error) throw new Error(error.message);
-  return (data || []).map((row) => ({
-    ...row,
-    title: row.message?.slice(0, 80) || 'Alert',
-    detail: row.message,
-    timestamp: row.triggered_at,
-    createdAt: row.triggered_at,
-  }));
+  return data || [];
 }
 
 export async function postAlert(alert) {
   if (!isSupabaseEnabled()) throw new Error('Supabase not configured');
   const row = {
     node_id: alert.nodeId ?? alert.node ?? null,
-    type: alert.type ?? 'system',
-    severity: alert.severity ?? 'info',
-    message: alert.message ?? alert.detail ?? alert.title ?? 'Alert',
+    title: alert.title || 'Alert',
+    detail: alert.detail ?? alert.message ?? '',
+    severity: alert.severity || 'info',
+    type: alert.type ?? null,
+    node_name: alert.nodeName ?? alert.node_name ?? null,
     parameter: alert.parameter ?? null,
     value: alert.value ?? null,
-    triggered_at: alert.triggered_at ?? alert.timestamp ?? new Date().toISOString(),
+    threshold_min: alert.thresholdMin ?? alert.threshold_min ?? null,
+    threshold_max: alert.thresholdMax ?? alert.threshold_max ?? null,
+    status: alert.status ?? 'active',
+    timestamp: alert.timestamp || new Date().toISOString(),
   };
   const { data, error } = await supabase
     .from('alerts')
@@ -170,64 +138,30 @@ export async function postAlert(alert) {
   return { success: true, id: data?.id, message: 'Alert stored successfully' };
 }
 
-// --- Nodes (id text, node_code, name, lat, lng, status, last_seen_at, deactivated_at) ---
+// --- Nodes (Supabase as source of truth when enabled) ---
 
-/**
- * Fetch nodes from Supabase. By default returns only active (v_nodes_active).
- * @param {boolean} includeDeactivated - If true, fetch all nodes including deactivated.
- */
-export async function getNodesFromSupabase(includeDeactivated = false) {
+export async function getNodesFromSupabase() {
   if (!isSupabaseEnabled()) return null;
-  const table = includeDeactivated ? 'nodes' : 'v_nodes_active';
   const { data, error } = await supabase
-    .from(table)
-    .select('id, node_code, name, lat, lng, status, last_seen_at, created_at, updated_at' + (includeDeactivated ? ', deactivated_at' : ''))
-    .order('node_code');
+    .from('nodes')
+    .select('id, name, location, status, lat, lng, last_maintenance')
+    .order('id');
   if (error) throw new Error(error.message);
   return data;
 }
 
-/**
- * Save nodes to Supabase. Upsert by id. For "delete" pass deactivated_at set on the node.
- */
 export async function saveNodesToSupabase(nodes) {
   if (!isSupabaseEnabled()) throw new Error('Supabase not configured');
   const rows = nodes.map((n) => ({
     id: n.id,
-    node_code: n.node_code ?? n.nodeCode ?? n.id,
     name: n.name ?? null,
+    location: n.location ?? null,
     status: n.status ?? 'offline',
     lat: n.lat ?? null,
     lng: n.lng ?? null,
-    deactivated_at: n.deactivated_at ?? (n.deactivated ? new Date().toISOString() : null),
+    last_maintenance: n.lastMaintenance ?? n.last_maintenance ?? null,
   }));
   const { error } = await supabase.from('nodes').upsert(rows, { onConflict: 'id' });
-  if (error) throw new Error(error.message);
-  return { success: true };
-}
-
-/**
- * Deactivate a node (soft delete). Sets deactivated_at and status = deactivated via trigger.
- */
-export async function deactivateNodeInSupabase(nodeId) {
-  if (!isSupabaseEnabled()) throw new Error('Supabase not configured');
-  const { error } = await supabase
-    .from('nodes')
-    .update({ deactivated_at: new Date().toISOString(), updated_at: new Date().toISOString() })
-    .eq('id', nodeId);
-  if (error) throw new Error(error.message);
-  return { success: true };
-}
-
-/**
- * Reactivate a node. Clears deactivated_at (status set to offline by trigger).
- */
-export async function reactivateNodeInSupabase(nodeId) {
-  if (!isSupabaseEnabled()) throw new Error('Supabase not configured');
-  const { error } = await supabase
-    .from('nodes')
-    .update({ deactivated_at: null, updated_at: new Date().toISOString() })
-    .eq('id', nodeId);
   if (error) throw new Error(error.message);
   return { success: true };
 }

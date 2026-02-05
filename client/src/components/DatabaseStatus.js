@@ -43,16 +43,16 @@ const DatabaseStatus = () => {
       role="status"
       aria-label={
         status === 'ok'
-          ? 'Connected to Supabase'
+          ? 'Connected'
           : status === 'error'
-          ? `Supabase error: ${errorMsg}`
-          : 'Checking Supabase connection'
+          ? `Error: ${errorMsg}`
+          : 'Checking connection'
       }
       title={status === 'error' ? errorMsg : undefined}
     >
       <span className="database-status__dot" />
       <span className="database-status__label">
-        DB: Supabase
+        Database
         {status === 'checking' && ' …'}
         {status === 'ok' && ' ✓'}
         {status === 'error' && ' ✗'}

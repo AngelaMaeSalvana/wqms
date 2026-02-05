@@ -31,14 +31,12 @@ export async function loadNodes() {
       const fromDb = await getNodesFromSupabase();
       const list = Array.isArray(fromDb) ? fromDb.map((r) => ({
         id: r.id,
-        node_code: r.node_code ?? r.id,
         name: r.name,
-        location: r.name ?? '',
+        location: r.location,
         status: r.status ?? 'offline',
         lat: r.lat,
         lng: r.lng,
-        last_seen_at: r.last_seen_at,
-        deactivated_at: r.deactivated_at,
+        lastMaintenance: r.last_maintenance ?? r.lastMaintenance ?? null,
       })) : [];
       nodesCache = list;
       try {

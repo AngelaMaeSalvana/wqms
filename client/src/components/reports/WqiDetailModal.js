@@ -1,4 +1,5 @@
 import React, { useEffect } from "react";
+import { createPortal } from "react-dom";
 import { getWQIClass, getQualityRatings } from "../../utils/wqiCalculator";
 import "./WqiDetailModal.css";
 
@@ -74,7 +75,7 @@ export default function WqiDetailModal({ date, wqi, params, onClose }) {
     return value.toFixed(1);
   };
 
-  return (
+  return createPortal(
     <div className="wqi-modal-backdrop" onClick={onClose} role="dialog" aria-modal="true" aria-labelledby="wqi-modal-title">
       <div className="wqi-modal" onClick={(e) => e.stopPropagation()}>
         <div className="wqi-modal-header">
@@ -163,6 +164,7 @@ export default function WqiDetailModal({ date, wqi, params, onClose }) {
           )}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

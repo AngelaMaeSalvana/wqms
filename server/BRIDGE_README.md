@@ -68,6 +68,8 @@ Standalone **always-on** Node.js service: subscribes to HiveMQ Cloud (WSS), pars
 }
 ```
 
-## Deploy (24/7)
+## Deploy (24/7) — run automatically without your PC
 
-Run this process on **Railway**, **Render**, **Fly.io**, or a VPS. Do **not** use Vercel (serverless); the bridge must keep a long-lived MQTT connection.
+**You only receive MQTT data when the bridge is running.** To have it run 24/7 without your computer, deploy it to the cloud. See **[DEPLOY_BRIDGE.md](./DEPLOY_BRIDGE.md)** for step-by-step instructions for **Railway**, **Render**, and **Fly.io**.
+
+Do **not** use Vercel for the bridge (serverless cannot hold a long-lived MQTT connection).

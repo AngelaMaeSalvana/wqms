@@ -79,24 +79,6 @@ class ApiService {
     return this.request('/alerts', { method: 'POST', body: JSON.stringify(alert) });
   }
 
-  /** Supabase only: load nodes including deactivated (for Nodes page). */
-  async getNodesFromSupabase(includeDeactivated = false) {
-    if (!isSupabaseEnabled()) return [];
-    return supabaseService.getNodesFromSupabase(includeDeactivated);
-  }
-
-  /** Supabase only: soft-delete node (set deactivated_at). */
-  async deactivateNode(nodeId) {
-    if (!isSupabaseEnabled()) throw new Error('Supabase not configured');
-    return supabaseService.deactivateNodeInSupabase(nodeId);
-  }
-
-  /** Supabase only: reactivate node (clear deactivated_at). */
-  async reactivateNode(nodeId) {
-    if (!isSupabaseEnabled()) throw new Error('Supabase not configured');
-    return supabaseService.reactivateNodeInSupabase(nodeId);
-  }
-
   async healthCheck() {
     if (isSupabaseEnabled()) return { status: 'ok', database: 'supabase' };
     return this.request('/health');

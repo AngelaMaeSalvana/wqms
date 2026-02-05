@@ -50,7 +50,7 @@ export function TodayCard({ todayStats, selectedNode, readingsLoaded = false }) 
         {!hasStats && readingsLoaded ? (
           <div className="today-card-empty" aria-live="polite">
             <p>No data from database yet.</p>
-            <p className="today-card-empty-hint">Readings come from Supabase or MQTT. Add data in Nodes or wait for sensor uploads.</p>
+            <p className="today-card-empty-hint">Add nodes or wait for sensor data.</p>
           </div>
         ) : !hasStats ? (
           <div className="today-stats-skeleton">

@@ -3,18 +3,23 @@ import { createPortal } from "react-dom";
 import { jsPDF } from "jspdf";
 import { autoTable } from "jspdf-autotable";
 import "../utils/chartConfig";
-import { Line } from "react-chartjs-2";
+import { Line, Bar } from "react-chartjs-2";
 import PageDateWithStatus from "../components/PageDateWithStatus";
 import CalendarCard from "../components/reports/calendar-card";
 import WqiDetailModal from "../components/reports/WqiDetailModal";
 import { getWQIClass, calculateWQI } from "../utils/wqiCalculator";
 import { getNodes, loadNodes } from "../utils/nodesStorage";
-import { getCrystalReport } from "../utils/crystalReportStorage";
 import api from "../services/api";
+import { applyCalibrationToReadings } from "../utils/calibration";
+import { PageLoader } from "../components/LoadingSkeleton";
 import "./Reports.css";
 
-const MemoizedReportChart = memo(function MemoizedReportChart({ data, options }) {
-  return <Line data={data} options={options} />;
+const MemoizedReportChart = memo(function MemoizedReportChart({ data, options, chartType }) {
+  return chartType === "bar" ? (
+    <Bar data={data} options={options} />
+  ) : (
+    <Line data={data} options={options} />
+  );
 });
 
 const EXPORT_HEADERS = [
@@ -108,6 +113,11 @@ const PARAMETER_OPTIONS = [
 const PERIOD_OPTIONS = [
   { id: "week", label: "By week" },
   { id: "month", label: "By month" },
+];
+
+const CHART_TYPE_OPTIONS = [
+  { id: "line", label: "Line chart" },
+  { id: "bar", label: "Bar chart" },
 ];
 
 const MONTH_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -438,10 +448,11 @@ export default function Reports() {
   const [search, setSearch] = useState("");
   const [tableDateFrom, setTableDateFrom] = useState("");
   const [tableDateTo, setTableDateTo] = useState("");
-  const [tableSort, setTableSort] = useState("newest");
+  const [tableSort, setTableSort] = useState({ column: "date", direction: "desc" });
   const [tableNodeFilter, setTableNodeFilter] = useState("all");
   const [tablePage, setTablePage] = useState(1);
   const [nodes, setNodes] = useState([]);
+  const [nodesLoaded, setNodesLoaded] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const [reportReadings, setReportReadings] = useState([]);
   const [reportReadingsForChart, setReportReadingsForChart] = useState([]);
@@ -449,6 +460,7 @@ export default function Reports() {
   /** Daily summaries derived from sensor_readings for the chart. */
   const reportSummaries = useMemo(() => aggregateReadingsToDailySummaries(reportReadingsForChart), [reportReadingsForChart]);
   const [reportParameter, setReportParameter] = useState(PARAMETER_OPTIONS[0].id);
+  const [reportChartType, setReportChartType] = useState(CHART_TYPE_OPTIONS[0].id);
   const [reportPeriod, setReportPeriod] = useState(PERIOD_OPTIONS[0].id);
   const [reportRangeStart, setReportRangeStart] = useState(() => getWeekRange(new Date()).start);
   const [reportRangeEnd, setReportRangeEnd] = useState(() => getWeekRange(new Date()).end);
@@ -469,7 +481,7 @@ export default function Reports() {
   const [modalOpen, setModalOpen] = useState(false);
   const exportRef = useRef(null);
 
-  const TABLE_PAGE_SIZE = 7;
+  const TABLE_PAGE_SIZE = 9;
 
   /** Effective date range for table: when From/To are set, use them; otherwise default last 7 days. */
   const tableDateRange = useMemo(() => {
@@ -489,7 +501,7 @@ export default function Reports() {
   }, [tableDateFrom, tableDateTo]);
 
   useEffect(() => {
-    loadNodes().then(() => setNodes(getNodes()));
+    loadNodes().then(() => setNodes(getNodes())).finally(() => setNodesLoaded(true));
   }, []);
   useEffect(() => {
     const onFocus = () => loadNodes().then(() => setNodes(getNodes()));
@@ -501,14 +513,14 @@ export default function Reports() {
     if (!reportRangeStart || !reportRangeEnd) return;
     const start = typeof reportRangeStart === "string" ? reportRangeStart : (reportRangeStart.getFullYear() + "-" + String(reportRangeStart.getMonth() + 1).padStart(2, "0") + "-" + String(reportRangeStart.getDate()).padStart(2, "0"));
     const end = typeof reportRangeEnd === "string" ? reportRangeEnd : (reportRangeEnd.getFullYear() + "-" + String(reportRangeEnd.getMonth() + 1).padStart(2, "0") + "-" + String(reportRangeEnd.getDate()).padStart(2, "0"));
-    api.getSensorReadings({ startDate: start, endDate: end, limit: 500 }).then((rows) => setReportReadingsForChart(Array.isArray(rows) ? rows : [])).catch(() => setReportReadingsForChart([]));
+    api.getSensorReadings({ startDate: start, endDate: end, limit: 500 }).then((rows) => setReportReadingsForChart(applyCalibrationToReadings(Array.isArray(rows) ? rows : []))).catch(() => setReportReadingsForChart([]));
   }, [reportRangeStart, reportRangeEnd]);
 
   useEffect(() => {
     if (!tableDateRange?.start || !tableDateRange?.end) return;
     const start = tableDateRange.start.getFullYear() + "-" + String(tableDateRange.start.getMonth() + 1).padStart(2, "0") + "-" + String(tableDateRange.start.getDate()).padStart(2, "0");
     const end = tableDateRange.end.getFullYear() + "-" + String(tableDateRange.end.getMonth() + 1).padStart(2, "0") + "-" + String(tableDateRange.end.getDate()).padStart(2, "0");
-    api.getSensorReadings({ startDate: start, endDate: end, limit: 500 }).then((rows) => setReportReadings(Array.isArray(rows) ? rows : [])).catch(() => setReportReadings([]));
+    api.getSensorReadings({ startDate: start, endDate: end, limit: 500 }).then((rows) => setReportReadings(applyCalibrationToReadings(Array.isArray(rows) ? rows : []))).catch(() => setReportReadings([]));
   }, [tableDateRange?.start?.getTime(), tableDateRange?.end?.getTime()]);
 
   useEffect(() => {
@@ -594,10 +606,20 @@ export default function Reports() {
     if (tableNodeFilter && tableNodeFilter !== "all") {
       filtered = filtered.filter((r) => r.nodeId === tableNodeFilter);
     }
-    const sorted =
-      tableSort === "oldest"
-        ? [...filtered].sort((a, b) => a.date.getTime() - b.date.getTime())
-        : [...filtered].sort((a, b) => b.date.getTime() - a.date.getTime());
+    const { column, direction } = tableSort;
+    const sorted = [...filtered].sort((a, b) => {
+      let cmp = 0;
+      if (column === "date" || column === "time") cmp = a.date.getTime() - b.date.getTime();
+      else if (column === "node") cmp = String(a.nodeName || a.nodeId).localeCompare(String(b.nodeName || b.nodeId));
+      else if (column === "temperature") cmp = (a.temperature ?? -Infinity) - (b.temperature ?? -Infinity);
+      else if (column === "pH") cmp = (a.pH ?? -Infinity) - (b.pH ?? -Infinity);
+      else if (column === "turbidity") cmp = (a.turbidity ?? -Infinity) - (b.turbidity ?? -Infinity);
+      else if (column === "dissolvedOxygen") cmp = (a.dissolvedOxygen ?? -Infinity) - (b.dissolvedOxygen ?? -Infinity);
+      else if (column === "nh3") cmp = (a.nh3 ?? -Infinity) - (b.nh3 ?? -Infinity);
+      else if (column === "flowRate") cmp = (a.flowRate ?? -Infinity) - (b.flowRate ?? -Infinity);
+      else if (column === "wqi") cmp = (a.wqi ?? -Infinity) - (b.wqi ?? -Infinity);
+      return direction === "asc" ? cmp : -cmp;
+    });
     return sorted;
   }, [reportReadings, nodes, search, tableNodeFilter, tableSort]);
 
@@ -610,7 +632,7 @@ export default function Reports() {
 
   useEffect(() => {
     setTablePage(1);
-  }, [search, tableNodeFilter, tableDateFrom, tableDateTo, tableSort]);
+  }, [search, tableNodeFilter, tableDateFrom, tableDateTo, tableSort.column, tableSort.direction]);
 
   useEffect(() => {
     if (tablePage > totalPages) setTablePage(Math.max(1, totalPages));
@@ -704,25 +726,15 @@ export default function Reports() {
       const csv = "\uFEFF" + [headerRow, ...dataRows].map(line).join("\r\n");
       downloadBlob(`${baseName}.xls`, new Blob([csv], { type: "application/vnd.ms-excel;charset=utf-8" }));
     } else if (format === "pdf") {
-      const crystalReport = getCrystalReport();
       const doc = new jsPDF({ orientation: "landscape" });
       doc.setFontSize(10);
       doc.text("WQMS Sensor Data", 14, 12);
-      let y = 18;
+      const y = 18;
       doc.text(`Exported: ${new Date().toLocaleString()}  |  ${rows.length} records`, 14, y);
-      if (crystalReport?.fileName) {
-        y += 6;
-        doc.setFontSize(9);
-        doc.text(`Report template: ${crystalReport.fileName}`, 14, y);
-        doc.setFontSize(10);
-        y += 4;
-      } else {
-        y += 4;
-      }
       autoTable(doc, {
         head: [headerRow],
         body: dataRows.length > 0 ? dataRows : [["No data for current filters."]],
-        startY: y + 4,
+        startY: y + 10,
         styles: { fontSize: 7 },
         headStyles: { fillColor: [27, 156, 133] },
       });
@@ -730,7 +742,7 @@ export default function Reports() {
     }
     } catch (err) {
       console.error("Export failed:", err);
-      alert(`Export failed: ${err?.message || String(err)}. Try narrowing filters or check the console.`);
+      alert("Export failed. Please try again.");
     }
   };
 
@@ -816,12 +828,19 @@ export default function Reports() {
     return () => document.removeEventListener("click", handleClickOutside);
   }, []);
 
+  if (!nodesLoaded) {
+    return (
+      <div className="reports-page">
+        <PageLoader />
+      </div>
+    );
+  }
+
   return (
     <div className="reports-page">
       <header className="page-header reports-page-header">
         <div>
           <h1 className="page-title">Reports</h1>
-          <p className="reports-data-source">Data: sensor_readings (bridge test)</p>
         </div>
         <PageDateWithStatus lastUpdated={lastUpdated} className="page-meta reports-header-meta" />
       </header>
@@ -831,6 +850,20 @@ export default function Reports() {
           <div className="card__header reports-chart-header">
             <div>
               <h2 className="card__title">Report chart</h2>
+            </div>
+            <div className="reports-chart-header-chart-type">
+              <select
+                className="reports-chart-select reports-chart-select--header"
+                value={reportChartType}
+                onChange={(e) => setReportChartType(e.target.value)}
+                aria-label="Chart type"
+              >
+                {CHART_TYPE_OPTIONS.map((opt) => (
+                  <option key={opt.id} value={opt.id}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
             </div>
           </div>
           <div className="reports-chart-layout">
@@ -844,7 +877,7 @@ export default function Reports() {
                 </div>
               )}
               <div className="reports-chart-wrapper">
-                <MemoizedReportChart data={reportChartData} options={reportChartOptions} />
+                <MemoizedReportChart data={reportChartData} options={reportChartOptions} chartType={reportChartType} />
               </div>
             </div>
             <aside className="reports-chart-selectors" ref={dateRangePickerRef} aria-label="Chart filters">
@@ -1111,15 +1144,6 @@ export default function Reports() {
           value={tableDateTo}
           onChange={(e) => setTableDateTo(e.target.value)}
         />
-        <select
-          className="metric-select reports-sort"
-          aria-label="Sort by"
-          value={tableSort}
-          onChange={(e) => setTableSort(e.target.value)}
-        >
-          <option value="newest">Newest first</option>
-          <option value="oldest">Oldest first</option>
-        </select>
         <div className="reports-export-wrap" ref={exportRef}>
           <button
             type="button"
@@ -1160,16 +1184,146 @@ export default function Reports() {
             <table className="reports-data-table" role="table">
               <thead>
                 <tr>
-                  <th>Date</th>
-                  <th>Time</th>
-                  <th>Node</th>
-                  <th>Temperature (°C)</th>
-                  <th>pH</th>
-                  <th>Turbidity (NTU)</th>
-                  <th>Dissolved O₂ (mg/L)</th>
-                  <th>NH₃ (mg/L)</th>
-                  <th>Flow rate (L/min)</th>
-                  <th>WQI</th>
+                  <th>
+                    <button
+                      type="button"
+                      className={`reports-th-btn ${tableSort.column === "date" ? "reports-th-btn--active" : ""}`}
+                      onClick={() =>
+                        setTableSort((s) => ({
+                          column: "date",
+                          direction: s.column === "date" && s.direction === "desc" ? "asc" : "desc",
+                        }))
+                      }
+                    >
+                      Date {tableSort.column === "date" && (tableSort.direction === "asc" ? "↑" : "↓")}
+                    </button>
+                  </th>
+                  <th>
+                    <button
+                      type="button"
+                      className={`reports-th-btn ${tableSort.column === "time" ? "reports-th-btn--active" : ""}`}
+                      onClick={() =>
+                        setTableSort((s) => ({
+                          column: "time",
+                          direction: s.column === "time" && s.direction === "desc" ? "asc" : "desc",
+                        }))
+                      }
+                    >
+                      Time {tableSort.column === "time" && (tableSort.direction === "asc" ? "↑" : "↓")}
+                    </button>
+                  </th>
+                  <th>
+                    <button
+                      type="button"
+                      className={`reports-th-btn ${tableSort.column === "node" ? "reports-th-btn--active" : ""}`}
+                      onClick={() =>
+                        setTableSort((s) => ({
+                          column: "node",
+                          direction: s.column === "node" && s.direction === "asc" ? "desc" : "asc",
+                        }))
+                      }
+                    >
+                      Node {tableSort.column === "node" && (tableSort.direction === "asc" ? "↑" : "↓")}
+                    </button>
+                  </th>
+                  <th>
+                    <button
+                      type="button"
+                      className={`reports-th-btn ${tableSort.column === "temperature" ? "reports-th-btn--active" : ""}`}
+                      onClick={() =>
+                        setTableSort((s) => ({
+                          column: "temperature",
+                          direction: s.column === "temperature" && s.direction === "asc" ? "desc" : "asc",
+                        }))
+                      }
+                    >
+                      Temperature (°C) {tableSort.column === "temperature" && (tableSort.direction === "asc" ? "↑" : "↓")}
+                    </button>
+                  </th>
+                  <th>
+                    <button
+                      type="button"
+                      className={`reports-th-btn ${tableSort.column === "pH" ? "reports-th-btn--active" : ""}`}
+                      onClick={() =>
+                        setTableSort((s) => ({
+                          column: "pH",
+                          direction: s.column === "pH" && s.direction === "asc" ? "desc" : "asc",
+                        }))
+                      }
+                    >
+                      pH {tableSort.column === "pH" && (tableSort.direction === "asc" ? "↑" : "↓")}
+                    </button>
+                  </th>
+                  <th>
+                    <button
+                      type="button"
+                      className={`reports-th-btn ${tableSort.column === "turbidity" ? "reports-th-btn--active" : ""}`}
+                      onClick={() =>
+                        setTableSort((s) => ({
+                          column: "turbidity",
+                          direction: s.column === "turbidity" && s.direction === "asc" ? "desc" : "asc",
+                        }))
+                      }
+                    >
+                      Turbidity (NTU) {tableSort.column === "turbidity" && (tableSort.direction === "asc" ? "↑" : "↓")}
+                    </button>
+                  </th>
+                  <th>
+                    <button
+                      type="button"
+                      className={`reports-th-btn ${tableSort.column === "dissolvedOxygen" ? "reports-th-btn--active" : ""}`}
+                      onClick={() =>
+                        setTableSort((s) => ({
+                          column: "dissolvedOxygen",
+                          direction: s.column === "dissolvedOxygen" && s.direction === "asc" ? "desc" : "asc",
+                        }))
+                      }
+                    >
+                      Dissolved O₂ (mg/L) {tableSort.column === "dissolvedOxygen" && (tableSort.direction === "asc" ? "↑" : "↓")}
+                    </button>
+                  </th>
+                  <th>
+                    <button
+                      type="button"
+                      className={`reports-th-btn ${tableSort.column === "nh3" ? "reports-th-btn--active" : ""}`}
+                      onClick={() =>
+                        setTableSort((s) => ({
+                          column: "nh3",
+                          direction: s.column === "nh3" && s.direction === "asc" ? "desc" : "asc",
+                        }))
+                      }
+                    >
+                      NH₃ (mg/L) {tableSort.column === "nh3" && (tableSort.direction === "asc" ? "↑" : "↓")}
+                    </button>
+                  </th>
+                  <th>
+                    <button
+                      type="button"
+                      className={`reports-th-btn ${tableSort.column === "flowRate" ? "reports-th-btn--active" : ""}`}
+                      onClick={() =>
+                        setTableSort((s) => ({
+                          column: "flowRate",
+                          direction: s.column === "flowRate" && s.direction === "asc" ? "desc" : "asc",
+                        }))
+                      }
+                    >
+                      Flow rate (L/min) {tableSort.column === "flowRate" && (tableSort.direction === "asc" ? "↑" : "↓")}
+                    </button>
+                  </th>
+                  <th>
+                    <button
+                      type="button"
+                      className={`reports-th-btn ${tableSort.column === "wqi" ? "reports-th-btn--active" : ""}`}
+                      onClick={() =>
+                        setTableSort((s) => ({
+                          column: "wqi",
+                          direction: s.column === "wqi" && s.direction === "asc" ? "desc" : "asc",
+                        }))
+                      }
+                    >
+                      WQI {tableSort.column === "wqi" && (tableSort.direction === "asc" ? "↑" : "↓")}
+                    </button>
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -1206,7 +1360,7 @@ export default function Reports() {
               </tbody>
             </table>
           </div>
-          {totalRows > TABLE_PAGE_SIZE && (
+          {totalRows > 0 && (
             <div className="reports-table-pagination">
               <span className="reports-table-pagination-info">
                 Showing {(tablePage - 1) * TABLE_PAGE_SIZE + 1}–{Math.min(tablePage * TABLE_PAGE_SIZE, totalRows)} of {totalRows}

@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS water_quality_readings (
   ph real,
   nh3 real,
   dissolved_oxygen real,
+  flow_rate real,
   wqi integer,
   timestamp timestamptz DEFAULT now(),
   created_at timestamptz DEFAULT now()
@@ -30,12 +31,20 @@ CREATE TABLE IF NOT EXISTS alerts (
   title text,
   detail text,
   severity text,
+  type text,
+  node_name text,
+  parameter text,
+  value real,
+  threshold_min real,
+  threshold_max real,
+  status text DEFAULT 'active',
   timestamp timestamptz DEFAULT now(),
   created_at timestamptz DEFAULT now()
 );
 
 CREATE INDEX IF NOT EXISTS idx_alerts_timestamp ON alerts (timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_alerts_severity ON alerts (severity);
+CREATE INDEX IF NOT EXISTS idx_alerts_status_timestamp ON alerts (status, timestamp DESC);
 
 -- 3. Daily summaries (aggregates for reports)
 CREATE TABLE IF NOT EXISTS daily_summaries (
@@ -48,6 +57,7 @@ CREATE TABLE IF NOT EXISTS daily_summaries (
   avg_ph real,
   avg_nh3 real,
   avg_dissolved_oxygen real,
+  avg_flow_rate real,
   avg_wqi real,
   min_wqi integer,
   max_wqi integer,
@@ -67,6 +77,7 @@ CREATE TABLE IF NOT EXISTS nodes (
   status text DEFAULT 'offline',
   lat double precision,
   lng double precision,
+  last_maintenance timestamptz,
   created_at timestamptz DEFAULT now(),
   updated_at timestamptz DEFAULT now()
 );

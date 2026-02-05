@@ -1,5 +1,5 @@
-import React, { useState, useRef, useEffect } from "react";
-import LastUpdated from "../LastUpdated";
+import React, { useState, useMemo } from "react";
+import { Link } from "react-router-dom";
 import EmptyState from "../EmptyState";
 import AlertDetailModal from "../AlertDetailModal";
 import { AlertSkeleton } from "../LoadingSkeleton";
@@ -20,91 +20,85 @@ function getRelativeTime(date) {
   return d.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
 }
 
+/** Map stored severity (high/medium/low/info) to display tier: critical, warning, info. */
+function getDisplaySeverity(severity) {
+  const s = (severity || "info").toLowerCase();
+  if (s === "high") return "critical";
+  if (s === "medium") return "warning";
+  return "info";
+}
+
+const SEVERITY_PILLS = [
+  { value: "all", label: "All" },
+  { value: "critical", label: "Critical" },
+  { value: "warning", label: "Warning" },
+  { value: "info", label: "Info" },
+];
+
 export function AlertsSummaryCard({
   alerts = [],
-  recentAlerts,
   isLoadingAlerts,
-  lastUpdated,
-  onExportJson,
-  onExportCsv,
-  formatDateShort = (d) => (d ? new Date(d).toLocaleDateString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "—"),
 }) {
-  const list = recentAlerts != null ? recentAlerts : alerts.slice(0, 5);
-  const [exportOpen, setExportOpen] = useState(false);
+  const [severityFilter, setSeverityFilter] = useState("all");
   const [selectedAlert, setSelectedAlert] = useState(null);
   const [readIds, setReadIds] = useState(new Set());
-  const exportDropdownRef = useRef(null);
 
-  useEffect(() => {
-    if (!exportOpen) return;
-    const handleClickOutside = (e) => {
-      if (exportDropdownRef.current && !exportDropdownRef.current.contains(e.target)) {
-        setExportOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [exportOpen]);
+  const severityCounts = useMemo(() => {
+    const counts = { critical: 0, warning: 0, info: 0 };
+    alerts.forEach((a) => {
+      const tier = getDisplaySeverity(a.severity);
+      counts[tier]++;
+    });
+    return counts;
+  }, [alerts]);
 
-  const hasExport = onExportJson || onExportCsv;
-  const unreadCount = list.filter((a) => !readIds.has(a.id || a.timestamp)).length;
+  const filteredAlerts = useMemo(() => {
+    if (severityFilter === "all") return alerts;
+    return alerts.filter((a) => getDisplaySeverity(a.severity) === severityFilter);
+  }, [alerts, severityFilter]);
 
-  const handleMarkAllRead = () => {
-    setReadIds(new Set(list.map((a) => a.id || a.timestamp)));
-  };
+  const list = filteredAlerts.slice(0, 5);
 
   return (
     <div className="card card--fill alerts-summary-card alerts-notifications-panel">
       <div className="alerts-notifications-header">
-        <h2 className="alerts-notifications-title">Notifications</h2>
-        {hasExport && (
-          <div className="alerts-notifications-header-actions">
-            <div className="alerts-notifications-export" ref={exportDropdownRef}>
-              <button
-                type="button"
-                className="ghost-btn export-dropdown__trigger"
-                onClick={() => setExportOpen((v) => !v)}
-                aria-haspopup="true"
-                aria-expanded={exportOpen}
-                aria-label="Export alerts"
-              >
-                Export <span className="export-dropdown__chevron">▼</span>
-              </button>
-              {exportOpen && (
-                <div className="export-dropdown__menu" role="menu">
-                  {onExportJson && (
-                    <button
-                      type="button"
-                      role="menuitem"
-                      className="export-dropdown__item"
-                      onClick={() => {
-                        onExportJson(alerts);
-                        setExportOpen(false);
-                      }}
-                    >
-                      Export as JSON
-                    </button>
-                  )}
-                  {onExportCsv && (
-                    <button
-                      type="button"
-                      role="menuitem"
-                      className="export-dropdown__item"
-                      onClick={() => {
-                        onExportCsv(alerts);
-                        setExportOpen(false);
-                      }}
-                    >
-                      Export as CSV
-                    </button>
-                  )}
-                </div>
-              )}
-            </div>
-          </div>
-        )}
+        <div className="alerts-summary-title-row">
+          <h2 className="alerts-notifications-title">Alerts Summary</h2>
+          <span className="alerts-summary-count" aria-label={`${alerts.length} alerts`}>
+            {alerts.length}
+          </span>
+        </div>
       </div>
       <div className="card__body alerts-notifications-body">
+        {alerts.length > 0 && (
+          <div className="alerts-summary-breakdown" aria-label="Severity breakdown">
+            {severityCounts.critical > 0 && (
+              <span className="alerts-summary-badge alerts-summary-badge--critical">{severityCounts.critical} Critical</span>
+            )}
+            {severityCounts.warning > 0 && (
+              <span className="alerts-summary-badge alerts-summary-badge--warning">{severityCounts.warning} Warning</span>
+            )}
+            {severityCounts.info > 0 && (
+              <span className="alerts-summary-badge alerts-summary-badge--info">{severityCounts.info} Info</span>
+            )}
+          </div>
+        )}
+        {alerts.length > 0 && (
+          <div className="alerts-summary-pills" role="tablist" aria-label="Filter by severity">
+            {SEVERITY_PILLS.map((p) => (
+              <button
+                key={p.value}
+                type="button"
+                role="tab"
+                aria-selected={severityFilter === p.value}
+                className={`alerts-summary-pill ${severityFilter === p.value ? "alerts-summary-pill--active" : ""}`}
+                onClick={() => setSeverityFilter(p.value)}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+        )}
         {isLoadingAlerts ? (
           <div className="alerts-list alerts-notifications-list">
             {[1, 2, 3].map((i) => (
@@ -115,7 +109,7 @@ export function AlertsSummaryCard({
           <EmptyState
             icon="🔔"
             title="No alerts"
-            message="No alerts for the selected node."
+            message={alerts.length === 0 ? "No alerts — all systems operating normally." : `No ${severityFilter} alerts.`}
           />
         ) : (
           <>
@@ -123,11 +117,12 @@ export function AlertsSummaryCard({
               {list.map((a) => {
                 const alertId = a.id || a.timestamp;
                 const isUnread = !readIds.has(alertId);
+                const displaySeverity = getDisplaySeverity(a.severity);
                 return (
                   <li key={alertId} className="alerts-list__item alerts-notifications-item">
                     <button
                       type="button"
-                      className={`alert alert--${(a.severity || "info").toLowerCase()} alert--clickable alerts-notification-item`}
+                      className={`alert alert--${displaySeverity} alert--clickable alerts-notification-item`}
                       onClick={() => {
                         setReadIds((prev) => new Set([...prev, alertId]));
                         setSelectedAlert(a);
@@ -144,13 +139,13 @@ export function AlertsSummaryCard({
                 );
               })}
             </ul>
-            {unreadCount > 0 && (
-              <button type="button" className="alerts-mark-all-read" onClick={handleMarkAllRead}>
-                Mark all as read
-              </button>
-            )}
           </>
         )}
+        <div className="alerts-summary-footer">
+          <Link to="/alerts" className="alerts-summary-see-all">
+            See all alerts
+          </Link>
+        </div>
       </div>
       {selectedAlert && (
         <AlertDetailModal alert={selectedAlert} onClose={() => setSelectedAlert(null)} />

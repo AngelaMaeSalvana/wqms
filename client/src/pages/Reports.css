@@ -94,13 +94,21 @@
 .reports-chart-header {
   display: flex;
   flex-wrap: wrap;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 16px;
 }
 
 .reports-chart-header .card__title {
   margin: 0 0 4px 0;
+}
+
+.reports-chart-header-chart-type {
+  flex-shrink: 0;
+}
+
+.reports-chart-select--header {
+  min-width: 140px;
 }
 
 .reports-chart-header .card__desc {
@@ -122,6 +130,7 @@
   display: flex;
   flex-direction: column;
   min-height: 0;
+  padding-right: 4px;
 }
 
 .reports-chart-selectors {
@@ -129,16 +138,18 @@
   width: 200px;
   display: flex;
   flex-direction: column;
-  gap: 14px;
-  padding: 16px;
+  gap: 16px;
+  padding: 16px 16px 20px;
   border-left: 1px solid var(--border);
   background: rgba(255, 255, 255, 0.02);
+  justify-content: flex-start;
 }
 
 .reports-chart-selector-group {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  min-width: 0;
 }
 
 .reports-chart-selector-label {
@@ -359,6 +370,10 @@
 .reports-chart-report-title {
   flex-shrink: 0;
   margin-bottom: 12px;
+}
+
+.reports-chart-content:not(:has(.reports-chart-report-title)) .reports-chart-wrapper {
+  padding-top: 2px;
 }
 
 .reports-chart-report-heading {
@@ -637,9 +652,13 @@
   min-height: 200px;
 }
 
+/* Fixed height for 8 rows so pagination never moves when changing pages */
 .reports-data-table-wrap {
+  height: 368px;
+  min-height: 368px;
+  flex-shrink: 0;
   overflow: visible;
-  min-height: 120px;
+  padding-bottom: 0;
 }
 
 .reports-data-table {
@@ -650,7 +669,7 @@
 
 .reports-data-table th,
 .reports-data-table td {
-  padding: 10px 14px;
+  padding: 8px 12px;
   text-align: left;
   border-bottom: 1px solid var(--border);
   white-space: nowrap;
@@ -660,16 +679,39 @@
   color: var(--text-muted);
   font-weight: 600;
   font-size: 0.75rem;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  position: sticky;
-  top: 0;
-  background: var(--panel);
-  z-index: 1;
+}
+
+.reports-th-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 0;
+  margin: -4px 0;
+  background: none;
+  border: none;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: left;
+  white-space: nowrap;
+  transition: color 0.2s;
+}
+
+.reports-th-btn:hover {
+  color: var(--text);
+}
+
+.reports-th-btn--active {
+  color: var(--accent, #1b9c85);
 }
 
 .reports-data-table tbody tr:hover {
   background: rgba(255, 255, 255, 0.03);
+}
+
+.reports-data-table tbody tr:last-child td {
+  border-bottom: none;
 }
 
 .reports-data-table td {
@@ -701,15 +743,19 @@
 }
 
 .reports-table-pagination {
+  flex-shrink: 0;
+  min-height: 48px;
+  margin-top: -6px;
+  padding: 8px 16px;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 12px 16px;
   border-top: 1px solid var(--border);
   font-size: 0.85rem;
   color: var(--text-muted);
+  background: var(--panel);
 }
 
 .reports-table-pagination-info {
@@ -796,7 +842,8 @@
     width: 100%;
     flex-direction: row;
     flex-wrap: wrap;
-    padding: 12px;
+    padding: 14px 12px 16px;
+    gap: 14px;
     border-left: none;
     border-top: 1px solid var(--border);
   }
@@ -816,6 +863,7 @@
   }
   .reports-chart-header {
     flex-direction: column;
+    align-items: flex-start;
     gap: 12px;
   }
   .reports-filters {
@@ -863,6 +911,7 @@
   }
   .reports-chart-selectors {
     flex-direction: column;
+    padding: 12px 10px 16px;
   }
   .reports-chart-selector-group {
     flex: 1 1 100%;

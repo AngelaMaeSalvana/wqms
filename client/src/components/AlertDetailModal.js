@@ -1,4 +1,5 @@
 import React, { useEffect } from "react";
+import { createPortal } from "react-dom";
 import "./AlertDetailModal.css";
 
 const SEVERITY_LABELS = {
@@ -27,7 +28,7 @@ export function AlertDetailModal({ alert: a, onClose }) {
   const hasThreshold = a.thresholdMin != null || a.thresholdMax != null;
   const thresholdStr = [a.thresholdMin, a.thresholdMax].filter(Boolean).join("–");
 
-  return (
+  return createPortal(
     <div
       className="alert-detail-overlay"
       onClick={onClose}
@@ -100,7 +101,8 @@ export function AlertDetailModal({ alert: a, onClose }) {
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 

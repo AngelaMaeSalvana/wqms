@@ -22,50 +22,28 @@ const defaultOptions = {
   },
 };
 
-const PH_TZ = "Asia/Manila";
+const EMPTY_CHART_DATA = {
+  labels: [],
+  datasets: [
+    { label: "Temperature °C", data: [], borderColor: "#1b9c85", backgroundColor: "rgba(27, 156, 133, 0.1)", fill: true },
+    { label: "Turbidity", data: [], borderColor: "#d45b5b", backgroundColor: "rgba(212, 91, 91, 0.1)", fill: true },
+    { label: "Water pH", data: [], borderColor: "#f0a500", backgroundColor: "rgba(240, 165, 0, 0.1)", fill: true },
+    { label: "NH₃ mg/L", data: [], borderColor: "#9b59b6", backgroundColor: "rgba(155, 89, 182, 0.1)", fill: true },
+    { label: "Flow rate L/min", data: [], borderColor: "#3498db", backgroundColor: "rgba(52, 152, 219, 0.1)", fill: true },
+    { label: "Dissolved O₂ mg/L", data: [], borderColor: "#2ecc71", backgroundColor: "rgba(46, 204, 113, 0.1)", fill: true },
+  ],
+};
 
-function formatLastUpdate(isoString) {
-  if (!isoString) return null;
-  try {
-    const d = new Date(isoString);
-    return d.toLocaleString("en-PH", { timeZone: PH_TZ, dateStyle: "short", timeStyle: "medium" });
-  } catch {
-    return null;
-  }
-}
-
-export function LiveChart({ todayData, todayChartOptions, lastSensorUpdate }) {
-  const data = useMemo(() => {
-    if (todayData && todayData.labels && todayData.datasets?.length) {
-      return todayData;
-    }
-    return {
-      labels: ["00:00", "04:00", "08:00", "12:00", "16:00", "20:00"],
-      datasets: [
-        {
-          label: "Temperature °C",
-          data: [24, 25, 26, 27, 26, 25],
-          borderColor: "#1b9c85",
-          backgroundColor: "rgba(27, 156, 133, 0.1)",
-          fill: true,
-        },
-        {
-          label: "Turbidity",
-          data: [2, 2.2, 1.8, 2.5, 2.1, 2],
-          borderColor: "#d45b5b",
-          backgroundColor: "rgba(212, 91, 91, 0.1)",
-          fill: true,
-        },
-        {
-          label: "pH",
-          data: [7.0, 7.1, 7.2, 7.1, 7.0, 6.9],
-          borderColor: "#f0a500",
-          backgroundColor: "rgba(240, 165, 0, 0.1)",
-          fill: true,
-        },
-      ],
-    };
+export function LiveChart({ todayData, todayChartOptions }) {
+  const hasData = useMemo(() => {
+    if (!todayData?.labels?.length || !todayData?.datasets?.length) return false;
+    return todayData.datasets.some((ds) => ds.data?.length > 0);
   }, [todayData]);
+
+  const data = useMemo(() => {
+    if (hasData && todayData?.labels && todayData?.datasets?.length) return todayData;
+    return EMPTY_CHART_DATA;
+  }, [todayData, hasData]);
 
   const options = useMemo(() => {
     const merged = { ...defaultOptions, ...(todayChartOptions || {}) };
@@ -81,15 +59,10 @@ export function LiveChart({ todayData, todayChartOptions, lastSensorUpdate }) {
   return (
     <div className="card card--fill live-chart-card">
       <div className="card__header live-chart-card__header">
-        <div className="live-chart-card__title-wrap">
+        <div>
           <h2 className="card__title">Live Chart</h2>
-          {lastSensorUpdate != null && (
-            <p className="live-chart-card__last-update" aria-live="polite" title="Stored in UTC; shown in Philippines time (Asia/Manila). Late UTC can appear as next calendar day in PH.">
-              Last sensor update: {formatLastUpdate(lastSensorUpdate)} (Philippines)
-            </p>
-          )}
         </div>
-        {legendItems.length > 0 && (
+        {legendItems.length > 0 && hasData && (
           <div className="live-chart-legend" aria-hidden="true">
             {legendItems.map((item, i) => (
               <span key={i} className="live-chart-legend__item" style={{ ["--legend-color"]: item.color }}>
@@ -101,9 +74,19 @@ export function LiveChart({ todayData, todayChartOptions, lastSensorUpdate }) {
         )}
       </div>
       <div className="card__body card__body--fill live-chart-body">
-        <div className="line-chart line-chart--horizontal-only">
-          <Line data={data} options={options} />
-        </div>
+        {!hasData ? (
+          <div className="live-chart-empty" aria-live="polite">
+            <p className="live-chart-empty-message">No data for today.</p>
+            <p className="live-chart-empty-hint">Readings from the selected node will appear here as they are collected.</p>
+          </div>
+        ) : (
+          <div className="line-chart line-chart--horizontal-only">
+            <Line data={data} options={options} />
+          </div>
+        )}
+        <p className="live-chart-copy" aria-hidden="true">
+          Data uses a default sampling interval (e.g. 15 min) at normal flow. When flow increases, sampling frequency increases; when flow stabilizes, the system reverts to the default interval.
+        </p>
       </div>
     </div>
   );
