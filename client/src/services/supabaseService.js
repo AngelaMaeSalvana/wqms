@@ -4,12 +4,14 @@
  */
 import { supabase, isSupabaseEnabled } from '../lib/supabaseClient';
 
+export { isSupabaseEnabled };
+
 // --- Readings ---
 
 export async function getLatestReading(nodeId = null) {
   if (!isSupabaseEnabled()) return null;
   let q = supabase
-    .from('water_quality_readings')
+    .from('sensor_readings')
     .select('*')
     .order('timestamp', { ascending: false })
     .limit(1);
@@ -21,7 +23,7 @@ export async function getLatestReading(nodeId = null) {
 
 export async function getReadings({ startDate, endDate, nodeId, limit = 100 }) {
   if (!isSupabaseEnabled()) return [];
-  let q = supabase.from('water_quality_readings').select('*');
+  let q = supabase.from('sensor_readings').select('*');
   if (startDate) q = q.gte('timestamp', `${startDate}T00:00:00.000Z`);
   if (endDate) q = q.lte('timestamp', `${endDate}T23:59:59.999Z`);
   if (nodeId) q = q.eq('node_id', nodeId);
@@ -31,17 +33,9 @@ export async function getReadings({ startDate, endDate, nodeId, limit = 100 }) {
   return data || [];
 }
 
-/** Sensor readings table (bridge / testing). Same shape as getReadings. */
+/** Same table as getReadings; higher default limit for Reports. */
 export async function getSensorReadings({ startDate, endDate, nodeId, limit = 500 }) {
-  if (!isSupabaseEnabled()) return [];
-  let q = supabase.from('sensor_readings').select('*');
-  if (startDate) q = q.gte('timestamp', `${startDate}T00:00:00.000Z`);
-  if (endDate) q = q.lte('timestamp', `${endDate}T23:59:59.999Z`);
-  if (nodeId) q = q.eq('node_id', nodeId);
-  q = q.order('timestamp', { ascending: false }).limit(limit);
-  const { data, error } = await q;
-  if (error) throw new Error(error.message);
-  return data || [];
+  return getReadings({ startDate, endDate, nodeId, limit });
 }
 
 export async function getDailySummaries({ startDate, endDate, nodeId }) {
@@ -63,7 +57,7 @@ export async function getReadingByDate(date, nodeId = null) {
   const start = `${date}T00:00:00.000Z`;
   const end = `${date}T23:59:59.999Z`;
   let q = supabase
-    .from('water_quality_readings')
+    .from('sensor_readings')
     .select('*')
     .gte('timestamp', start)
     .lte('timestamp', end)
@@ -83,14 +77,15 @@ export async function postReading(reading) {
     temperature: reading.temperature,
     turbidity: reading.turbidity,
     ph: reading.pH ?? reading.ph,
-    nh3: reading.nh3 ?? reading.NH3,
     dissolved_oxygen: reading.dissolvedOxygen ?? reading.do,
     flow_rate: reading.flowRate ?? reading.flow_rate ?? null,
-    wqi: Math.round(reading.wqi ?? reading.WQI ?? 0),
+    seq: reading.seq != null ? (typeof reading.seq === 'number' ? reading.seq : parseInt(reading.seq, 10)) : null,
+    tx_millis: reading.tx_millis != null ? (typeof reading.tx_millis === 'number' ? reading.tx_millis : parseInt(reading.tx_millis, 10)) : null,
+    rx_millis: reading.rx_millis != null ? (typeof reading.rx_millis === 'number' ? reading.rx_millis : parseInt(reading.rx_millis, 10)) : null,
     timestamp: reading.timestamp || new Date().toISOString(),
   };
   const { data, error } = await supabase
-    .from('water_quality_readings')
+    .from('sensor_readings')
     .insert(row)
     .select('id')
     .single();
@@ -162,6 +157,42 @@ export async function saveNodesToSupabase(nodes) {
     last_maintenance: n.lastMaintenance ?? n.last_maintenance ?? null,
   }));
   const { error } = await supabase.from('nodes').upsert(rows, { onConflict: 'id' });
+  if (error) throw new Error(error.message);
+  return { success: true };
+}
+
+// --- Settings (thresholds, calibration, data collection, WQI weights) ---
+
+const SETTINGS_KEYS = [
+  'wqms_thresholds',
+  'wqms_calibration',
+  'wqms_data_collection',
+  'wqms_wqi_weights',
+];
+
+export async function getSettingsFromSupabase() {
+  if (!isSupabaseEnabled()) return null;
+  const { data, error } = await supabase
+    .from('settings')
+    .select('key, value')
+    .in('key', SETTINGS_KEYS);
+  if (error) throw new Error(error.message);
+  const map = {};
+  (data || []).forEach(({ key, value }) => {
+    map[key] = value || {};
+  });
+  return map;
+}
+
+export async function saveSettingsToSupabase(settingsByKey) {
+  if (!isSupabaseEnabled()) throw new Error('Supabase not configured');
+  const rows = Object.entries(settingsByKey).map(([key, value]) => ({
+    key,
+    value: value || {},
+  }));
+  const { error } = await supabase
+    .from('settings')
+    .upsert(rows, { onConflict: 'key', ignoreDuplicates: false });
   if (error) throw new Error(error.message);
   return { success: true };
 }

@@ -4,11 +4,11 @@ import { getWQIClass, getQualityRatings } from "../../utils/wqiCalculator";
 import "./WqiDetailModal.css";
 
 const PARAM_LABELS = [
-  { key: "temperature", label: "Temperature", unit: "°C", weight: "15%" },
+  { key: "temperature", label: "Temperature", unit: "°C", weight: "10%" },
   { key: "pH", label: "pH", unit: "", weight: "20%" },
   { key: "turbidity", label: "Turbidity", unit: "NTU", weight: "15%" },
   { key: "dissolvedOxygen", label: "Dissolved O₂", unit: "mg/L", weight: "30%" },
-  { key: "nh3", label: "NH₃", unit: "mg/L", weight: "20%" },
+  { key: "nh3", label: "NH₃ (from TAN)", unit: "mg/L", weight: "25%" },
   { key: "flowRate", label: "Flow rate", unit: "L/min", weight: "—" },
 ];
 
@@ -16,38 +16,40 @@ const CLASS_DETAILS = {
   excellent: {
     description: "Water is of excellent quality, suitable for drinking, irrigation, and all aquatic life. All parameters are within optimal ranges. Safe for direct consumption without treatment.",
     uses: "Drinking water, irrigation, aquaculture, recreational activities",
-    wqiRange: "< 50",
+    wqiRange: "90 – 100",
   },
   good: {
     description: "Water quality is good and generally safe for most uses. Minor deviations from optimal values may be present. Suitable for irrigation and most aquatic life. May require basic filtration for drinking.",
     uses: "Irrigation, aquaculture, recreational activities, drinking with treatment",
-    wqiRange: "50 - 100",
+    wqiRange: "70 – 89",
+  },
+  fair: {
+    description: "Water quality is fair. Some parameters may be outside optimal ranges. Suitable for irrigation with caution; treatment recommended for drinking.",
+    uses: "Irrigation with caution, industrial use; treatment recommended for drinking",
+    wqiRange: "50 – 69",
   },
   poor: {
-    description: "Water quality is poor with significant deviations from optimal values. Not recommended for drinking without extensive treatment. Limited use for irrigation. Some aquatic species may be affected.",
-    uses: "Limited irrigation (with caution), industrial cooling, NOT recommended for drinking or aquaculture",
-    wqiRange: "100 - 200",
+    description: "Water quality is poor with significant deviations from optimal values. Not recommended for drinking without extensive treatment. Limited use for irrigation.",
+    uses: "Limited irrigation (with caution), industrial cooling; NOT recommended for drinking or aquaculture",
+    wqiRange: "25 – 49",
   },
   "very-poor": {
     description: "Water quality is very poor with severe contamination. High health risks if consumed. Unsuitable for most uses including irrigation and aquatic life. Requires immediate treatment and monitoring.",
-    uses: "NOT SAFE for any human or animal consumption. Limited industrial use only with treatment",
-    wqiRange: "200 - 300",
+    uses: "NOT SAFE for any human or animal consumption. Requires immediate remediation",
+    wqiRange: "< 25",
   },
   unsuitable: {
-    description: "Water is severely contaminated and unsuitable for any use. Extreme health hazards present. Critical water quality parameters are beyond acceptable limits. Immediate remediation required.",
+    description: "Water is severely contaminated and unsuitable for any use. Extreme health hazards present. Immediate remediation required.",
     uses: "UNSUITABLE - No safe use possible. Requires emergency remediation measures",
-    wqiRange: "> 300",
+    wqiRange: "< 25",
   },
 };
 
-/** Bar segments: 0–33.3% Unsuitable, 33.3–66.7% Very Poor, 66.7–83.3% Poor, 83.3–100% Good/Excellent. */
+/** WQI scale 0–100: position on bar (0% = very poor, 100% = excellent). */
 function wqiToBarPosition(wqi) {
   const s = Number(wqi);
-  if (s >= 300) return 0;
-  if (s >= 200) return 33.3 * (1 - (s - 200) / 100);
-  if (s >= 100) return 33.3 + 33.4 * (1 - (s - 100) / 100);
-  if (s >= 50) return 83.3 + ((100 - s) / 50) * 16.7; /* Good → green (83.3–100%) */
-  return 83.3 + ((50 - s) / 50) * 16.7; /* Excellent → green */
+  if (isNaN(s)) return 0;
+  return Math.min(100, Math.max(0, s));
 }
 
 export default function WqiDetailModal({ date, wqi, params, onClose }) {

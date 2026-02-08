@@ -1,30 +1,65 @@
 /**
  * Water Quality Index (WQI) Calculator
- * 
- * Formula: WQI = (Σ(Q_i × W_i)) / (Σ W_i)
- * 
- * Where:
- * - Q_i = quality rating of parameter i
- * - W_i = weight of parameter i
- * - n = 5 (number of parameters)
- * 
- * Parameter Weights:
- * - Dissolved Oxygen (DO): 0.30
- * - pH: 0.20
- * - NH₃: 0.20
- * - Turbidity: 0.15
- * - Temperature: 0.15
- * Total: 1.00
+ *
+ * Final expanded formula: WQI = 0.10*Qtemp + 0.30*QDO + 0.20*QpH + 0.25*QNH3 + 0.15*Qturb
+ *
+ * Parameter Weights (suggested for environmental monitoring, Σ Wi = 1.00):
+ * - DO: 0.30, NH3: 0.25, pH: 0.20, Turbidity: 0.15, Temperature: 0.10
+ *
+ * NH3 is computed from TAN, pH, and temperature when not provided.
  */
 
-// Parameter weights
-const WEIGHTS = {
+import { calculateNH3FromTAN } from './nh3Calculator';
+
+const WQI_WEIGHTS_KEY = 'wqms_wqi_weights';
+
+/** Default parameter weights (Σ Wi = 1.00): DO 0.30, NH3 0.25, pH 0.20, Turbidity 0.15, Temperature 0.10 */
+export const DEFAULT_WQI_WEIGHTS = {
   dissolvedOxygen: 0.30,
+  nh3: 0.25,
   pH: 0.20,
-  nh3: 0.20,
   turbidity: 0.15,
-  temperature: 0.15,
+  temperature: 0.10,
 };
+
+/**
+ * Get WQI parameter weights from localStorage (user-adjustable in Settings).
+ * Returns normalized weights; falls back to defaults if invalid or missing.
+ */
+export function getWQIWeights() {
+  try {
+    const s = localStorage.getItem(WQI_WEIGHTS_KEY);
+    const stored = s ? JSON.parse(s) : null;
+    if (!stored || typeof stored !== 'object') return { ...DEFAULT_WQI_WEIGHTS };
+    const merged = {
+      dissolvedOxygen: parseFloat(stored.dissolvedOxygen),
+      nh3: parseFloat(stored.nh3),
+      pH: parseFloat(stored.pH),
+      turbidity: parseFloat(stored.turbidity),
+      temperature: parseFloat(stored.temperature),
+    };
+    const safe = (v, def) => (isFinite(v) && v >= 0 ? v : def);
+    const d = DEFAULT_WQI_WEIGHTS;
+    const raw = {
+      dissolvedOxygen: safe(merged.dissolvedOxygen, d.dissolvedOxygen),
+      nh3: safe(merged.nh3, d.nh3),
+      pH: safe(merged.pH, d.pH),
+      turbidity: safe(merged.turbidity, d.turbidity),
+      temperature: safe(merged.temperature, d.temperature),
+    };
+    const sum = Object.values(raw).reduce((a, v) => a + v, 0);
+    if (sum <= 0) return { ...DEFAULT_WQI_WEIGHTS };
+    return {
+      dissolvedOxygen: raw.dissolvedOxygen / sum,
+      nh3: raw.nh3 / sum,
+      pH: raw.pH / sum,
+      turbidity: raw.turbidity / sum,
+      temperature: raw.temperature / sum,
+    };
+  } catch {
+    return { ...DEFAULT_WQI_WEIGHTS };
+  }
+}
 
 /**
  * Calculate quality rating (Q_i) for Dissolved Oxygen
@@ -158,50 +193,52 @@ const calculateTemperatureQuality = (tempValue) => {
 
 /**
  * Calculate Water Quality Index (WQI)
- * 
- * Formula: WQI = (Σ(Q_i × W_i)) / (Σ W_i)
- * 
+ * WQI = 0.10*Qtemp + 0.30*QDO + 0.20*QpH + 0.25*QNH3 + 0.15*Qturb
+ *
  * @param {Object} params - Sensor readings
  * @param {number} params.dissolvedOxygen - Dissolved Oxygen in mg/L
  * @param {number} params.pH - pH value
- * @param {number} params.nh3 - NH₃ (Ammonia) in mg/L
+ * @param {number} [params.nh3] - NH₃ (Ammonia) in mg/L (optional; computed from tan/pH/temperature if not provided)
+ * @param {number} [params.tan] - TAN in mg/L (used with pH and temperature to compute NH3)
  * @param {number} params.turbidity - Turbidity in NTU
  * @param {number} params.temperature - Temperature in °C
  * @returns {number|null} - Calculated WQI value or null if insufficient data
  */
 export const calculateWQI = (params) => {
-  const { dissolvedOxygen, pH, nh3, turbidity, temperature } = params;
+  const { dissolvedOxygen, pH, nh3: nh3Param, tan, turbidity, temperature } = params;
+  const nh3 = nh3Param != null && !isNaN(nh3Param)
+    ? nh3Param
+    : calculateNH3FromTAN(tan, pH, temperature);
 
-  // Calculate quality ratings for each parameter
   const qDO = calculateDOQuality(dissolvedOxygen);
   const qPH = calculatepHQuality(pH);
   const qNH3 = calculateNH3Quality(nh3);
   const qTurbidity = calculateTurbidityQuality(turbidity);
   const qTemperature = calculateTemperatureQuality(temperature);
 
-  // Collect valid quality ratings and their weights
+  const w = getWQIWeights();
   const qualityRatings = [];
   const weights = [];
 
   if (qDO !== null) {
     qualityRatings.push(qDO);
-    weights.push(WEIGHTS.dissolvedOxygen);
+    weights.push(w.dissolvedOxygen);
   }
   if (qPH !== null) {
     qualityRatings.push(qPH);
-    weights.push(WEIGHTS.pH);
+    weights.push(w.pH);
   }
   if (qNH3 !== null) {
     qualityRatings.push(qNH3);
-    weights.push(WEIGHTS.nh3);
+    weights.push(w.nh3);
   }
   if (qTurbidity !== null) {
     qualityRatings.push(qTurbidity);
-    weights.push(WEIGHTS.turbidity);
+    weights.push(w.turbidity);
   }
   if (qTemperature !== null) {
     qualityRatings.push(qTemperature);
-    weights.push(WEIGHTS.temperature);
+    weights.push(w.temperature);
   }
 
   // Need at least 3 parameters to calculate WQI
@@ -226,13 +263,17 @@ export const calculateWQI = (params) => {
 };
 
 /**
- * Get quality ratings for all parameters (for debugging/display)
+ * Get quality ratings for all parameters (for debugging/display).
+ * Accepts nh3 directly or tan + pH + temperature to compute NH3.
  */
 export const getQualityRatings = (params) => {
+  const nh3 = params.nh3 != null && !isNaN(params.nh3)
+    ? params.nh3
+    : calculateNH3FromTAN(params.tan, params.pH, params.temperature);
   return {
     dissolvedOxygen: calculateDOQuality(params.dissolvedOxygen),
     pH: calculatepHQuality(params.pH),
-    nh3: calculateNH3Quality(params.nh3),
+    nh3: calculateNH3Quality(nh3),
     turbidity: calculateTurbidityQuality(params.turbidity),
     temperature: calculateTemperatureQuality(params.temperature),
   };
@@ -240,15 +281,15 @@ export const getQualityRatings = (params) => {
 
 /**
  * Get WQI classification (class, label, quality key for styling)
- * Ranges: <50 Excellent, 50–100 Good, 100–200 Poor, 200–300 Very Poor, >300 Unsuitable
+ * Scale: 90–100 Excellent, 70–89 Good, 50–69 Fair, 25–49 Poor, <25 Very Poor
  */
 export function getWQIClass(wqi) {
   if (wqi == null || isNaN(wqi)) return { class: "N/A", label: "No Data", quality: "muted" };
-  if (wqi < 50) return { class: "I", label: "Excellent", quality: "excellent" };
-  if (wqi <= 100) return { class: "II", label: "Good", quality: "good" };
-  if (wqi <= 200) return { class: "III", label: "Poor", quality: "poor" };
-  if (wqi <= 300) return { class: "IV", label: "Very Poor", quality: "very-poor" };
-  return { class: "V", label: "Unsuitable", quality: "unsuitable" };
+  if (wqi >= 90) return { class: "I", label: "Excellent", quality: "excellent" };
+  if (wqi >= 70) return { class: "II", label: "Good", quality: "good" };
+  if (wqi >= 50) return { class: "III", label: "Fair", quality: "fair" };
+  if (wqi >= 25) return { class: "IV", label: "Poor", quality: "poor" };
+  return { class: "V", label: "Very Poor", quality: "very-poor" };
 }
 
 export default calculateWQI;

@@ -10,12 +10,13 @@
   padding: 16px;
 }
 
-.alert-detail-modal {
-  max-width: 340px;
-  width: 100%;
+.alert-detail-overlay .alert-detail-modal {
+  width: min(100%, 420px);
+  max-width: 420px;
   max-height: 90vh;
   overflow: auto;
   padding: 20px;
+  flex-shrink: 0;
 }
 
 .alert-detail-modal__header {

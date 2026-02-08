@@ -82,13 +82,22 @@ function normalizeNodeId(id) {
   return s;
 }
 
+const { calculateWQI } = require('./utils/nh3Wqi');
+
 async function updateDailySummary(reading, nodeId) {
   const today = new Date().toISOString().split('T')[0];
-  const wqi = Math.round(reading.wqi || reading.WQI || 0);
   const location = reading.location || 'Unknown';
   const ph = reading.pH ?? reading.ph;
-  const nh3 = reading.nh3 ?? reading.NH3;
+  const tan = reading.tan ?? reading.TAN ?? 0.5;
   const doVal = reading.dissolvedOxygen ?? reading.do;
+  const flowRate = reading.flowRate ?? reading.flow_rate ?? null;
+  const wqi = calculateWQI({
+    temperature: reading.temperature,
+    ph,
+    tan,
+    dissolvedOxygen: doVal,
+    turbidity: reading.turbidity,
+  });
 
   const existing = await db.getDailySummaryByDateAndNode(today, nodeId);
   if (existing) {
@@ -99,12 +108,13 @@ async function updateDailySummary(reading, nodeId) {
       location: existing.location,
       avg_temperature: (existing.avg_temperature * existing.reading_count + reading.temperature) / newCount,
       avg_turbidity: (existing.avg_turbidity * existing.reading_count + reading.turbidity) / newCount,
-      avg_ph: (existing.avg_ph * existing.reading_count + ph) / newCount,
-      avg_nh3: (existing.avg_nh3 * existing.reading_count + nh3) / newCount,
-      avg_dissolved_oxygen: (existing.avg_dissolved_oxygen * existing.reading_count + doVal) / newCount,
-      avg_wqi: (existing.avg_wqi * existing.reading_count + wqi) / newCount,
-      min_wqi: Math.min(existing.min_wqi, wqi),
-      max_wqi: Math.max(existing.max_wqi, wqi),
+      avg_ph: (existing.avg_ph * existing.reading_count + (ph ?? 0)) / newCount,
+      avg_tan: (existing.avg_tan * existing.reading_count + tan) / newCount,
+      avg_dissolved_oxygen: (existing.avg_dissolved_oxygen * existing.reading_count + (doVal ?? 0)) / newCount,
+      avg_flow_rate: (existing.avg_flow_rate * existing.reading_count + (flowRate ?? 0)) / newCount,
+      avg_wqi: wqi != null && existing.avg_wqi != null ? (existing.avg_wqi * existing.reading_count + wqi) / newCount : (wqi ?? existing.avg_wqi),
+      min_wqi: wqi != null ? (existing.min_wqi != null ? Math.min(existing.min_wqi, wqi) : wqi) : existing.min_wqi,
+      max_wqi: wqi != null ? (existing.max_wqi != null ? Math.max(existing.max_wqi, wqi) : wqi) : existing.max_wqi,
       reading_count: newCount,
     });
   } else {
@@ -115,8 +125,9 @@ async function updateDailySummary(reading, nodeId) {
       avg_temperature: reading.temperature,
       avg_turbidity: reading.turbidity,
       avg_ph: ph,
-      avg_nh3: nh3,
+      avg_tan: tan,
       avg_dissolved_oxygen: doVal,
+      avg_flow_rate: flowRate,
       avg_wqi: wqi,
       min_wqi: wqi,
       max_wqi: wqi,
@@ -138,9 +149,11 @@ async function handleMQTTMessage(topic, data) {
       temperature: reading.temperature,
       turbidity: reading.turbidity,
       ph: reading.pH ?? reading.ph,
-      nh3: reading.nh3 ?? reading.NH3,
       dissolved_oxygen: reading.dissolvedOxygen ?? reading.do,
-      wqi: Math.round(reading.wqi || reading.WQI || 0),
+      flow_rate: reading.flowRate ?? reading.flow_rate ?? null,
+      seq: reading.seq != null ? (typeof reading.seq === 'number' ? reading.seq : parseInt(reading.seq, 10)) : null,
+      tx_millis: reading.tx_millis != null ? (typeof reading.tx_millis === 'number' ? reading.tx_millis : parseInt(reading.tx_millis, 10)) : null,
+      rx_millis: reading.rx_millis != null ? (typeof reading.rx_millis === 'number' ? reading.rx_millis : parseInt(reading.rx_millis, 10)) : null,
       timestamp,
     };
     const result = await db.insertReading(row);
@@ -229,9 +242,11 @@ app.post('/api/readings', async (req, res) => {
       temperature: reading.temperature,
       turbidity: reading.turbidity,
       ph: reading.pH ?? reading.ph,
-      nh3: reading.nh3 ?? reading.NH3,
       dissolved_oxygen: reading.dissolvedOxygen ?? reading.do,
-      wqi: Math.round(reading.wqi ?? reading.WQI ?? 0),
+      flow_rate: reading.flowRate ?? reading.flow_rate ?? null,
+      seq: reading.seq != null ? (typeof reading.seq === 'number' ? reading.seq : parseInt(reading.seq, 10)) : null,
+      tx_millis: reading.tx_millis != null ? (typeof reading.tx_millis === 'number' ? reading.tx_millis : parseInt(reading.tx_millis, 10)) : null,
+      rx_millis: reading.rx_millis != null ? (typeof reading.rx_millis === 'number' ? reading.rx_millis : parseInt(reading.rx_millis, 10)) : null,
       timestamp: reading.timestamp || new Date().toISOString(),
     };
     const result = await db.insertReading(row);

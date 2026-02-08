@@ -54,23 +54,23 @@ function sqliteAll(sql, params = []) {
 // --- Readings ---
 async function insertReading(row) {
   if (useSupabase) {
-    const { data, error } = await supabase.from('water_quality_readings').insert(row).select('id').single();
+    const { data, error } = await supabase.from('sensor_readings').insert(row).select('id').single();
     if (error) throw error;
     return { lastID: data?.id };
   }
-  const sql = `INSERT INTO water_quality_readings (node_id, location, temperature, turbidity, ph, nh3, dissolved_oxygen, wqi, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`;
-  return sqliteRun(sql, [row.node_id, row.location, row.temperature, row.turbidity, row.ph, row.nh3, row.dissolved_oxygen, row.wqi, row.timestamp]);
+  const sql = `INSERT INTO sensor_readings (node_id, location, temperature, turbidity, ph, dissolved_oxygen, flow_rate, seq, tx_millis, rx_millis, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+  return sqliteRun(sql, [row.node_id, row.location, row.temperature, row.turbidity, row.ph, row.dissolved_oxygen, row.flow_rate ?? null, row.seq ?? null, row.tx_millis ?? null, row.rx_millis ?? null, row.timestamp]);
 }
 
 async function getLatestReading(nodeId = null) {
   if (useSupabase) {
-    let q = supabase.from('water_quality_readings').select('*').order('timestamp', { ascending: false }).limit(1);
+    let q = supabase.from('sensor_readings').select('*').order('timestamp', { ascending: false }).limit(1);
     if (nodeId) q = q.eq('node_id', nodeId);
     const { data, error } = await q.maybeSingle();
     if (error) throw error;
     return data || {};
   }
-  let sql = 'SELECT * FROM water_quality_readings';
+  let sql = 'SELECT * FROM sensor_readings';
   const params = [];
   if (nodeId) {
     sql += ' WHERE node_id = ?';
@@ -83,7 +83,7 @@ async function getLatestReading(nodeId = null) {
 
 async function getReadings({ startDate, endDate, nodeId, limit = 100 }) {
   if (useSupabase) {
-    let q = supabase.from('water_quality_readings').select('*').order('timestamp', { ascending: false }).limit(parseInt(limit));
+    let q = supabase.from('sensor_readings').select('*').order('timestamp', { ascending: false }).limit(parseInt(limit));
     if (startDate) q = q.gte('timestamp', `${startDate}T00:00:00.000Z`);
     if (endDate) q = q.lte('timestamp', `${endDate}T23:59:59.999Z`);
     if (nodeId) q = q.eq('node_id', nodeId);
@@ -91,7 +91,7 @@ async function getReadings({ startDate, endDate, nodeId, limit = 100 }) {
     if (error) throw error;
     return data || [];
   }
-  let sql = 'SELECT * FROM water_quality_readings WHERE 1=1';
+  let sql = 'SELECT * FROM sensor_readings WHERE 1=1';
   const params = [];
   if (startDate) { sql += ' AND date(timestamp) >= ?'; params.push(startDate); }
   if (endDate) { sql += ' AND date(timestamp) <= ?'; params.push(endDate); }
@@ -105,13 +105,13 @@ async function getReadingByDate(date, nodeId = null) {
   if (useSupabase) {
     const start = `${date}T00:00:00.000Z`;
     const end = `${date}T23:59:59.999Z`;
-    let q = supabase.from('water_quality_readings').select('*').gte('timestamp', start).lte('timestamp', end).order('timestamp', { ascending: false }).limit(1);
+    let q = supabase.from('sensor_readings').select('*').gte('timestamp', start).lte('timestamp', end).order('timestamp', { ascending: false }).limit(1);
     if (nodeId) q = q.eq('node_id', nodeId);
     const { data, error } = await q.maybeSingle();
     if (error) throw error;
     return data || {};
   }
-  let sql = 'SELECT * FROM water_quality_readings WHERE date(timestamp) = ?';
+  let sql = 'SELECT * FROM sensor_readings WHERE date(timestamp) = ?';
   const params = [date];
   if (nodeId) { sql += ' AND node_id = ?'; params.push(nodeId); }
   sql += ' ORDER BY timestamp DESC LIMIT 1';
@@ -182,14 +182,14 @@ async function upsertDailySummary(row) {
     if (error) throw error;
     return;
   }
-  const sql = `INSERT INTO daily_summaries (date, node_id, location, avg_temperature, avg_turbidity, avg_ph, avg_nh3, avg_dissolved_oxygen, avg_wqi, min_wqi, max_wqi, reading_count)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  const sql = `INSERT INTO daily_summaries (date, node_id, location, avg_temperature, avg_turbidity, avg_ph, avg_tan, avg_dissolved_oxygen, avg_flow_rate, avg_wqi, min_wqi, max_wqi, reading_count)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(date, node_id) DO UPDATE SET
-    avg_temperature=excluded.avg_temperature, avg_turbidity=excluded.avg_turbidity, avg_ph=excluded.avg_ph, avg_nh3=excluded.avg_nh3,
-    avg_dissolved_oxygen=excluded.avg_dissolved_oxygen, avg_wqi=excluded.avg_wqi, min_wqi=excluded.min_wqi, max_wqi=excluded.max_wqi, reading_count=excluded.reading_count`;
+    avg_temperature=excluded.avg_temperature, avg_turbidity=excluded.avg_turbidity, avg_ph=excluded.avg_ph, avg_tan=excluded.avg_tan,
+    avg_dissolved_oxygen=excluded.avg_dissolved_oxygen, avg_flow_rate=excluded.avg_flow_rate, avg_wqi=excluded.avg_wqi, min_wqi=excluded.min_wqi, max_wqi=excluded.max_wqi, reading_count=excluded.reading_count`;
   await sqliteRun(sql, [
-    row.date, row.node_id, row.location, row.avg_temperature, row.avg_turbidity, row.avg_ph, row.avg_nh3,
-    row.avg_dissolved_oxygen, row.avg_wqi, row.min_wqi, row.max_wqi, row.reading_count
+    row.date, row.node_id, row.location, row.avg_temperature, row.avg_turbidity, row.avg_ph, row.avg_tan ?? null,
+    row.avg_dissolved_oxygen, row.avg_flow_rate ?? null, row.avg_wqi, row.min_wqi, row.max_wqi, row.reading_count
   ]);
 }
 
@@ -198,10 +198,10 @@ function initializeSqlite() {
   if (useSupabase || !sqliteDb) return;
   const run = (sql) => new Promise((res, rej) => sqliteDb.run(sql, (err) => (err ? rej(err) : res())));
   return Promise.all([
-    run(`CREATE TABLE IF NOT EXISTS water_quality_readings (
-      id INTEGER PRIMARY KEY AUTOINCREMENT, node_id TEXT, location TEXT, temperature REAL, turbidity REAL, ph REAL, nh3 REAL, dissolved_oxygen REAL, wqi INTEGER, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP, created_at DATETIME DEFAULT CURRENT_TIMESTAMP )`),
+    run(`CREATE TABLE IF NOT EXISTS sensor_readings (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, node_id TEXT NOT NULL, location TEXT, temperature REAL, turbidity REAL, ph REAL, dissolved_oxygen REAL, flow_rate REAL, seq INTEGER, tx_millis INTEGER, rx_millis INTEGER, timestamp DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, created_at DATETIME DEFAULT CURRENT_TIMESTAMP )`),
     run(`CREATE TABLE IF NOT EXISTS alerts ( id INTEGER PRIMARY KEY AUTOINCREMENT, node_id TEXT, title TEXT, detail TEXT, severity TEXT, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP, created_at DATETIME DEFAULT CURRENT_TIMESTAMP )`),
-    run(`CREATE TABLE IF NOT EXISTS daily_summaries ( id INTEGER PRIMARY KEY AUTOINCREMENT, date DATE, node_id TEXT, location TEXT, avg_temperature REAL, avg_turbidity REAL, avg_ph REAL, avg_nh3 REAL, avg_dissolved_oxygen REAL, avg_wqi REAL, min_wqi INTEGER, max_wqi INTEGER, reading_count INTEGER, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, UNIQUE(date, node_id) )`)
+    run(`CREATE TABLE IF NOT EXISTS daily_summaries ( id INTEGER PRIMARY KEY AUTOINCREMENT, date DATE, node_id TEXT, location TEXT, avg_temperature REAL, avg_turbidity REAL, avg_ph REAL, avg_tan REAL, avg_dissolved_oxygen REAL, avg_flow_rate REAL, avg_wqi REAL, min_wqi INTEGER, max_wqi INTEGER, reading_count INTEGER, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, UNIQUE(date, node_id) )`)
   ]).then(() => console.log('✅ SQLite tables initialized'));
 }
 

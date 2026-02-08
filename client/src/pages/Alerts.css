@@ -170,6 +170,10 @@
   overflow: auto;
 }
 
+.alerts-grid--empty .card__body {
+  overflow: hidden;
+}
+
 .alerts-grid-placeholder {
   min-height: 200px;
   display: flex;

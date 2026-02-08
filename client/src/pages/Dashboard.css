@@ -230,7 +230,7 @@
     flex: 1 1 100%;
   }
   .wqiScore {
-    font-size: 2rem;
+    font-size: 1.75rem;
   }
   .mini-map-wrapper,
   .mini-map-wrapper--leaflet {
@@ -243,6 +243,6 @@
     font-size: 0.95rem;
   }
   .wqiScore {
-    font-size: 1.75rem;
+    font-size: 1.5rem;
   }
 }

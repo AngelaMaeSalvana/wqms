@@ -8,6 +8,7 @@ import PageDateWithStatus from "../components/PageDateWithStatus";
 import CalendarCard from "../components/reports/calendar-card";
 import WqiDetailModal from "../components/reports/WqiDetailModal";
 import { getWQIClass, calculateWQI } from "../utils/wqiCalculator";
+import { getNH3FromReading, calculateNH3FromTAN } from "../utils/nh3Calculator";
 import { getNodes, loadNodes } from "../utils/nodesStorage";
 import api from "../services/api";
 import { applyCalibrationToReadings } from "../utils/calibration";
@@ -259,9 +260,9 @@ function buildReportChartFromSummaries(parameterId, periodId, rangeStart, rangeE
     pH: (s) => s.avg_ph,
     turbidity: (s) => s.avg_turbidity,
     dissolvedOxygen: (s) => s.avg_dissolved_oxygen,
-    nh3: (s) => s.avg_nh3,
+    nh3: (s) => s.avg_nh3 ?? (s.avg_tan != null && s.avg_ph != null && s.avg_temperature != null ? calculateNH3FromTAN(s.avg_tan, s.avg_ph, s.avg_temperature) : null),
     wqi: (s) => s.avg_wqi,
-    flowRate: () => null,
+    flowRate: (s) => s.avg_flow_rate ?? null,
   };
   const getVal = paramMap[parameterId] || (() => null);
   const minArr = [];
@@ -354,13 +355,15 @@ function buildCalendarDays(year, month, summaries = []) {
       const daySummaries = byDate[key] || [];
       if (daySummaries.length > 0) {
         const firstS = daySummaries[0];
+        const avgNh3 = firstS.avg_nh3 ?? (firstS.avg_tan != null && firstS.avg_ph != null && firstS.avg_temperature != null ? calculateNH3FromTAN(firstS.avg_tan, firstS.avg_ph, firstS.avg_temperature) : null);
         params = {
           temperature: firstS.avg_temperature,
           pH: firstS.avg_ph,
           turbidity: firstS.avg_turbidity,
           dissolvedOxygen: firstS.avg_dissolved_oxygen,
-          nh3: firstS.avg_nh3,
-          flowRate: null,
+          nh3: avgNh3,
+          tan: firstS.avg_tan,
+          flowRate: firstS.avg_flow_rate ?? null,
         };
         wqi = firstS.avg_wqi != null ? Math.round(firstS.avg_wqi) : calculateWQI(params);
       }
@@ -414,33 +417,41 @@ function aggregateReadingsToDailySummaries(readings) {
     const phs = num((r) => r.ph ?? r.pH);
     const turbs = num((r) => r.turbidity);
     const dos = num((r) => r.dissolved_oxygen ?? r.dissolvedOxygen ?? r.do);
-    const nh3s = num((r) => r.nh3 ?? r.NH3);
-    const wqis = num((r) => r.wqi ?? r.WQI);
+    const nh3s = dayReadings.map((r) => getNH3FromReading(r)).filter((v) => v != null);
+    const tans = num((r) => r.tan ?? r.TAN);
+    const flowRates = num((r) => r.flow_rate ?? r.flowRate);
+    const avgTemp = temps.length ? temps.reduce((a, b) => a + b, 0) / temps.length : null;
+    const avgPh = phs.length ? phs.reduce((a, b) => a + b, 0) / phs.length : null;
+    const avgTurb = turbs.length ? turbs.reduce((a, b) => a + b, 0) / turbs.length : null;
+    const avgDO = dos.length ? dos.reduce((a, b) => a + b, 0) / dos.length : null;
+    const avgTan = tans.length ? tans.reduce((a, b) => a + b, 0) / tans.length : null;
+    const avgNh3 = nh3s.length ? nh3s.reduce((a, b) => a + b, 0) / nh3s.length : null;
+    const avgFlow = flowRates.length ? flowRates.reduce((a, b) => a + b, 0) / flowRates.length : null;
+    const wqiFromParams = calculateWQI({ temperature: avgTemp, pH: avgPh, tan: avgTan, turbidity: avgTurb, dissolvedOxygen: avgDO });
     return {
       date,
       node_id: dayReadings[0]?.node_id ?? dayReadings[0]?.nodeId,
       location: dayReadings[0]?.location,
-      avg_temperature: temps.length ? temps.reduce((a, b) => a + b, 0) / temps.length : null,
-      avg_ph: phs.length ? phs.reduce((a, b) => a + b, 0) / phs.length : null,
-      avg_turbidity: turbs.length ? turbs.reduce((a, b) => a + b, 0) / turbs.length : null,
-      avg_dissolved_oxygen: dos.length ? dos.reduce((a, b) => a + b, 0) / dos.length : null,
-      avg_nh3: nh3s.length ? nh3s.reduce((a, b) => a + b, 0) / nh3s.length : null,
-      avg_wqi: wqis.length ? wqis.reduce((a, b) => a + b, 0) / wqis.length : null,
-      min_wqi: wqis.length ? Math.min(...wqis) : null,
-      max_wqi: wqis.length ? Math.max(...wqis) : null,
+      avg_temperature: avgTemp,
+      avg_ph: avgPh,
+      avg_turbidity: avgTurb,
+      avg_dissolved_oxygen: avgDO,
+      avg_tan: avgTan,
+      avg_nh3: avgNh3,
+      avg_flow_rate: avgFlow,
+      avg_wqi: wqiFromParams,
+      min_wqi: wqiFromParams,
+      max_wqi: wqiFromParams,
       reading_count: n,
     };
   });
 }
 
-/** Bar segments: 0–33.3% Unsuitable, 33.3–66.7% Very Poor, 66.7–83.3% Poor, 83.3–100% Good/Excellent. */
+/** WQI scale 0–100: position on bar (0% = very poor, 100% = excellent). */
 function wqiToBarPosition(wqi) {
   const s = Number(wqi);
-  if (s >= 300) return 0;
-  if (s >= 200) return 33.3 * (1 - (s - 200) / 100);
-  if (s >= 100) return 33.3 + 33.4 * (1 - (s - 100) / 100);
-  if (s >= 50) return 83.3 + ((100 - s) / 50) * 16.7;
-  return 83.3 + ((50 - s) / 50) * 16.7;
+  if (isNaN(s)) return 0;
+  return Math.min(100, Math.max(0, s));
 }
 
 export default function Reports() {
@@ -578,11 +589,11 @@ export default function Reports() {
     const rows = list.map((r) => {
       const d = typeof r.timestamp === "string" ? new Date(r.timestamp) : new Date(r.timestamp);
       const nodeId = r.node_id || r.nodeId || "1";
-      const wqi = r.wqi != null ? Math.round(r.wqi) : calculateWQI({
+      const wqi = calculateWQI({
         temperature: r.temperature,
         turbidity: r.turbidity,
         pH: r.ph ?? r.pH,
-        nh3: r.nh3 ?? r.NH3,
+        tan: r.tan ?? r.TAN,
         dissolvedOxygen: r.dissolved_oxygen ?? r.dissolvedOxygen ?? r.do,
       });
       return {
@@ -593,8 +604,8 @@ export default function Reports() {
         pH: r.ph ?? r.pH ?? null,
         turbidity: r.turbidity ?? null,
         dissolvedOxygen: r.dissolved_oxygen ?? r.dissolvedOxygen ?? r.do ?? null,
-        nh3: r.nh3 ?? r.NH3 ?? null,
-        flowRate: r.flowRate ?? null,
+        nh3: getNH3FromReading(r),
+        flowRate: r.flow_rate ?? r.flowRate ?? null,
         wqi: wqi != null ? Math.round(wqi) : null,
       };
     });

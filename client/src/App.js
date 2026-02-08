@@ -1,7 +1,8 @@
-import React from "react";
+import React, { useEffect } from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 
 import Layout from "./components/Layout.js";
+import { syncSettingsFromSupabase } from "./utils/settingsStorage";
 import ErrorBoundary from "./components/ErrorBoundary.js";
 
 import Dashboard from "./pages/Dashboard";
@@ -14,6 +15,10 @@ import Settings from "./pages/Settings";
 import "./App.css";
 
 export default function App() {
+  useEffect(() => {
+    syncSettingsFromSupabase();
+  }, []);
+
   return (
     <ErrorBoundary>
       <BrowserRouter>

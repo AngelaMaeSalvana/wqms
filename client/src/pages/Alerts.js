@@ -3,6 +3,7 @@ import { jsPDF } from "jspdf";
 import { autoTable } from "jspdf-autotable";
 import PageDateWithStatus from "../components/PageDateWithStatus";
 import AlertDetailModal from "../components/AlertDetailModal";
+import EmptyState from "../components/EmptyState";
 import { buildAlertsForAllNodes } from "../utils/alertsData";
 import { getNodes, loadNodes } from "../utils/nodesStorage";
 import api from "../services/api";
@@ -331,12 +332,18 @@ export default function Alerts() {
         </div>
       </div>
 
-      <section className="alerts-grid card alerts-notifications-panel">
+      <section className={`alerts-grid card alerts-notifications-panel ${filteredAlerts.length === 0 ? "alerts-grid--empty" : ""}`}>
         <div className="card__body alerts-notifications-body">
           {filteredAlerts.length === 0 ? (
-            <div className="alerts-grid-placeholder">
-              No alerts match your filters. Alerts are generated from threshold breaches, node status (offline/testing), and maintenance due.
-            </div>
+            <EmptyState
+              icon="🔔"
+              title="No alerts"
+              message={
+                allAlerts.length === 0
+                  ? "No alerts — all systems operating normally."
+                  : "No alerts match your filters. Alerts are generated from threshold breaches, node status (offline/testing), and maintenance due."
+              }
+            />
           ) : (
             <>
               <ul className="alerts-tab-list alerts-notifications-list" aria-label="Alerts list">

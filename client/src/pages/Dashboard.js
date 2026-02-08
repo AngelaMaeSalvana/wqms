@@ -9,6 +9,7 @@ import MiniMapCard from "../components/dashboard/MiniMapCard";
 import AlertsSummaryCard from "../components/dashboard/AlertsSummaryCard";
 import PageDateWithStatus from "../components/PageDateWithStatus";
 import { calculateWQI, getWQIClass } from "../utils/wqiCalculator";
+import { getNH3FromReading } from "../utils/nh3Calculator";
 import { buildAlertsForAllNodes } from "../utils/alertsData";
 import { getNodes, loadNodes } from "../utils/nodesStorage";
 import api from "../services/api";
@@ -81,6 +82,7 @@ export default function Dashboard() {
           const nid = r.node_id || r.nodeId || "1";
           if (!byNode[nid] || new Date(r.timestamp) > new Date(byNode[nid].timestamp)) {
             byNode[nid] = {
+              ...r,
               temperature: r.temperature,
               pH: r.ph,
               ph: r.ph,
@@ -88,8 +90,9 @@ export default function Dashboard() {
               dissolvedOxygen: r.dissolved_oxygen,
               dissolved_oxygen: r.dissolved_oxygen,
               do: r.dissolved_oxygen,
-              nh3: r.nh3,
-              NH3: r.nh3,
+              tan: r.tan ?? r.TAN,
+              nh3: getNH3FromReading(r),
+              NH3: getNH3FromReading(r),
               flowRate: r.flow_rate ?? r.flowRate,
             };
           }
@@ -206,8 +209,9 @@ export default function Dashboard() {
     const tempData = list.map((r) => r.temperature ?? null);
     const turbData = list.map((r) => r.turbidity ?? null);
     const phData = list.map((r) => r.ph ?? r.pH ?? null);
-    const nh3Data = list.map((r) => r.nh3 ?? r.NH3 ?? null);
-    const flowData = list.map((r) => r.flowRate ?? null);
+    const nh3Data = list.map((r) => getNH3FromReading(r));
+    const tanData = list.map((r) => r.tan ?? r.TAN ?? null);
+    const flowData = list.map((r) => r.flow_rate ?? r.flowRate ?? null);
     const doData = list.map((r) => r.dissolved_oxygen ?? r.dissolvedOxygen ?? r.do ?? null);
     return {
       labels,
@@ -215,7 +219,8 @@ export default function Dashboard() {
         { label: "Temperature °C", data: tempData, borderColor: "#1b9c85", backgroundColor: "rgba(27, 156, 133, 0.1)", fill: true },
         { label: "Turbidity", data: turbData, borderColor: "#d45b5b", backgroundColor: "rgba(212, 91, 91, 0.1)", fill: true },
         { label: "Water pH", data: phData, borderColor: "#f0a500", backgroundColor: "rgba(240, 165, 0, 0.1)", fill: true },
-        { label: "NH₃ mg/L", data: nh3Data, borderColor: "#9b59b6", backgroundColor: "rgba(155, 89, 182, 0.1)", fill: true },
+        { label: "NH₃ mg/L (calc)", data: nh3Data, borderColor: "#9b59b6", backgroundColor: "rgba(155, 89, 182, 0.1)", fill: true },
+        { label: "TAN mg/L", data: tanData, borderColor: "#8e44ad", backgroundColor: "rgba(142, 68, 173, 0.1)", fill: true },
         { label: "Flow rate L/min", data: flowData, borderColor: "#3498db", backgroundColor: "rgba(52, 152, 219, 0.1)", fill: true },
         { label: "Dissolved O₂ mg/L", data: doData, borderColor: "#2ecc71", backgroundColor: "rgba(46, 204, 113, 0.1)", fill: true },
       ],
@@ -238,26 +243,23 @@ export default function Dashboard() {
       turbidity: getStats(ds[1]?.data),
       ph: getStats(ds[2]?.data),
       nh3: getStats(ds[3]?.data),
-      flowRate: getStats(ds[4]?.data),
-      dissolvedOxygen: getStats(ds[5]?.data),
+      tan: getStats(ds[4]?.data),
+      flowRate: getStats(ds[5]?.data),
+      dissolvedOxygen: getStats(ds[6]?.data),
     };
   }, [todayData]);
 
-  /** WQI from today's parameter averages (00:00 to current hour). Uses calculateWQI with avg values. */
+  /** WQI from today's parameter averages. Uses calculateWQI with avg values (tan + pH + T → NH3). */
   const wqiValue = useMemo(() => {
     if (!todayStats) return null;
-    const { temperature, ph, nh3, turbidity, dissolvedOxygen } = todayStats;
-    const avgTemp = temperature?.avg;
-    const avgPh = ph?.avg;
-    const avgNh3 = nh3?.avg;
-    const avgTurb = turbidity?.avg;
-    const avgDO = dissolvedOxygen?.avg;
+    const { temperature, ph, nh3, tan, turbidity, dissolvedOxygen } = todayStats;
     return calculateWQI({
-      temperature: avgTemp ?? undefined,
-      pH: avgPh ?? undefined,
-      nh3: avgNh3 ?? undefined,
-      turbidity: avgTurb ?? undefined,
-      dissolvedOxygen: avgDO ?? undefined,
+      temperature: temperature?.avg ?? undefined,
+      pH: ph?.avg ?? undefined,
+      tan: tan?.avg ?? undefined,
+      nh3: nh3?.avg ?? undefined,
+      turbidity: turbidity?.avg ?? undefined,
+      dissolvedOxygen: dissolvedOxygen?.avg ?? undefined,
     });
   }, [todayStats]);
 

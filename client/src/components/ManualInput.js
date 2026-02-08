@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { createPortal } from 'react-dom';
-import { calculateWQI, getQualityRatings } from '../utils/wqiCalculator';
+import { calculateWQI, getQualityRatings, getWQIWeights } from '../utils/wqiCalculator';
+import { calculateNH3FromTAN } from '../utils/nh3Calculator';
 import './ManualInput.css';
 
 const ManualInput = ({ onSave, onClose }) => {
@@ -8,8 +9,9 @@ const ManualInput = ({ onSave, onClose }) => {
     temperature: '',
     turbidity: '',
     pH: '',
-    nh3: '',
+    tan: '',
     dissolvedOxygen: '',
+    flowRate: '',
   });
 
   // Time input - default to current time
@@ -65,10 +67,10 @@ const ManualInput = ({ onSave, onClose }) => {
       newErrors.pH = 'pH should be between 0 and 14';
     }
     
-    if (inputs.nh3 === '' || inputs.nh3 === null) {
-      newErrors.nh3 = 'NH₃ is required';
-    } else if (inputs.nh3 < 0 || inputs.nh3 > 10) {
-      newErrors.nh3 = 'NH₃ should be between 0 and 10 mg/L';
+    if (inputs.tan === '' || inputs.tan === null) {
+      newErrors.tan = 'TAN (Total Ammonia Nitrogen) is required';
+    } else if (inputs.tan < 0 || inputs.tan > 50) {
+      newErrors.tan = 'TAN should be between 0 and 50 mg/L';
     }
     
     if (inputs.dissolvedOxygen === '' || inputs.dissolvedOxygen === null) {
@@ -86,11 +88,14 @@ const ManualInput = ({ onSave, onClose }) => {
       return;
     }
 
+    const temp = parseFloat(inputs.temperature);
+    const ph = parseFloat(inputs.pH);
+    const tan = parseFloat(inputs.tan);
     const params = {
-      temperature: parseFloat(inputs.temperature),
+      temperature: temp,
       turbidity: parseFloat(inputs.turbidity),
-      pH: parseFloat(inputs.pH),
-      nh3: parseFloat(inputs.nh3),
+      pH: ph,
+      tan,
       dissolvedOxygen: parseFloat(inputs.dissolvedOxygen),
     };
 
@@ -124,9 +129,9 @@ const ManualInput = ({ onSave, onClose }) => {
       temperature: parseFloat(inputs.temperature),
       turbidity: parseFloat(inputs.turbidity),
       pH: parseFloat(inputs.pH),
-      nh3: parseFloat(inputs.nh3),
+      tan: parseFloat(inputs.tan),
       dissolvedOxygen: parseFloat(inputs.dissolvedOxygen),
-      wqi: calculatedWQI,
+      flowRate: inputs.flowRate !== '' && !isNaN(parseFloat(inputs.flowRate)) ? parseFloat(inputs.flowRate) : undefined,
       timestamp: timestamp.toISOString(),
       inputHour: selectedTime.hour,
       inputMinute: selectedTime.minute,
@@ -146,8 +151,9 @@ const ManualInput = ({ onSave, onClose }) => {
       temperature: '',
       turbidity: '',
       pH: '',
-      nh3: '',
+      tan: '',
       dissolvedOxygen: '',
+      flowRate: '',
     });
     setCalculatedWQI(null);
     setQualityRatings(null);
@@ -257,19 +263,36 @@ const ManualInput = ({ onSave, onClose }) => {
               </div>
 
               <div className="input-group">
-                <label htmlFor="nh3">
-                  NH₃ (Ammonia) (mg/L) <span className="weight-label">Weight: 0.20</span>
+                <label htmlFor="tan">
+                  TAN (Total Ammonia Nitrogen) (mg/L) <span className="weight-label">→ NH₃ calculated</span>
                 </label>
                 <input
-                  id="nh3"
+                  id="tan"
                   type="number"
                   step="0.01"
-                  value={inputs.nh3}
-                  onChange={(e) => handleInputChange('nh3', e.target.value)}
+                  value={inputs.tan}
+                  onChange={(e) => handleInputChange('tan', e.target.value)}
                   placeholder="e.g., 0.5"
-                  className={errors.nh3 ? 'error' : ''}
+                  className={errors.tan ? 'error' : ''}
                 />
-                {errors.nh3 && <span className="error-message">{errors.nh3}</span>}
+                {errors.tan && <span className="error-message">{errors.tan}</span>}
+                {inputs.tan !== '' && !isNaN(parseFloat(inputs.tan)) && inputs.pH !== '' && inputs.temperature !== '' && (
+                  <span className="computed-nh3">
+                    NH₃ (calculated): {calculateNH3FromTAN(parseFloat(inputs.tan), parseFloat(inputs.pH), parseFloat(inputs.temperature))?.toFixed(3) ?? '—'} mg/L
+                  </span>
+                )}
+              </div>
+              <div className="input-group">
+                <label htmlFor="flowRate">Flow rate (L/min) <span className="weight-label">Optional</span></label>
+                <input
+                  id="flowRate"
+                  type="number"
+                  step="0.1"
+                  min="0"
+                  value={inputs.flowRate}
+                  onChange={(e) => handleInputChange('flowRate', e.target.value)}
+                  placeholder="e.g., 2.5"
+                />
               </div>
 
               <div className="input-group">
@@ -299,7 +322,16 @@ const ManualInput = ({ onSave, onClose }) => {
             </div>
           </div>
 
-          {calculatedWQI !== null && qualityRatings && (
+          {calculatedWQI !== null && qualityRatings && (() => {
+            const w = getWQIWeights();
+            const weightedSum = (
+              (qualityRatings.dissolvedOxygen ?? 0) * w.dissolvedOxygen +
+              (qualityRatings.nh3 ?? 0) * w.nh3 +
+              (qualityRatings.pH ?? 0) * w.pH +
+              (qualityRatings.turbidity ?? 0) * w.turbidity +
+              (qualityRatings.temperature ?? 0) * w.temperature
+            );
+            return (
             <div className="result-section">
               <h3>Calculation Results</h3>
               
@@ -316,41 +348,41 @@ const ManualInput = ({ onSave, onClose }) => {
                   <div className="rating-item">
                     <span className="rating-label">Dissolved Oxygen:</span>
                     <span className="rating-value">{qualityRatings.dissolvedOxygen?.toFixed(1) || 'N/A'}</span>
-                    <span className="rating-weight">× 0.30</span>
+                    <span className="rating-weight">× {w.dissolvedOxygen.toFixed(2)}</span>
                     <span className="rating-contribution">
-                      = {(qualityRatings.dissolvedOxygen * 0.30).toFixed(2)}
+                      = {((qualityRatings.dissolvedOxygen ?? 0) * w.dissolvedOxygen).toFixed(2)}
                     </span>
                   </div>
                   <div className="rating-item">
                     <span className="rating-label">pH:</span>
                     <span className="rating-value">{qualityRatings.pH?.toFixed(1) || 'N/A'}</span>
-                    <span className="rating-weight">× 0.20</span>
+                    <span className="rating-weight">× {w.pH.toFixed(2)}</span>
                     <span className="rating-contribution">
-                      = {(qualityRatings.pH * 0.20).toFixed(2)}
+                      = {((qualityRatings.pH ?? 0) * w.pH).toFixed(2)}
                     </span>
                   </div>
                   <div className="rating-item">
-                    <span className="rating-label">NH₃:</span>
+                    <span className="rating-label">NH₃ (from TAN):</span>
                     <span className="rating-value">{qualityRatings.nh3?.toFixed(1) || 'N/A'}</span>
-                    <span className="rating-weight">× 0.20</span>
+                    <span className="rating-weight">× {w.nh3.toFixed(2)}</span>
                     <span className="rating-contribution">
-                      = {(qualityRatings.nh3 * 0.20).toFixed(2)}
+                      = {((qualityRatings.nh3 ?? 0) * w.nh3).toFixed(2)}
                     </span>
                   </div>
                   <div className="rating-item">
                     <span className="rating-label">Turbidity:</span>
                     <span className="rating-value">{qualityRatings.turbidity?.toFixed(1) || 'N/A'}</span>
-                    <span className="rating-weight">× 0.15</span>
+                    <span className="rating-weight">× {w.turbidity.toFixed(2)}</span>
                     <span className="rating-contribution">
-                      = {(qualityRatings.turbidity * 0.15).toFixed(2)}
+                      = {((qualityRatings.turbidity ?? 0) * w.turbidity).toFixed(2)}
                     </span>
                   </div>
                   <div className="rating-item">
                     <span className="rating-label">Temperature:</span>
                     <span className="rating-value">{qualityRatings.temperature?.toFixed(1) || 'N/A'}</span>
-                    <span className="rating-weight">× 0.15</span>
+                    <span className="rating-weight">× {w.temperature.toFixed(2)}</span>
                     <span className="rating-contribution">
-                      = {(qualityRatings.temperature * 0.15).toFixed(2)}
+                      = {((qualityRatings.temperature ?? 0) * w.temperature).toFixed(2)}
                     </span>
                   </div>
                 </div>
@@ -360,22 +392,13 @@ const ManualInput = ({ onSave, onClose }) => {
                     <strong>Formula:</strong> WQI = (Σ(Q_i × W_i)) / (Σ W_i)
                   </p>
                   <p className="formula-calculation">
-                    WQI = (
-                      {(qualityRatings.dissolvedOxygen * 0.30).toFixed(2)} + 
-                      {(qualityRatings.pH * 0.20).toFixed(2)} + 
-                      {(qualityRatings.nh3 * 0.20).toFixed(2)} + 
-                      {(qualityRatings.turbidity * 0.15).toFixed(2)} + 
-                      {(qualityRatings.temperature * 0.15).toFixed(2)}
-                    ) / 1.00
-                  </p>
-                  <p className="formula-result">
-                    WQI = {(
-                      (qualityRatings.dissolvedOxygen * 0.30) +
-                      (qualityRatings.pH * 0.20) +
-                      (qualityRatings.nh3 * 0.20) +
-                      (qualityRatings.turbidity * 0.15) +
-                      (qualityRatings.temperature * 0.15)
-                    ).toFixed(2)} ≈ <strong>{calculatedWQI}</strong>
+                    WQI = {w.dissolvedOxygen.toFixed(2)}×QDO + {w.nh3.toFixed(2)}×QNH3 + {w.pH.toFixed(2)}×QpH + {w.turbidity.toFixed(2)}×Qturb + {w.temperature.toFixed(2)}×Qtemp = (
+                      {((qualityRatings.dissolvedOxygen ?? 0) * w.dissolvedOxygen).toFixed(2)} + 
+                      {((qualityRatings.nh3 ?? 0) * w.nh3).toFixed(2)} + 
+                      {((qualityRatings.pH ?? 0) * w.pH).toFixed(2)} + 
+                      {((qualityRatings.turbidity ?? 0) * w.turbidity).toFixed(2)} + 
+                      {((qualityRatings.temperature ?? 0) * w.temperature).toFixed(2)}
+                    ) = {weightedSum.toFixed(2)} ≈ <strong>{calculatedWQI}</strong>
                   </p>
                 </div>
               </div>
@@ -386,7 +409,8 @@ const ManualInput = ({ onSave, onClose }) => {
                 </button>
               </div>
             </div>
-          )}
+            );
+          })()}
         </div>
       </div>
     </div>,

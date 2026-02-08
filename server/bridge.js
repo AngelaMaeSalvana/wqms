@@ -75,18 +75,27 @@ function payloadToRow(topic, data) {
     temperature: data.temperature ?? null,
     turbidity: data.turbidity ?? null,
     ph: data.pH ?? data.ph ?? null,
-    nh3: data.nh3 ?? data.NH3 ?? null,
     dissolved_oxygen: data.dissolvedOxygen ?? data.do ?? data.dissolved_oxygen ?? null,
-    wqi: data.wqi != null || data.WQI != null ? Math.round(data.wqi ?? data.WQI ?? 0) : null,
+    flow_rate: data.flowRate ?? data.flow_rate ?? null,
+    seq: data.seq != null ? (typeof data.seq === 'number' ? data.seq : parseInt(data.seq, 10)) : null,
+    tx_millis: data.tx_millis != null ? (typeof data.tx_millis === 'number' ? data.tx_millis : parseInt(data.tx_millis, 10)) : null,
+    rx_millis: data.rx_millis != null ? (typeof data.rx_millis === 'number' ? data.rx_millis : parseInt(data.rx_millis, 10)) : null,
     timestamp,
   };
 }
 
-/** Insert one reading into Supabase. */
+/** Columns allowed on sensor_readings (no nh3, no tan, no wqi). */
+const SENSOR_READINGS_COLUMNS = ['node_id', 'location', 'temperature', 'turbidity', 'ph', 'dissolved_oxygen', 'flow_rate', 'seq', 'tx_millis', 'rx_millis', 'timestamp'];
+
+/** Insert one reading into Supabase. Only whitelisted columns are sent (never nh3/tan/wqi). */
 async function insertReading(row) {
+  const payload = {};
+  for (const k of SENSOR_READINGS_COLUMNS) {
+    payload[k] = row[k] ?? null;
+  }
   const { data, error } = await supabase
     .from(SUPABASE_TABLE)
-    .insert(row)
+    .insert(payload)
     .select('id')
     .single();
 

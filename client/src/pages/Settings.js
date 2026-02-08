@@ -1,5 +1,12 @@
 import React, { useState, useEffect } from "react";
 import { useTheme } from "../contexts/ThemeContext";
+import { DEFAULT_WQI_WEIGHTS, getWQIWeights } from "../utils/wqiCalculator";
+import {
+  loadFromStorage,
+  saveToStorage,
+  syncSettingsFromSupabase,
+  saveSettingsToSupabaseAndLocal,
+} from "../utils/settingsStorage";
 import "./Settings.css";
 
 const FONT_OPTIONS = [
@@ -34,22 +41,7 @@ const DEFAULT_DATA_COLLECTION = {
   readingsLimit: 500,
 };
 
-function loadFromStorage(key, fallback) {
-  try {
-    const s = localStorage.getItem(key);
-    return s ? JSON.parse(s) : fallback;
-  } catch {
-    return fallback;
-  }
-}
-
-function saveToStorage(key, value) {
-  try {
-    localStorage.setItem(key, JSON.stringify(value));
-  } catch (e) {
-    console.warn("Could not save to localStorage", e);
-  }
-}
+const WQI_WEIGHTS_KEY = "wqms_wqi_weights";
 
 export default function Settings() {
   const { theme, setTheme } = useTheme();
@@ -66,8 +58,25 @@ export default function Settings() {
     ...DEFAULT_DATA_COLLECTION,
     ...loadFromStorage("wqms_data_collection", {}),
   }));
+  const [wqiWeights, setWqiWeights] = useState(() => ({
+    ...DEFAULT_WQI_WEIGHTS,
+    ...loadFromStorage(WQI_WEIGHTS_KEY, {}),
+  }));
   const [saveFeedback, setSaveFeedback] = useState(null);
   const [activeTab, setActiveTab] = useState("system"); // "system" | "preferences"
+  const [settingsLoaded, setSettingsLoaded] = useState(false);
+
+  // Load settings from Supabase on mount (when enabled)
+  useEffect(() => {
+    syncSettingsFromSupabase()
+      .then(() => {
+        setThresholds((t) => ({ ...t, ...loadFromStorage("wqms_thresholds", {}) }));
+        setCalibration((c) => ({ ...c, ...loadFromStorage("wqms_calibration", {}) }));
+        setDataCollection((d) => ({ ...d, ...loadFromStorage("wqms_data_collection", {}) }));
+        setWqiWeights((w) => ({ ...w, ...loadFromStorage(WQI_WEIGHTS_KEY, {}) }));
+      })
+      .finally(() => setSettingsLoaded(true));
+  }, []);
 
   useEffect(() => {
     document.documentElement.setAttribute("data-font-size", fontSize);
@@ -101,13 +110,31 @@ export default function Settings() {
     }
   };
 
-  const handleSaveAll = () => {
-    saveToStorage("wqms_thresholds", thresholds);
-    saveToStorage("wqms_calibration", calibration);
-    saveToStorage("wqms_data_collection", dataCollection);
+  const updateWqiWeight = (key, value) => {
+    const n = parseFloat(value);
+    if (!isNaN(n) && n >= 0) {
+      const next = { ...wqiWeights, [key]: n };
+      setWqiWeights(next);
+      saveToStorage(WQI_WEIGHTS_KEY, next);
+    }
+  };
+
+  const handleSaveAll = async () => {
     document.documentElement.setAttribute("data-font-size", fontSize);
     localStorage.setItem("fontPreference", fontSize);
-    setSaveFeedback("Saved");
+    const settingsByKey = {
+      wqms_thresholds: thresholds,
+      wqms_calibration: calibration,
+      wqms_data_collection: dataCollection,
+      [WQI_WEIGHTS_KEY]: wqiWeights,
+    };
+    try {
+      await saveSettingsToSupabaseAndLocal(settingsByKey);
+      setSaveFeedback("Saved");
+    } catch (e) {
+      setSaveFeedback("Error saving");
+      console.warn(e);
+    }
     setTimeout(() => setSaveFeedback(null), 2000);
   };
 
@@ -318,6 +345,107 @@ export default function Settings() {
                 />
               </label>
             </div>
+          </div>
+        </section>
+
+        {/* WQI Parameter Weights */}
+        <section className="settings-section card">
+          <div className="card__header">
+            <h2 className="card__title">Water Quality Index (WQI) Weights</h2>
+            <p className="card__desc">
+              Adjust how much each parameter contributes to the WQI. Weights are normalized (sum = 1.00).
+              Higher weight = greater influence on the final score.
+            </p>
+          </div>
+          <div className="card__body">
+            <div className="settings-grid">
+              <label className="settings-label">
+                <span>Dissolved O₂ (W_DO)</span>
+                <input
+                  type="number"
+                  min={0}
+                  max={1}
+                  step="0.05"
+                  className="settings-input"
+                  value={wqiWeights.dissolvedOxygen ?? DEFAULT_WQI_WEIGHTS.dissolvedOxygen}
+                  onChange={(e) => updateWqiWeight("dissolvedOxygen", e.target.value)}
+                  aria-label="Weight for Dissolved Oxygen"
+                />
+              </label>
+              <label className="settings-label">
+                <span>NH₃ (W_NH3)</span>
+                <input
+                  type="number"
+                  min={0}
+                  max={1}
+                  step="0.05"
+                  className="settings-input"
+                  value={wqiWeights.nh3 ?? DEFAULT_WQI_WEIGHTS.nh3}
+                  onChange={(e) => updateWqiWeight("nh3", e.target.value)}
+                  aria-label="Weight for NH3"
+                />
+              </label>
+              <label className="settings-label">
+                <span>pH (W_pH)</span>
+                <input
+                  type="number"
+                  min={0}
+                  max={1}
+                  step="0.05"
+                  className="settings-input"
+                  value={wqiWeights.pH ?? DEFAULT_WQI_WEIGHTS.pH}
+                  onChange={(e) => updateWqiWeight("pH", e.target.value)}
+                  aria-label="Weight for pH"
+                />
+              </label>
+              <label className="settings-label">
+                <span>Turbidity (W_turb)</span>
+                <input
+                  type="number"
+                  min={0}
+                  max={1}
+                  step="0.05"
+                  className="settings-input"
+                  value={wqiWeights.turbidity ?? DEFAULT_WQI_WEIGHTS.turbidity}
+                  onChange={(e) => updateWqiWeight("turbidity", e.target.value)}
+                  aria-label="Weight for Turbidity"
+                />
+              </label>
+              <label className="settings-label">
+                <span>Temperature (W_temp)</span>
+                <input
+                  type="number"
+                  min={0}
+                  max={1}
+                  step="0.05"
+                  className="settings-input"
+                  value={wqiWeights.temperature ?? DEFAULT_WQI_WEIGHTS.temperature}
+                  onChange={(e) => updateWqiWeight("temperature", e.target.value)}
+                  aria-label="Weight for Temperature"
+                />
+              </label>
+            </div>
+            {(() => {
+              const w = getWQIWeights();
+              const sum = Object.values(w).reduce((a, v) => a + v, 0);
+              const maxWeight = Math.max(...Object.values(w));
+              const hasExtreme = maxWeight > 0.5;
+              return (
+                <>
+                  <p className="settings-helper" style={{ marginTop: "0.75rem" }}>
+                    Normalized formula in use: WQI = {w.dissolvedOxygen.toFixed(2)}×QDO + {w.nh3.toFixed(2)}×QNH3 + {w.pH.toFixed(2)}×QpH + {w.turbidity.toFixed(2)}×Qturb + {w.temperature.toFixed(2)}×Qtemp
+                  </p>
+                  <p className="settings-helper">
+                    Weights sum to {sum.toFixed(2)}. {sum !== 1 ? "Values are auto-normalized so the total = 1.00." : ""}
+                  </p>
+                  {hasExtreme && (
+                    <p className="settings-helper" role="alert" style={{ color: "var(--accent-warning, #f0a500)" }}>
+                      ⚠ Extreme weight distribution may bias the index. Consider using more balanced weights.
+                    </p>
+                  )}
+                </>
+              );
+            })()}
           </div>
         </section>
 

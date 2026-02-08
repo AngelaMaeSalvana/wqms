@@ -9,10 +9,11 @@ CREATE TABLE IF NOT EXISTS sensor_readings (
   temperature real,
   turbidity real,
   ph real,
-  nh3 real,
   dissolved_oxygen real,
   flow_rate real,
-  wqi integer,
+  seq integer,
+  tx_millis bigint,
+  rx_millis bigint,
   timestamp timestamptz NOT NULL DEFAULT now(),
   created_at timestamptz DEFAULT now()
 );
@@ -23,12 +24,12 @@ CREATE INDEX IF NOT EXISTS idx_sensor_readings_timestamp ON sensor_readings (tim
 -- RLS (optional): enable and allow service role / anon as needed
 ALTER TABLE sensor_readings ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY "Allow service role full access on sensor_readings"
+-- Drop first so this script is re-runnable (avoids "policy already exists").
+DROP POLICY IF EXISTS "Allow service role full access on sensor_readings" ON sensor_readings;
+DROP POLICY IF EXISTS "Allow anon read on sensor_readings" ON sensor_readings;
+DROP POLICY IF EXISTS "Allow all on sensor_readings" ON sensor_readings;
+
+CREATE POLICY "Allow all on sensor_readings"
   ON sensor_readings FOR ALL
   USING (true)
   WITH CHECK (true);
-
--- Allow anon (dashboard) to read for Reports page
-CREATE POLICY "Allow anon read on sensor_readings"
-  ON sensor_readings FOR SELECT
-  USING (true);

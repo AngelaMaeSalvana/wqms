@@ -1,7 +1,8 @@
 /**
  * Build alerts from real data only: threshold breaches (from readingsByNode), node status, maintenance.
- * No mock/dummy readings.
+ * No mock/dummy readings. NH3 is computed from TAN when not provided.
  */
+import { getNH3FromReading } from './nh3Calculator';
 
 const THRESHOLDS_KEY = "wqms_thresholds";
 const DEFAULT_THRESHOLDS = {
@@ -144,7 +145,7 @@ export function buildAlertsForAllNodes(nodes = [], readingsByNode = {}) {
       });
     }
 
-    const nh3 = readings.nh3 ?? readings.NH3;
+    const nh3 = getNH3FromReading(readings);
     if (nh3 != null && nh3 > thresholds.nh3Max) {
       alerts.push({
         id: `threshold-${nodeId}-nh3`,
