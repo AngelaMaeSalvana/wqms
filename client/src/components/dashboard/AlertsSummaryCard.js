@@ -35,6 +35,8 @@ const SEVERITY_PILLS = [
   { value: "info", label: "Info" },
 ];
 
+const SEVERITY_EMOJI = { critical: "🔴", warning: "🟡", info: "🟢" };
+
 export function AlertsSummaryCard({
   alerts = [],
   isLoadingAlerts,
@@ -58,9 +60,10 @@ export function AlertsSummaryCard({
   }, [alerts, severityFilter]);
 
   const list = filteredAlerts.slice(0, 5);
+  const hasAlerts = alerts.length > 0;
 
   return (
-    <div className="card card--fill alerts-summary-card alerts-notifications-panel">
+    <div className={`card card--fill alerts-summary-card alerts-notifications-panel ${!hasAlerts ? "alerts-summary-card--empty" : ""}`}>
       <div className="alerts-notifications-header">
         <div className="alerts-summary-title-row">
           <h2 className="alerts-notifications-title">Alerts Summary</h2>
@@ -73,13 +76,22 @@ export function AlertsSummaryCard({
         {alerts.length > 0 && (
           <div className="alerts-summary-breakdown" aria-label="Severity breakdown">
             {severityCounts.critical > 0 && (
-              <span className="alerts-summary-badge alerts-summary-badge--critical">{severityCounts.critical} Critical</span>
+              <span className="alerts-summary-badge alerts-summary-badge--critical" title="Critical">
+                <span className="alerts-summary-emoji" aria-hidden>{SEVERITY_EMOJI.critical}</span>
+                {severityCounts.critical} Critical
+              </span>
             )}
             {severityCounts.warning > 0 && (
-              <span className="alerts-summary-badge alerts-summary-badge--warning">{severityCounts.warning} Warning</span>
+              <span className="alerts-summary-badge alerts-summary-badge--warning" title="Warning">
+                <span className="alerts-summary-emoji" aria-hidden>{SEVERITY_EMOJI.warning}</span>
+                {severityCounts.warning} Warning
+              </span>
             )}
             {severityCounts.info > 0 && (
-              <span className="alerts-summary-badge alerts-summary-badge--info">{severityCounts.info} Info</span>
+              <span className="alerts-summary-badge alerts-summary-badge--info" title="Info">
+                <span className="alerts-summary-emoji" aria-hidden>{SEVERITY_EMOJI.info}</span>
+                {severityCounts.info} Info
+              </span>
             )}
           </div>
         )}
@@ -118,6 +130,7 @@ export function AlertsSummaryCard({
                 const alertId = a.id || a.timestamp;
                 const isUnread = !readIds.has(alertId);
                 const displaySeverity = getDisplaySeverity(a.severity);
+                const status = a.resolved ? "Resolved" : "Active";
                 return (
                   <li key={alertId} className="alerts-list__item alerts-notifications-item">
                     <button
@@ -132,7 +145,13 @@ export function AlertsSummaryCard({
                       {isUnread && <span className="alerts-notification-dot" aria-hidden />}
                       <span className="alerts-notification-content">
                         <span className="alert-title">{a.title || "Alert"}</span>
-                        <span className="alert-date">{getRelativeTime(a.timestamp || a.createdAt)}</span>
+                        {a.parameter && <span className="alert-parameter">{a.parameter}</span>}
+                        <span className="alert-meta">
+                          <span className="alert-node">{a.nodeName || a.nodeId || "—"}</span>
+                          <span className="alert-date">{getRelativeTime(a.timestamp || a.createdAt)}</span>
+                          <span className={`alert-status alert-status--${a.resolved ? "resolved" : "active"}`}>{status}</span>
+                        </span>
+                        <span className="alert-view-details">View details</span>
                       </span>
                     </button>
                   </li>
@@ -141,11 +160,13 @@ export function AlertsSummaryCard({
             </ul>
           </>
         )}
-        <div className="alerts-summary-footer">
-          <Link to="/alerts" className="alerts-summary-see-all">
-            See all alerts
-          </Link>
-        </div>
+        {hasAlerts && (
+          <div className="alerts-summary-footer">
+            <Link to="/alerts" className="alerts-summary-see-all">
+              See more
+            </Link>
+          </div>
+        )}
       </div>
       {selectedAlert && (
         <AlertDetailModal alert={selectedAlert} onClose={() => setSelectedAlert(null)} />

@@ -43,7 +43,8 @@ export function TodayCard({ todayStats, selectedNode, readingsLoaded = false }) 
     <div className="card card--fill today-card">
       <div className="card__header">
         <div>
-          <h2 className="card__title">Today</h2>
+          <h2 className="card__title">Today&apos;s Overview</h2>
+          <p className="card__desc">Quick snapshot of the day&apos;s readings: average, lowest, and highest value of each parameter for the selected node.</p>
         </div>
       </div>
       <div className="card__body card__body--fill">

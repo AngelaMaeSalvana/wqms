@@ -132,6 +132,19 @@ export default function Dashboard() {
     );
   }, [builtAlerts, sensorTestAlerts]);
 
+  /** Alerts for the selected node on the current date only (for Dashboard Alerts Summary card) */
+  const dashboardAlerts = useMemo(() => {
+    const nodeId = selectedNodeId || null;
+    const today = new Date().toDateString();
+    return alerts.filter((a) => {
+      const matchesNode = (a.nodeId || a.node_id) === nodeId;
+      const ts = a.timestamp ?? a.createdAt;
+      const alertDate = ts != null ? new Date(ts).toDateString() : today;
+      const matchesToday = alertDate === today;
+      return matchesNode && matchesToday;
+    });
+  }, [alerts, selectedNodeId]);
+
   const selectedNode = useMemo(
     () => nodes.find((n) => n.id === selectedNodeId) || nodes[0],
     [nodes, selectedNodeId]
@@ -317,7 +330,7 @@ export default function Dashboard() {
         </section>
         <section className="dash__cell dash__cell--alerts">
           <AlertsSummaryCard
-            alerts={alerts}
+            alerts={dashboardAlerts}
             isLoadingAlerts={isLoadingAlerts}
           />
         </section>

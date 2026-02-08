@@ -119,10 +119,6 @@
   flex-shrink: 0;
 }
 
-.wqi-card .card__desc {
-  font-size: 0.75rem;
-}
-
 .wqi-card .wqiBox {
   flex: 1;
   display: flex;
@@ -162,7 +158,7 @@
   display: flex;
   flex-direction: row;
   flex-wrap: wrap;
-  gap: 12px;
+  gap: 16px;
   flex: 1;
   min-height: 0;
   align-content: flex-start;
@@ -170,13 +166,13 @@
 
 .today-stats-grid .today-stat-block {
   flex: 1 1 120px;
-  min-width: 0;
+  min-width: 110px;
 }
 
 .today-stats-skeleton {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 14px;
 }
 
 .today-card-empty {
@@ -196,7 +192,7 @@
 }
 
 .today-stat-block {
-  padding: 12px 14px;
+  padding: 14px 16px;
   border-radius: 12px;
   background: var(--panel-dark);
   border: 1px solid var(--border);
@@ -458,6 +454,11 @@
   padding-top: 0;
 }
 
+/* No scrollbar when there are no alerts */
+.alerts-summary-card--empty .card__body {
+  overflow: hidden;
+}
+
 .alerts-notifications-header {
   display: flex;
   justify-content: space-between;
@@ -517,6 +518,10 @@
 .alerts-summary-badge--info {
   background: rgba(34, 197, 94, 0.2);
   color: var(--success);
+}
+
+.alerts-summary-emoji {
+  margin-right: 4px;
 }
 
 .alerts-summary-pills {
@@ -653,6 +658,51 @@
   color: var(--text-muted);
 }
 
+.alerts-notification-item .alert-parameter {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  display: block;
+}
+
+.alerts-notification-item .alert-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+.alerts-notification-item .alert-node {
+  font-weight: 500;
+}
+
+.alerts-notification-item .alert-status {
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.alerts-notification-item .alert-status--active {
+  background: rgba(234, 179, 8, 0.2);
+  color: var(--warning);
+}
+
+.alerts-notification-item .alert-status--resolved {
+  background: rgba(34, 197, 94, 0.2);
+  color: var(--success);
+}
+
+.alerts-notification-item .alert-view-details {
+  display: inline-block;
+  margin-top: 4px;
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--primary);
+}
+
 .alerts-notification-item .alert-detail {
   display: none;
 }
@@ -773,13 +823,102 @@
   max-width: 320px;
 }
 
-.live-chart-copy {
-  margin: 12px 0 0;
+.live-chart-explanation {
+  margin-top: 12px;
   padding-top: 12px;
   border-top: 1px solid var(--border);
-  font-size: 0.75rem;
+}
+
+.live-chart-explanation__toggle {
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--primary);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.live-chart-explanation__toggle:hover {
+  text-decoration: underline;
+}
+
+/* How it works modal */
+.live-chart-how-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: brightness(0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 24px;
+}
+
+.live-chart-how-modal {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  max-width: 540px;
+  width: 100%;
+  max-height: 85vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.35);
+}
+
+.live-chart-how-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border);
+}
+
+.live-chart-how-modal-header h2 {
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.live-chart-how-modal-close {
+  width: 34px;
+  height: 34px;
+  border: none;
+  background: transparent;
   color: var(--text-muted);
-  line-height: 1.4;
+  font-size: 1.4rem;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: 8px;
+  transition: background 0.2s, color 0.2s;
+}
+
+.live-chart-how-modal-close:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text);
+}
+
+.live-chart-how-modal-body {
+  padding: 18px 20px;
+  overflow: auto;
+  flex: 1;
+  min-height: 0;
+  font-size: 0.9rem;
+  color: var(--text);
+  line-height: 1.6;
+}
+
+.live-chart-how-modal-body p {
+  margin: 0 0 12px 0;
+}
+
+.live-chart-how-modal-body p:last-child {
+  margin-bottom: 0;
 }
 
 .live-chart-card .line-chart--horizontal-only {
