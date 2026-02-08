@@ -1,5 +1,4 @@
-import React, { useMemo, useState, useEffect } from "react";
-import { createPortal } from "react-dom";
+import React, { useMemo } from "react";
 import "../../utils/chartConfig";
 import { Line } from "react-chartjs-2";
 import "./dashboard.css";
@@ -35,14 +34,7 @@ const EMPTY_CHART_DATA = {
   ],
 };
 
-const LIVE_CHART_EXPLANATION = {
-  core: "Sensor nodes monitor water quality parameters and transmit data to a cloud-based system. The web dashboard presents live charts that update automatically as new data becomes available. The live chart uses a default sampling interval of 15 minutes when the measured flow rate is within or near a predefined nominal threshold.",
-  adaptive: "When the flow rate increases beyond defined threshold levels, the system increases the sampling frequency (i.e., reduces the sampling interval). The adjustment follows a piecewise threshold-based policy, where higher flow rate ranges correspond to shorter sampling intervals. When flow conditions stabilize or return to normal, the system reverts to the default interval to optimize power consumption, bandwidth usage, and data storage.",
-  rationale: "Higher flow rates are associated with greater variability in water quality parameters. Adaptive sampling improves the ability of the live chart to capture rapid changes during dynamic flow conditions. Piecewise thresholds provide a transparent and easily configurable mechanism for controlling sampling behavior.",
-};
-
 export function LiveChart({ todayData, todayChartOptions }) {
-  const [showHowItWorksModal, setShowHowItWorksModal] = useState(false);
   const hasData = useMemo(() => {
     if (!todayData?.labels?.length || !todayData?.datasets?.length) return false;
     return todayData.datasets.some((ds) => ds.data?.length > 0);
@@ -93,60 +85,9 @@ export function LiveChart({ todayData, todayChartOptions }) {
               <Line data={data} options={options} />
             </div>
           )}
-          <div className="live-chart-explanation">
-            <button
-              type="button"
-              className="live-chart-explanation__toggle"
-              onClick={() => setShowHowItWorksModal(true)}
-            >
-              How it works
-            </button>
-          </div>
         </div>
       </div>
-      {showHowItWorksModal && createPortal(
-        <HowItWorksModal
-          explanation={LIVE_CHART_EXPLANATION}
-          onClose={() => setShowHowItWorksModal(false)}
-        />,
-        document.body
-      )}
     </>
-  );
-}
-
-
-function HowItWorksModal({ explanation, onClose }) {
-  useEffect(() => {
-    const handleEscape = (e) => {
-      if (e.key === "Escape") onClose();
-    };
-    document.addEventListener("keydown", handleEscape);
-    return () => document.removeEventListener("keydown", handleEscape);
-  }, [onClose]);
-
-  return (
-    <div
-      className="live-chart-how-modal-backdrop"
-      onClick={onClose}
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="live-chart-how-modal-title"
-    >
-      <div className="live-chart-how-modal" onClick={(e) => e.stopPropagation()}>
-        <div className="live-chart-how-modal-header">
-          <h2 id="live-chart-how-modal-title">How it works</h2>
-          <button type="button" className="live-chart-how-modal-close" onClick={onClose} aria-label="Close">
-            ×
-          </button>
-        </div>
-        <div className="live-chart-how-modal-body" role="region" aria-label="Live chart sampling explanation">
-          <p><strong>Core design.</strong> {explanation.core}</p>
-          <p><strong>Adaptive behavior.</strong> {explanation.adaptive}</p>
-          <p><strong>Rationale.</strong> {explanation.rationale}</p>
-        </div>
-      </div>
-    </div>
   );
 }
 

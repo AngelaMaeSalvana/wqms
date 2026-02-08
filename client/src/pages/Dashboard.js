@@ -210,7 +210,6 @@ export default function Dashboard() {
     const turbData = list.map((r) => r.turbidity ?? null);
     const phData = list.map((r) => r.ph ?? r.pH ?? null);
     const nh3Data = list.map((r) => getNH3FromReading(r));
-    const tanData = list.map((r) => r.tan ?? r.TAN ?? null);
     const flowData = list.map((r) => r.flow_rate ?? r.flowRate ?? null);
     const doData = list.map((r) => r.dissolved_oxygen ?? r.dissolvedOxygen ?? r.do ?? null);
     return {
@@ -220,7 +219,6 @@ export default function Dashboard() {
         { label: "Turbidity", data: turbData, borderColor: "#d45b5b", backgroundColor: "rgba(212, 91, 91, 0.1)", fill: true },
         { label: "Water pH", data: phData, borderColor: "#f0a500", backgroundColor: "rgba(240, 165, 0, 0.1)", fill: true },
         { label: "NH₃ mg/L (calc)", data: nh3Data, borderColor: "#9b59b6", backgroundColor: "rgba(155, 89, 182, 0.1)", fill: true },
-        { label: "TAN mg/L", data: tanData, borderColor: "#8e44ad", backgroundColor: "rgba(142, 68, 173, 0.1)", fill: true },
         { label: "Flow rate L/min", data: flowData, borderColor: "#3498db", backgroundColor: "rgba(52, 152, 219, 0.1)", fill: true },
         { label: "Dissolved O₂ mg/L", data: doData, borderColor: "#2ecc71", backgroundColor: "rgba(46, 204, 113, 0.1)", fill: true },
       ],
@@ -243,20 +241,18 @@ export default function Dashboard() {
       turbidity: getStats(ds[1]?.data),
       ph: getStats(ds[2]?.data),
       nh3: getStats(ds[3]?.data),
-      tan: getStats(ds[4]?.data),
-      flowRate: getStats(ds[5]?.data),
-      dissolvedOxygen: getStats(ds[6]?.data),
+      flowRate: getStats(ds[4]?.data),
+      dissolvedOxygen: getStats(ds[5]?.data),
     };
   }, [todayData]);
 
-  /** WQI from today's parameter averages. Uses calculateWQI with avg values (tan + pH + T → NH3). */
+  /** WQI from today's parameter averages. Uses calculateWQI with avg values (NH3 from readings). */
   const wqiValue = useMemo(() => {
     if (!todayStats) return null;
-    const { temperature, ph, nh3, tan, turbidity, dissolvedOxygen } = todayStats;
+    const { temperature, ph, nh3, turbidity, dissolvedOxygen } = todayStats;
     return calculateWQI({
       temperature: temperature?.avg ?? undefined,
       pH: ph?.avg ?? undefined,
-      tan: tan?.avg ?? undefined,
       nh3: nh3?.avg ?? undefined,
       turbidity: turbidity?.avg ?? undefined,
       dissolvedOxygen: dissolvedOxygen?.avg ?? undefined,
