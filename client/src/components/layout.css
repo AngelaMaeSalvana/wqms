@@ -40,6 +40,52 @@
   flex-direction: column;
 }
 
+/* Backdrop when mobile menu is open */
+.layout-backdrop {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background: rgba(0, 0, 0, 0.5);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.25s ease;
+}
+
+.layout-backdrop.open {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* Enable backdrop on small screens, add top padding for fixed mobile header */
+@media (max-width: 1024px), (max-height: 768px) {
+  .layout-backdrop {
+    display: block;
+  }
+
+  .layout-main {
+    padding-top: calc(56px + 14px);
+  }
+}
+
+@media (max-width: 600px), (max-height: 520px) {
+  .layout-main {
+    padding-top: calc(56px + 12px);
+  }
+}
+
+@media (max-width: 480px), (max-height: 480px) {
+  .layout-main {
+    padding-top: calc(56px + 10px);
+  }
+}
+
+@media (max-width: 360px), (max-height: 420px) {
+  .layout-main {
+    padding-top: calc(56px + 8px);
+  }
+}
+
 /* Responsive layout padding */
 @media (max-width: 1535px), (max-height: 900px) {
   .layout-main {
@@ -59,7 +105,7 @@
   }
 }
 
-@media (max-width: 768px), (max-height: 600px) {
+@media (max-width: 1024px), (max-height: 768px) {
   .layout-main {
     padding: 14px;
   }

@@ -5,9 +5,13 @@ const db = require('./db');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
-const MQTT_URL = process.env.MQTT_URL || 'mqtt://localhost:1883';
-const MQTT_USER = process.env.MQTT_USER || '';
-const MQTT_PASS = process.env.MQTT_PASS || '';
+let MQTT_URL = process.env.MQTT_URL || process.env.REACT_APP_MQTT_WS_URL || '';
+// HiveMQ Cloud: mqtt://host (no port) → mqtts://host:8883 for Node MQTT
+if (MQTT_URL && MQTT_URL.startsWith('mqtt://') && MQTT_URL.includes('hivemq') && !/:\d+(\/|$)/.test(MQTT_URL.slice(7))) {
+  MQTT_URL = 'mqtts://' + MQTT_URL.slice(7) + ':8883';
+}
+const MQTT_USER = process.env.MQTT_USER || process.env.REACT_APP_MQTT_USER || '';
+const MQTT_PASS = process.env.MQTT_PASS || process.env.REACT_APP_MQTT_PASS || '';
 
 app.use(cors());
 app.use(express.json());
@@ -16,10 +20,14 @@ if (!db.useSupabase()) {
   db.initializeSqlite().catch((err) => console.error('❌ SQLite init:', err));
 }
 
-// MQTT Client setup (supports HiveMQ Cloud: mqtts + username/password)
+// MQTT Client setup (HiveMQ Cloud: mqtts + username/password)
 let mqttClient = null;
 
 function connectMQTT() {
+  if (!MQTT_URL) {
+    console.warn('⚠️ MQTT not configured. Set MQTT_URL or REACT_APP_MQTT_WS_URL in .env for HiveMQ.');
+    return;
+  }
   const opts = {
     clientId: `wqms-backend-${Math.random().toString(16).substr(2, 8)}`,
     clean: true,
@@ -276,7 +284,9 @@ app.post('/api/alerts', async (req, res) => {
 app.listen(PORT, () => {
   console.log(`🚀 Backend server running on http://localhost:${PORT}`);
   console.log(`📡 API endpoints at http://localhost:${PORT}/api`);
-  connectMQTT();
+  if (MQTT_URL) {
+    connectMQTT();
+  }
 });
 
 process.on('SIGINT', () => {

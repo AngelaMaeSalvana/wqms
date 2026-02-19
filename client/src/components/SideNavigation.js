@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { NavLink } from "react-router-dom";
+import { NavLink, useLocation } from "react-router-dom";
 import "./side-nav.css";
 
 const navItems = [
@@ -11,11 +11,47 @@ const navItems = [
   { to: "/settings", label: "Settings", icon: "⚙️" },
 ];
 
-export default function SideNavigation() {
+const pathToTitle = (pathname) => {
+  const item = navItems.find((n) => n.to === pathname);
+  return item ? item.label : "Dashboard";
+};
+
+export default function SideNavigation({ isMobileOpen = false, onToggle, onClose }) {
   const [collapsed, setCollapsed] = useState(false);
+  const { pathname } = useLocation();
+  const pageTitle = pathToTitle(pathname);
+
+  const handleNavClick = () => {
+    if (onClose) onClose();
+  };
 
   return (
-    <aside className={`side-nav ${collapsed ? "collapsed" : ""}`}>
+    <>
+      <header className="side-nav__mobile-header" aria-label="Mobile header">
+        <button
+          type="button"
+          className="side-nav__hamburger"
+          onClick={onToggle}
+          aria-label={isMobileOpen ? "Close menu" : "Open menu"}
+          aria-expanded={isMobileOpen}
+        >
+          <span className="side-nav__hamburger-line" />
+          <span className="side-nav__hamburger-line" />
+          <span className="side-nav__hamburger-line" />
+        </button>
+        <div className="side-nav__mobile-branding">
+          <span className="side-nav__mobile-title">AQUALENS</span>
+          <span className="side-nav__breadcrumb">
+            <span className="side-nav__breadcrumb-sep" aria-hidden="true"> / </span>
+            {pageTitle}
+          </span>
+        </div>
+      </header>
+    <aside
+      className={`side-nav ${collapsed ? "collapsed" : ""} ${
+        isMobileOpen ? "mobile-open" : ""
+      }`}
+    >
       <div className="side-nav__top">
         <div className="side-nav__brand" title="AQUALENS">
           <span className="brand__logo">
@@ -40,6 +76,7 @@ export default function SideNavigation() {
           <NavLink
             key={item.to}
             to={item.to}
+            onClick={handleNavClick}
             className={({ isActive }) =>
               `side-nav__item ${isActive ? "active" : ""}`
             }
@@ -63,5 +100,6 @@ export default function SideNavigation() {
         )}
       </div>
     </aside>
+    </>
   );
 }

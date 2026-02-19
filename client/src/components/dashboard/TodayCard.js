@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import { MetricSkeleton } from "../LoadingSkeleton";
 import "./dashboard.css";
 
@@ -9,6 +9,12 @@ const PARAMS = [
   { key: "nh3", label: "NH₃", unit: " mg/L", color: "nh3" },
   { key: "flowRate", label: "Flow rate", unit: " L/min", color: "flow" },
   { key: "dissolvedOxygen", label: "Dissolved O₂", unit: " mg/L", color: "do" },
+];
+
+const TABS = [
+  { id: "low", label: "MIN", key: "low" },
+  { id: "avg", label: "AVG", key: "avg" },
+  { id: "high", label: "MAX", key: "high" },
 ];
 
 function StatBlock({ label, low, avg, high, unit, colorClass }) {
@@ -33,14 +39,67 @@ function StatBlock({ label, low, avg, high, unit, colorClass }) {
   );
 }
 
-export function TodayCard({ todayStats, selectedNode, readingsLoaded = false }) {
+export function TodayCard({ todayStats, selectedNode, readingsLoaded = false, variant = "grid" }) {
+  const [activeTab, setActiveTab] = useState("avg");
   const hasStats =
     todayStats &&
     (todayStats.temperature || todayStats.turbidity || todayStats.ph ||
      todayStats.nh3 || todayStats.flowRate || todayStats.dissolvedOxygen);
 
+  const renderTabsView = () => (
+    <>
+      <div className="today-card__tabs" role="tablist" aria-label="View MIN, AVG, or MAX values">
+        {TABS.map(({ id, label }) => (
+          <button
+            key={id}
+            type="button"
+            role="tab"
+            aria-selected={activeTab === id}
+            className={`today-card__tab ${activeTab === id ? "today-card__tab--active" : ""}`}
+            onClick={() => setActiveTab(id)}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      <div className="today-card__params">
+        {PARAMS.map(({ key, label, unit, color }) => {
+          const s = todayStats[key];
+          const value = s?.[activeTab];
+          return (
+            <div key={key} className={`today-card__param today-card__param--${color}`}>
+              <span className="today-card__param-name">{label}</span>
+              <span className="today-card__param-value">
+                {value != null ? `${value}${unit}` : "—"}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </>
+  );
+
+  const renderGridView = () => (
+    <div className="today-stats-grid">
+      {PARAMS.map(({ key, label, unit, color }) => {
+        const s = todayStats[key];
+        return (
+          <StatBlock
+            key={key}
+            label={label}
+            low={s?.low}
+            avg={s?.avg}
+            high={s?.high}
+            unit={unit}
+            colorClass={color}
+          />
+        );
+      })}
+    </div>
+  );
+
   return (
-    <div className="card card--fill today-card">
+    <div className={`card card--fill today-card today-card--${variant}`}>
       <div className="card__header">
         <div>
           <h2 className="card__title">Today&apos;s Overview</h2>
@@ -59,23 +118,10 @@ export function TodayCard({ todayStats, selectedNode, readingsLoaded = false }) 
               <MetricSkeleton key={i} />
             ))}
           </div>
+        ) : variant === "tabs" ? (
+          renderTabsView()
         ) : (
-          <div className="today-stats-grid">
-            {PARAMS.map(({ key, label, unit, color }) => {
-              const s = todayStats[key];
-              return (
-                <StatBlock
-                  key={key}
-                  label={label}
-                  low={s?.low}
-                  avg={s?.avg}
-                  high={s?.high}
-                  unit={unit}
-                  colorClass={color}
-                />
-              );
-            })}
-          </div>
+          renderGridView()
         )}
       </div>
     </div>

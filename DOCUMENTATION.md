@@ -101,9 +101,9 @@ Web Dashboard ← Backend ← Database
 1. **Backend:** `cd server && npm install`
 2. **Frontend:** `cd client && npm install`
 3. **Environment**
-   - **server/.env (optional):** `PORT=5000`, `MQTT_URL=mqtt://localhost:1883`, `MQTT_WS_URL=ws://localhost:9001`
-   - **client/.env:** `REACT_APP_API_URL=http://localhost:5000/api`, `REACT_APP_MQTT_URL=ws://localhost:9001`
-4. **Start MQTT broker:** `cd server && npm run mqtt-broker` (TCP 1883, WebSocket 9001)
+   - **server/.env:** `PORT=5000`, `MQTT_URL` or `REACT_APP_MQTT_WS_URL` (e.g. `mqtt://xxx.s1.eu.hivemq.cloud`), `REACT_APP_MQTT_USER`, `REACT_APP_MQTT_PASS`
+   - **client/.env:** `REACT_APP_SUPABASE_URL`, `REACT_APP_SUPABASE_ANON_KEY`, `REACT_APP_MQTT_WS_URL`, `REACT_APP_MQTT_USER`, `REACT_APP_MQTT_PASS`
+4. **MQTT:** Uses HiveMQ Cloud (no local broker needed)
 5. **Start backend:** `cd server && npm start` or `npm run dev`
 6. **Start frontend:** `cd client && npm start`
 
@@ -127,38 +127,24 @@ Web Dashboard ← Backend ← Database
 
 ---
 
-## 4. MQTT — quick start & broker setup
+## 4. MQTT — HiveMQ Cloud
 
-*Source: QUICK_START_MQTT.md, MQTT_SETUP.md*
+WQMS uses **HiveMQ Cloud** as the MQTT broker. No local broker (e.g. Mosquitto) is required.
 
-### Quick fix (test broker)
+### Configuration
 
-1. `cd server`
-2. `npm install aedes ws` (if needed)
-3. `node mqtt-broker-test.js`
-4. Dashboard should connect to `ws://localhost:9001`.
-
-### Broker options
-
-- **Test (easiest):** `node server/mqtt-broker-test.js` — WebSocket 9001, test data every 5s.
-- **Mosquitto:** Install (e.g. `choco install mosquitto` / `brew install mosquitto`). Config: `listener 9001` / `protocol websockets`, `allow_anonymous true` (testing). Start: `mosquitto -c mosquitto.conf`.
-- **Public test:** `REACT_APP_MQTT_URL=wss://broker.hivemq.com:8000/mqtt` (testing only).
-- **Cloud:** HiveMQ Cloud, AWS IoT, etc.
-
-### Client config
-
-`client/.env`: `REACT_APP_MQTT_URL=ws://localhost:9001` (or `wss://...` for production). Restart React after changing.
+- **server/.env:** `REACT_APP_MQTT_WS_URL=mqtt://xxx.s1.eu.hivemq.cloud`, `REACT_APP_MQTT_USER`, `REACT_APP_MQTT_PASS` (or `MQTT_URL`, `MQTT_USER`, `MQTT_PASS`)
+- **client/.env:** Same vars. The client auto-converts `mqtt://` HiveMQ URLs to `wss://` for browser WebSocket.
 
 ### Verify
 
-- Connection indicator (top-right): green “Live” = connected.
+- Connection indicator (top-right): green “Live” = connected to HiveMQ.
 - Browser console: “MQTT Connected to broker: …”.
+- Server/bridge: “✅ MQTT Connected to broker” or “Subscribed to water-quality/#”.
 
-### Publish test (Mosquitto)
+### Publish test
 
-```bash
-mosquitto_pub -h localhost -p 1883 -t "water-quality/node1" -m '{"temperature":25.5,"turbidity":15.2,"pH":7.0,"nh3":0.5,"dissolvedOxygen":8.2,"wqi":45,"location":"Villanueva","nodeId":"1"}'
-```
+Use HiveMQ MQTT CLI or `server/scripts/test.js` (or `npm run test-publish` in server) to publish to `water-quality/node1`.
 
 ---
 
@@ -369,20 +355,18 @@ Nodes + today’s readings (API, calibrated) → readingsByNode → selected nod
 ### MQTT disconnected
 
 1. **Browser console (F12):** Check connection attempts and errors.
-2. **Broker running:** e.g. `netstat -an | findstr :9001` (Windows) — should show LISTENING.
-3. **Restart broker:** `cd server` then start broker (e.g. `node mqtt-broker-test.js` or `npm run mqtt-broker`).
-4. **Test WebSocket in console:** `new WebSocket('ws://localhost:9001')`; check onopen/onerror/onclose.
+2. **HiveMQ config:** Verify `REACT_APP_MQTT_WS_URL`, `REACT_APP_MQTT_USER`, `REACT_APP_MQTT_PASS` in client `.env`.
+3. **Server:** Verify `MQTT_URL` or `REACT_APP_MQTT_WS_URL` and credentials in server `.env`.
 
 ### Common issues
 
-- **Port in use:** Change broker port or stop other process.
-- **Firewall:** Allow Node/broker.
-- **Wrong URL:** Verify `REACT_APP_MQTT_URL` in client `.env`.
-- **Broker not started:** Start broker and refresh app.
+- **Wrong URL:** Use HiveMQ Cloud URL (e.g. `mqtt://xxx.s1.eu.hivemq.cloud`); no port in URL (auto 8883 server, 8884 browser).
+- **Credentials:** HiveMQ Cloud requires username and password.
+- **ECONNREFUSED localhost:1883:** Server is using localhost fallback — set `REACT_APP_MQTT_WS_URL` in server `.env`.
 
 ### Backend not connecting to MQTT
 
-- Ensure broker is running; check MQTT_URL and broker logs.
+- Set `MQTT_URL` or `REACT_APP_MQTT_WS_URL` in server `.env` for HiveMQ. Server skips MQTT if not configured.
 
 ### Frontend not getting API data
 

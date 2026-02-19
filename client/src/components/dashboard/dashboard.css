@@ -35,6 +35,108 @@
   border-color: rgba(141, 218, 213, 0.5);
 }
 
+/* Floating node selector (mobile/tablet): button-like, bottom-right, drop-up, sticky to viewport */
+.node-selector-floating {
+  display: none;
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  z-index: 9999;
+}
+
+.node-selector-floating__trigger {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text);
+  font-size: 0.9rem;
+  font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+  transition: background 0.2s, border-color 0.2s;
+}
+
+.node-selector-floating__trigger:hover {
+  background: var(--panel-dark);
+  border-color: rgba(255, 255, 255, 0.15);
+}
+
+.node-selector-floating__trigger[aria-expanded="true"] {
+  border-color: rgba(141, 218, 213, 0.5);
+}
+
+.node-selector-floating__text {
+  max-width: 160px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.node-selector-floating__chevron {
+  font-size: 0.6em;
+  opacity: 0.8;
+  transition: transform 0.2s ease;
+}
+
+.node-selector-floating__trigger[aria-expanded="true"] .node-selector-floating__chevron {
+  transform: rotate(180deg);
+}
+
+.node-selector-floating__menu {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  right: 0;
+  margin-bottom: 8px;
+  padding: 6px 0;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.3);
+  max-height: 200px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.node-selector-floating__item {
+  display: block;
+  width: 100%;
+  padding: 10px 14px;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 0.85rem;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s ease;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.node-selector-floating__item:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.node-selector-floating__item.active {
+  background: rgba(141, 218, 213, 0.18);
+  color: var(--text);
+}
+
+@media (max-width: 1024px), (max-height: 768px) {
+  .node-selector-floating {
+    display: flex !important;
+  }
+}
+
 .dashHint {
   font-size: 0.75rem;
   color: var(--text-muted);
@@ -151,6 +253,93 @@
   font-size: 1rem;
   color: var(--text-muted);
   margin-top: 4px;
+}
+
+.wqi-card--minimal {
+  padding: 12px 16px;
+}
+
+.wqi-card--minimal .wqiBox--minimal {
+  flex-direction: row;
+  gap: 12px;
+  align-items: baseline;
+  padding: 0;
+  justify-content: center;
+}
+
+.wqi-card--minimal .wqiScore--minimal {
+  font-size: 2rem;
+}
+
+.wqi-card--minimal .wqiLabel {
+  font-size: 0.9rem;
+  margin-top: 0;
+}
+
+/* Today card tabs view */
+.today-card__tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--border);
+  margin: -4px 0 12px 0;
+}
+
+.today-card__tab {
+  flex: 1;
+  padding: 10px 12px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: color 0.2s, border-color 0.2s;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+
+.today-card__tab:hover {
+  color: var(--text);
+}
+
+.today-card__tab--active {
+  color: var(--text);
+  border-bottom-color: rgba(141, 218, 213, 0.6);
+}
+
+.today-card__params {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.today-card__param {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--panel-dark);
+  border-left: 3px solid var(--border);
+}
+
+.today-card__param--temp { border-left-color: #1b9c85; }
+.today-card__param--turb { border-left-color: #d45b5b; }
+.today-card__param--ph { border-left-color: #f0a500; }
+.today-card__param--nh3 { border-left-color: #9b59b6; }
+.today-card__param--flow { border-left-color: #3498db; }
+.today-card__param--do { border-left-color: #2ecc71; }
+
+.today-card__param-name {
+  font-size: 0.9rem;
+  color: var(--text-muted);
+}
+
+.today-card__param-value {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text);
 }
 
 /* Today card: low / avg / high stat blocks — horizontal so they fit without scroll */

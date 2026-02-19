@@ -100,9 +100,7 @@
   padding: 8px 12px;
   border-bottom: 1px solid var(--border);
   margin-bottom: 8px;
-}
-
-.table-skeleton__row {
+}.table-skeleton__row {
   display: flex;
   gap: 12px;
   padding: 8px 12px;

@@ -1,0 +1,290 @@
+.sensor-logs-page {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  padding: 24px;
+}
+
+.sensor-logs-page .page-header {
+  flex-shrink: 0;
+  margin-bottom: 20px;
+}
+
+.sensor-logs-page .sensor-logs-header-meta {
+  margin-top: 4px;
+}
+
+.sensor-logs-filters {
+  flex-shrink: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
+.sensor-logs-export-wrap {
+  position: relative;
+  margin-left: auto;
+}
+
+.sensor-logs-export-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.sensor-logs-export-caret {
+  font-size: 0.7em;
+  opacity: 0.8;
+}
+
+.sensor-logs-export-menu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 4px;
+  min-width: 160px;
+  padding: 6px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.sensor-logs-export-menu button {
+  padding: 10px 12px;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 0.9rem;
+  font-family: "Manrope", sans-serif;
+  text-align: left;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.sensor-logs-export-menu button:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+[data-theme="light"] .sensor-logs-export-menu {
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+}
+
+[data-theme="light"] .sensor-logs-export-menu button:hover {
+  background: rgba(0, 0, 0, 0.06);
+}
+
+.sensor-logs-search {
+  min-width: 200px;
+  flex: 1;
+  max-width: 320px;
+  border: 1px solid var(--border);
+  background: var(--panel-dark);
+  color: var(--text);
+  padding: 8px 14px;
+  padding-left: 36px;
+  border-radius: 999px;
+  font-size: 0.9rem;
+  font-family: "Manrope", sans-serif;
+  outline: none;
+  transition: border-color 0.2s, background 0.2s;
+}
+
+.sensor-logs-search::placeholder {
+  color: var(--text-muted);
+}
+
+.sensor-logs-search:hover {
+  background: var(--panel);
+  border-color: var(--border);
+}
+
+.sensor-logs-search:focus {
+  border-color: rgba(255, 255, 255, 0.3);
+  background: var(--panel);
+}
+
+[data-theme="light"] .sensor-logs-search {
+  background: #f8f9fa;
+  border-color: rgba(0, 0, 0, 0.25);
+}
+
+[data-theme="light"] .sensor-logs-search:hover,
+[data-theme="light"] .sensor-logs-search:focus {
+  background: #e9ecef;
+  border-color: rgba(0, 0, 0, 0.35);
+}
+
+.sensor-logs-node-select,
+.sensor-logs-date-input {
+  border: 1px solid var(--border);
+  background: var(--panel-dark);
+  color: var(--text);
+  padding: 8px 14px;
+  border-radius: 10px;
+  font-size: 0.9rem;
+  font-family: "Manrope", sans-serif;
+  outline: none;
+}
+
+.sensor-logs-table-card {
+  flex: 1;
+  min-height: 0;
+  overflow: visible;
+  display: flex;
+  flex-direction: column;
+}
+
+.sensor-logs-table-card .card__body {
+  flex: 1;
+  min-height: 0;
+  overflow: visible;
+  display: flex;
+  flex-direction: column;
+}
+
+.sensor-logs-data-table-wrap {
+  height: 368px;
+  min-height: 368px;
+  flex-shrink: 0;
+  overflow: visible;
+  padding-bottom: 0;
+}
+
+.sensor-logs-data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.sensor-logs-data-table th,
+.sensor-logs-data-table td {
+  padding: 8px 12px;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.sensor-logs-data-table th {
+  color: var(--text-muted);
+  font-weight: 600;
+  font-size: 0.75rem;
+}
+
+.sensor-logs-th-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 0;
+  margin: -4px 0;
+  background: none;
+  border: none;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: left;
+  white-space: nowrap;
+  transition: color 0.2s;
+}
+
+.sensor-logs-th-btn:hover {
+  color: var(--text);
+}
+
+.sensor-logs-th-btn--active {
+  color: var(--accent, #1b9c85);
+}
+
+.sensor-logs-data-table tbody tr:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.sensor-logs-data-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.sensor-logs-data-table td {
+  color: var(--text);
+}
+
+.sensor-logs-data-table-empty {
+  color: var(--text-muted);
+  text-align: center;
+  padding: 48px 24px !important;
+}
+
+.sensor-logs-data-table-node-id {
+  font-family: ui-monospace, monospace;
+  font-size: 0.85em;
+}
+
+.sensor-logs-data-table-node-name {
+  margin-left: 4px;
+  color: var(--text-muted);
+}
+
+.sensor-logs-search-highlight {
+  background: rgba(27, 156, 133, 0.4);
+  border-radius: 2px;
+  padding: 0 2px;
+}
+
+.sensor-logs-table-pagination {
+  flex-shrink: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 0;
+  margin-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.sensor-logs-table-pagination-info {
+  font-size: 0.9rem;
+  color: var(--text-muted);
+}
+
+.sensor-logs-table-pagination-btns {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.sensor-logs-table-pagination-page {
+  font-size: 0.9rem;
+  color: var(--text-muted);
+}
+
+.sensor-logs-table-pagination-btn {
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  background: var(--panel-dark);
+  color: var(--text);
+  font-size: 0.9rem;
+  font-family: "Manrope", sans-serif;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s;
+}
+
+.sensor-logs-table-pagination-btn:hover:not(:disabled) {
+  background: var(--panel);
+  border-color: var(--accent, #1b9c85);
+}
+
+.sensor-logs-table-pagination-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

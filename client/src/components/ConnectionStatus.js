@@ -4,7 +4,7 @@ import './ConnectionStatus.css';
 const ConnectionStatus = ({ isConnected, isConnecting, error, onReconnect, brokerUrl }) => {
   const [showDetails, setShowDetails] = useState(false);
   
-  const mqttUrl = brokerUrl || process.env.REACT_APP_MQTT_URL || 'ws://localhost:9001';
+  const mqttUrl = brokerUrl || process.env.REACT_APP_MQTT_WS_URL || process.env.REACT_APP_MQTT_URL || 'HiveMQ (not configured)';
 
   return (
     <div 
@@ -35,9 +35,7 @@ const ConnectionStatus = ({ isConnected, isConnecting, error, onReconnect, broke
             {error && <p><strong>Error:</strong> {error}</p>}
             <p className="connection-help">
               💡 <strong>To connect:</strong><br/>
-              1. Start MQTT broker on port 9001<br/>
-              2. Or set REACT_APP_MQTT_URL in .env<br/>
-              3. See MQTT_SETUP.md for details
+              Set REACT_APP_MQTT_WS_URL (e.g. mqtt://xxx.s1.eu.hivemq.cloud), REACT_APP_MQTT_USER, and REACT_APP_MQTT_PASS in client/.env
             </p>
           </div>
         </div>

@@ -2,12 +2,26 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import mqtt from 'mqtt';
 
 /**
+ * Convert HiveMQ mqtt:// URL to browser WebSocket wss:// (port 8884).
+ * Browser MQTT uses WebSockets; Node uses raw MQTT/TLS.
+ */
+function toBrowserMqttUrl(mqttUrl) {
+  if (!mqttUrl || typeof mqttUrl !== 'string') return null;
+  if (mqttUrl.startsWith('wss://') || mqttUrl.startsWith('ws://')) return mqttUrl;
+  if (mqttUrl.startsWith('mqtt://') && mqttUrl.includes('hivemq')) {
+    const host = mqttUrl.replace(/^mqtts?:\/\//, '').split('/')[0].replace(/:\d+$/, '');
+    return `wss://${host}:8884/mqtt`;
+  }
+  return mqttUrl;
+}
+
+/**
  * Custom hook for MQTT connection and subscription
- * 
- * Based on the system architecture:
- * - Nodes → Microcontroller → MQTT Broker → Web Dashboard (Live Updates)
- * 
- * @param {string} brokerUrl - MQTT broker URL (default: process.env.REACT_APP_MQTT_URL or 'ws://localhost:9001')
+ *
+ * Uses HiveMQ Cloud. Set REACT_APP_MQTT_WS_URL or REACT_APP_MQTT_URL in .env.
+ * HiveMQ mqtt:// URLs are auto-converted to wss:// for browser.
+ *
+ * @param {string} brokerUrl - MQTT broker URL (or from .env)
  * @param {object} options - MQTT connection options
  * @returns {object} - { client, isConnected, error, subscribe, unsubscribe, reconnect }
  */
@@ -17,26 +31,23 @@ export const useMQTT = (brokerUrl = null, options = {}) => {
   const [error, setError] = useState(null);
   const clientRef = useRef(null);
 
-  // Default broker URL - supports both WebSocket (ws://) and TCP (mqtt://)
-  // For browser, use WebSocket: ws:// or wss://
-  // Priority: 1) brokerUrl param, 2) .env file, 3) default localhost
-  let url = brokerUrl || process.env.REACT_APP_MQTT_URL || 'ws://localhost:9001';
-  
-  // Ensure we're using localhost, not a placeholder
-  if (url.includes('your-mqtt-broker')) {
-    console.warn('⚠️ Detected placeholder URL, using localhost:9001 instead');
-    url = 'ws://localhost:9001';
-  }
+  const rawUrl = brokerUrl || process.env.REACT_APP_MQTT_WS_URL || process.env.REACT_APP_MQTT_URL || '';
+  const url = toBrowserMqttUrl(rawUrl) || rawUrl;
 
   useEffect(() => {
-    // MQTT connection options
+    if (!url) {
+      setIsConnecting(false);
+      return;
+    }
     const mqttOptions = {
       clientId: `wqms-dashboard-${Math.random().toString(16).substr(2, 8)}`,
       clean: true,
       reconnectPeriod: 5000,
       connectTimeout: 30000,
-      protocolVersion: 4, // MQTT 3.1.1
+      protocolVersion: 4,
       protocolId: 'MQTT',
+      username: process.env.REACT_APP_MQTT_USER || undefined,
+      password: process.env.REACT_APP_MQTT_PASS || undefined,
       ...options,
     };
 

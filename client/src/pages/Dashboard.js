@@ -39,6 +39,20 @@ function toDateStr(d) {
   return `${y}-${m}-${day}`;
 }
 
+function useIsMobile(breakpoint = 768) {
+  const [isMobile, setIsMobile] = useState(() =>
+    typeof window !== "undefined" ? window.innerWidth <= breakpoint : false
+  );
+  useEffect(() => {
+    const mq = window.matchMedia(`(max-width: ${breakpoint}px)`);
+    const handler = () => setIsMobile(mq.matches);
+    handler();
+    mq.addEventListener("change", handler);
+    return () => mq.removeEventListener("change", handler);
+  }, [breakpoint]);
+  return isMobile;
+}
+
 export default function Dashboard() {
   const [nodes, setNodes] = useState([]);
   const [selectedNodeId, setSelectedNodeId] = useState("");
@@ -165,19 +179,8 @@ export default function Dashboard() {
   handleRefreshRef.current = handleRefresh;
 
   useEffect(() => {
-    let defaultIntervalMinutes = 15;
-    try {
-      const stored = localStorage.getItem("wqms_data_collection");
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        const n = parseInt(parsed.defaultIntervalMinutes, 10);
-        if (!isNaN(n) && n >= 1 && n <= 120) defaultIntervalMinutes = n;
-      }
-    } catch {
-      // use 15
-    }
-    const intervalMs = defaultIntervalMinutes * 60 * 1000;
-    autoRefreshIntervalRef.current = setInterval(() => handleRefreshRef.current(), intervalMs);
+    const LIVE_REFRESH_MS = 30 * 1000; // 30 seconds for real-time charts/reports
+    autoRefreshIntervalRef.current = setInterval(() => handleRefreshRef.current(), LIVE_REFRESH_MS);
     return () => {
       if (autoRefreshIntervalRef.current) clearInterval(autoRefreshIntervalRef.current);
     };
@@ -273,6 +276,7 @@ export default function Dashboard() {
   }), []);
 
   const isPageLoading = !nodesLoaded || !readingsLoaded;
+  const isMobile = useIsMobile(768);
 
   const handleSensorTest = useCallback(
     (nodeId, forceRun = false) => {
@@ -309,10 +313,15 @@ export default function Dashboard() {
 
       <div className="dash__grid">
         <section className="dash__cell dash__cell--today">
-          <TodayCard todayStats={todayStats} selectedNode={selectedNode} readingsLoaded={readingsLoaded} />
+          <TodayCard
+            todayStats={todayStats}
+            selectedNode={selectedNode}
+            readingsLoaded={readingsLoaded}
+            variant={isMobile ? "tabs" : "grid"}
+          />
         </section>
-        <section className="dash__cell dash__cell--wqi">
-          <WqiCard value={wqiValue} label={wqiLabel} />
+        <section className={`dash__cell dash__cell--wqi ${isMobile ? "dash__cell--wqi-first" : ""}`}>
+          <WqiCard value={wqiValue} label={wqiLabel} minimal={isMobile} />
         </section>
         <section className="dash__cell dash__cell--live">
           <LiveChart todayData={todayData} todayChartOptions={todayChartOptions} />

@@ -150,9 +150,24 @@
   }
   .dash__cell--today { grid-column: 1; grid-row: auto; }
   .dash__cell--wqi { grid-column: 1; grid-row: auto; }
+}
+
+/* Mobile: WQI first, then Overview; hide mini map and alerts */
+@media (max-width: 768px), (max-height: 600px) {
+  .dash__cell--wqi-first {
+    order: -2;
+  }
+  .dash__cell--today {
+    order: -1;
+  }
+  .dash__cell--today .card__desc {
+    display: none;
+  }
   .dash__cell--live { grid-column: 1; grid-row: auto; }
-  .dash__cell--mini { grid-column: 1; grid-row: auto; }
-  .dash__cell--alerts { grid-column: 1; grid-row: auto; }
+  .dash__cell--mini,
+  .dash__cell--alerts {
+    display: none;
+  }
   .dash__top {
     flex-direction: row;
     align-items: flex-start;
@@ -166,7 +181,7 @@
 }
 
 /* Responsive — tablets portrait / large phones */
-@media (max-width: 768px), (max-height: 600px) {
+@media (max-width: 1024px), (max-height: 768px) {
   .dash {
     overflow: visible;
     min-height: auto;

@@ -1,7 +1,4 @@
 import React, { useState, useRef, useEffect, useMemo, memo } from "react";
-import { createPortal } from "react-dom";
-import { jsPDF } from "jspdf";
-import { autoTable } from "jspdf-autotable";
 import "../utils/chartConfig";
 import { Line, Bar } from "react-chartjs-2";
 import PageDateWithStatus from "../components/PageDateWithStatus";
@@ -22,84 +19,6 @@ const MemoizedReportChart = memo(function MemoizedReportChart({ data, options, c
     <Line data={data} options={options} />
   );
 });
-
-const EXPORT_HEADERS = [
-  "Date", "Time", "Node", "Temperature (°C)", "pH", "Turbidity (NTU)",
-  "Dissolved O₂ (mg/L)", "NH₃ (mg/L)", "Flow rate (L/min)", "WQI",
-];
-
-/** Return all column values as strings for a row (for search). */
-function rowToSearchStrings(row) {
-  const nodeLabel = row.nodeName !== row.nodeId ? `${row.nodeId} — ${row.nodeName}` : row.nodeId;
-  return [
-    row.date.toLocaleDateString(),
-    row.date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-    nodeLabel,
-    String(row.temperature),
-    String(row.pH),
-    String(row.turbidity),
-    String(row.dissolvedOxygen),
-    String(row.nh3),
-    String(row.flowRate),
-    row.wqi != null ? String(row.wqi) : "—",
-  ];
-}
-
-function rowMatchesSearch(row, q) {
-  if (!q) return true;
-  const lower = q.trim().toLowerCase();
-  if (!lower) return true;
-  const strings = rowToSearchStrings(row);
-  return strings.some((s) => s && String(s).toLowerCase().includes(lower));
-}
-
-/** Escape special regex characters. */
-function escapeRegex(s) {
-  return String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-/** Wrap matching substrings in <mark>. Returns React node (string or array of fragments). */
-function highlightMatch(text, query) {
-  const str = text == null ? "" : String(text);
-  const q = query && query.trim();
-  if (!q) return str;
-  const escaped = escapeRegex(q);
-  const re = new RegExp(`(${escaped})`, "gi");
-  const parts = str.split(re);
-  if (parts.length === 1) return str;
-  return parts.map((part, i) =>
-    i % 2 === 1 ? (
-      <mark key={i} className="reports-search-highlight">{part}</mark>
-    ) : (
-      part
-    )
-  );
-}
-
-function rowToExportCells(row) {
-  const nodeLabel = row.nodeName !== row.nodeId ? `${row.nodeId} — ${row.nodeName}` : row.nodeId;
-  return [
-    row.date.toLocaleDateString(),
-    row.date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-    nodeLabel,
-    String(row.temperature),
-    String(row.pH),
-    String(row.turbidity),
-    String(row.dissolvedOxygen),
-    String(row.nh3),
-    String(row.flowRate),
-    row.wqi != null ? String(row.wqi) : "—",
-  ];
-}
-
-function downloadBlob(filename, blob) {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
-}
 
 const PARAMETER_OPTIONS = [
   { id: "temperature", label: "Temperature", unit: "°C" },
@@ -447,25 +366,10 @@ function aggregateReadingsToDailySummaries(readings) {
   });
 }
 
-/** WQI scale 0–100: position on bar (0% = very poor, 100% = excellent). */
-function wqiToBarPosition(wqi) {
-  const s = Number(wqi);
-  if (isNaN(s)) return 0;
-  return Math.min(100, Math.max(0, s));
-}
-
 export default function Reports() {
   const lastUpdated = new Date();
-  const [search, setSearch] = useState("");
-  const [tableDateFrom, setTableDateFrom] = useState("");
-  const [tableDateTo, setTableDateTo] = useState("");
-  const [tableSort, setTableSort] = useState({ column: "date", direction: "desc" });
-  const [tableNodeFilter, setTableNodeFilter] = useState("all");
-  const [tablePage, setTablePage] = useState(1);
   const [nodes, setNodes] = useState([]);
   const [nodesLoaded, setNodesLoaded] = useState(false);
-  const [exportOpen, setExportOpen] = useState(false);
-  const [reportReadings, setReportReadings] = useState([]);
   const [reportReadingsForChart, setReportReadingsForChart] = useState([]);
   const [calendarSummaries, setCalendarSummaries] = useState([]);
   /** Daily summaries derived from sensor_readings for the chart. */
@@ -490,26 +394,14 @@ export default function Reports() {
   });
   const [selectedDay, setSelectedDay] = useState(null);
   const [modalOpen, setModalOpen] = useState(false);
-  const exportRef = useRef(null);
+  const [refreshTrigger, setRefreshTrigger] = useState(0);
 
-  const TABLE_PAGE_SIZE = 9;
-
-  /** Effective date range for table: when From/To are set, use them; otherwise default last 7 days. */
-  const tableDateRange = useMemo(() => {
-    if (tableDateFrom && tableDateTo) {
-      const start = new Date(tableDateFrom);
-      start.setHours(0, 0, 0, 0);
-      const end = new Date(tableDateTo);
-      end.setHours(23, 59, 59, 999);
-      return { start, end };
-    }
-    const end = new Date();
-    end.setHours(23, 59, 59, 999);
-    const start = new Date();
-    start.setDate(start.getDate() - 6);
-    start.setHours(0, 0, 0, 0);
-    return { start, end };
-  }, [tableDateFrom, tableDateTo]);
+  /** Real-time refresh: refetch report and calendar data every 30 seconds */
+  useEffect(() => {
+    const LIVE_REFRESH_MS = 30 * 1000;
+    const id = setInterval(() => setRefreshTrigger((t) => t + 1), LIVE_REFRESH_MS);
+    return () => clearInterval(id);
+  }, []);
 
   useEffect(() => {
     loadNodes().then(() => setNodes(getNodes())).finally(() => setNodesLoaded(true));
@@ -525,14 +417,7 @@ export default function Reports() {
     const start = typeof reportRangeStart === "string" ? reportRangeStart : (reportRangeStart.getFullYear() + "-" + String(reportRangeStart.getMonth() + 1).padStart(2, "0") + "-" + String(reportRangeStart.getDate()).padStart(2, "0"));
     const end = typeof reportRangeEnd === "string" ? reportRangeEnd : (reportRangeEnd.getFullYear() + "-" + String(reportRangeEnd.getMonth() + 1).padStart(2, "0") + "-" + String(reportRangeEnd.getDate()).padStart(2, "0"));
     api.getSensorReadings({ startDate: start, endDate: end, limit: 500 }).then((rows) => setReportReadingsForChart(applyCalibrationToReadings(Array.isArray(rows) ? rows : []))).catch(() => setReportReadingsForChart([]));
-  }, [reportRangeStart, reportRangeEnd]);
-
-  useEffect(() => {
-    if (!tableDateRange?.start || !tableDateRange?.end) return;
-    const start = tableDateRange.start.getFullYear() + "-" + String(tableDateRange.start.getMonth() + 1).padStart(2, "0") + "-" + String(tableDateRange.start.getDate()).padStart(2, "0");
-    const end = tableDateRange.end.getFullYear() + "-" + String(tableDateRange.end.getMonth() + 1).padStart(2, "0") + "-" + String(tableDateRange.end.getDate()).padStart(2, "0");
-    api.getSensorReadings({ startDate: start, endDate: end, limit: 500 }).then((rows) => setReportReadings(applyCalibrationToReadings(Array.isArray(rows) ? rows : []))).catch(() => setReportReadings([]));
-  }, [tableDateRange?.start?.getTime(), tableDateRange?.end?.getTime()]);
+  }, [reportRangeStart, reportRangeEnd, refreshTrigger]);
 
   useEffect(() => {
     const start = new Date(calendarView.year, calendarView.month, 1);
@@ -540,7 +425,7 @@ export default function Reports() {
     const startStr = start.getFullYear() + "-" + String(start.getMonth() + 1).padStart(2, "0") + "-" + String(start.getDate()).padStart(2, "0");
     const endStr = end.getFullYear() + "-" + String(end.getMonth() + 1).padStart(2, "0") + "-" + String(end.getDate()).padStart(2, "0");
     api.getDailySummaries({ startDate: startStr, endDate: endStr }).then(setCalendarSummaries).catch(() => setCalendarSummaries([]));
-  }, [calendarView.year, calendarView.month]);
+  }, [calendarView.year, calendarView.month, refreshTrigger]);
 
   useEffect(() => {
     if (!dateRangePickerOpen || !dateRangeButtonRef.current) return;
@@ -580,74 +465,6 @@ export default function Reports() {
       ],
     };
   }, [reportParameter, reportPeriod, reportRangeStart, reportRangeEnd, reportSummaries]);
-
-  /** Table rows from API/Supabase readings only. No mock data. */
-  const sensorTableRows = useMemo(() => {
-    const list = Array.isArray(reportReadings) ? reportReadings : [];
-    const nodeMap = {};
-    nodes.forEach((n) => { nodeMap[n.id] = n.name || n.id; });
-    const rows = list.map((r) => {
-      const d = typeof r.timestamp === "string" ? new Date(r.timestamp) : new Date(r.timestamp);
-      const nodeId = r.node_id || r.nodeId || "1";
-      const wqi = calculateWQI({
-        temperature: r.temperature,
-        turbidity: r.turbidity,
-        pH: r.ph ?? r.pH,
-        tan: r.tan ?? r.TAN,
-        dissolvedOxygen: r.dissolved_oxygen ?? r.dissolvedOxygen ?? r.do,
-      });
-      return {
-        date: d,
-        nodeId,
-        nodeName: nodeMap[nodeId] || nodeId,
-        temperature: r.temperature ?? null,
-        pH: r.ph ?? r.pH ?? null,
-        turbidity: r.turbidity ?? null,
-        dissolvedOxygen: r.dissolved_oxygen ?? r.dissolvedOxygen ?? r.do ?? null,
-        nh3: getNH3FromReading(r),
-        flowRate: r.flow_rate ?? r.flowRate ?? null,
-        wqi: wqi != null ? Math.round(wqi) : null,
-      };
-    });
-    let filtered = rows;
-    if (search.trim()) {
-      const q = search.trim().toLowerCase();
-      filtered = filtered.filter((r) => rowMatchesSearch(r, q));
-    }
-    if (tableNodeFilter && tableNodeFilter !== "all") {
-      filtered = filtered.filter((r) => r.nodeId === tableNodeFilter);
-    }
-    const { column, direction } = tableSort;
-    const sorted = [...filtered].sort((a, b) => {
-      let cmp = 0;
-      if (column === "date" || column === "time") cmp = a.date.getTime() - b.date.getTime();
-      else if (column === "node") cmp = String(a.nodeName || a.nodeId).localeCompare(String(b.nodeName || b.nodeId));
-      else if (column === "temperature") cmp = (a.temperature ?? -Infinity) - (b.temperature ?? -Infinity);
-      else if (column === "pH") cmp = (a.pH ?? -Infinity) - (b.pH ?? -Infinity);
-      else if (column === "turbidity") cmp = (a.turbidity ?? -Infinity) - (b.turbidity ?? -Infinity);
-      else if (column === "dissolvedOxygen") cmp = (a.dissolvedOxygen ?? -Infinity) - (b.dissolvedOxygen ?? -Infinity);
-      else if (column === "nh3") cmp = (a.nh3 ?? -Infinity) - (b.nh3 ?? -Infinity);
-      else if (column === "flowRate") cmp = (a.flowRate ?? -Infinity) - (b.flowRate ?? -Infinity);
-      else if (column === "wqi") cmp = (a.wqi ?? -Infinity) - (b.wqi ?? -Infinity);
-      return direction === "asc" ? cmp : -cmp;
-    });
-    return sorted;
-  }, [reportReadings, nodes, search, tableNodeFilter, tableSort]);
-
-  const totalRows = sensorTableRows.length;
-  const totalPages = Math.max(1, Math.ceil(totalRows / TABLE_PAGE_SIZE));
-  const paginatedRows = useMemo(() => {
-    const start = (tablePage - 1) * TABLE_PAGE_SIZE;
-    return sensorTableRows.slice(start, start + TABLE_PAGE_SIZE);
-  }, [sensorTableRows, tablePage]);
-
-  useEffect(() => {
-    setTablePage(1);
-  }, [search, tableNodeFilter, tableDateFrom, tableDateTo, tableSort.column, tableSort.direction]);
-
-  useEffect(() => {
-    if (tablePage > totalPages) setTablePage(Math.max(1, totalPages));
-  }, [tablePage, totalPages]);
 
   const reportChartOptions = useMemo(
     () => ({
@@ -694,67 +511,6 @@ export default function Reports() {
   const handleSelectDate = (day) => {
     setSelectedDay(day);
     setModalOpen(true);
-  };
-
-  const handleExport = (format) => {
-    setExportOpen(false);
-    try {
-      const rows = sensorTableRows;
-      const headerRow = EXPORT_HEADERS;
-      const dataRows = rows.map(rowToExportCells);
-      const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
-      const baseName = `wqms-report-${timestamp}`;
-
-      if (format === "csv") {
-      const escape = (v) => {
-        const s = String(v);
-        if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
-        return s;
-      };
-      const line = (arr) => arr.map(escape).join(",");
-      const csv = "\uFEFF" + [headerRow, ...dataRows].map(line).join("\r\n");
-      downloadBlob(`${baseName}.csv`, new Blob([csv], { type: "text/csv;charset=utf-8" }));
-    } else if (format === "text") {
-      const pad = (v, w) => String(v).slice(0, w).padEnd(w);
-      const widths = [12, 10, 20, 8, 6, 10, 10, 8, 12, 6];
-      const textLines = [
-        "WQMS Sensor Data Export",
-        `Exported: ${new Date().toLocaleString()}`,
-        `Rows: ${rows.length}`,
-        "",
-        headerRow.map((h, i) => pad(h, widths[i])).join(" "),
-        ...dataRows.map((r) => r.map((c, i) => pad(c, widths[i])).join(" ")),
-      ];
-      const text = textLines.join("\r\n");
-      downloadBlob(`${baseName}.txt`, new Blob([text], { type: "text/plain;charset=utf-8" }));
-    } else if (format === "excel") {
-      const escape = (v) => {
-        const s = String(v);
-        if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
-        return s;
-      };
-      const line = (arr) => arr.map(escape).join(",");
-      const csv = "\uFEFF" + [headerRow, ...dataRows].map(line).join("\r\n");
-      downloadBlob(`${baseName}.xls`, new Blob([csv], { type: "application/vnd.ms-excel;charset=utf-8" }));
-    } else if (format === "pdf") {
-      const doc = new jsPDF({ orientation: "landscape" });
-      doc.setFontSize(10);
-      doc.text("WQMS Sensor Data", 14, 12);
-      const y = 18;
-      doc.text(`Exported: ${new Date().toLocaleString()}  |  ${rows.length} records`, 14, y);
-      autoTable(doc, {
-        head: [headerRow],
-        body: dataRows.length > 0 ? dataRows : [["No data for current filters."]],
-        startY: y + 10,
-        styles: { fontSize: 7 },
-        headStyles: { fillColor: [27, 156, 133] },
-      });
-      doc.save(`${baseName}.pdf`);
-    }
-    } catch (err) {
-      console.error("Export failed:", err);
-      alert("Export failed. Please try again.");
-    }
   };
 
   const handleReportPeriodChange = (e) => {
@@ -826,9 +582,6 @@ export default function Reports() {
 
   useEffect(() => {
     const handleClickOutside = (e) => {
-      if (exportRef.current && !exportRef.current.contains(e.target)) {
-        setExportOpen(false);
-      }
       const inSelectors = dateRangePickerRef.current?.contains(e.target);
       const inOverlay = dateRangeOverlayRef.current?.contains(e.target);
       if (!inSelectors && !inOverlay) {
@@ -1098,104 +851,17 @@ export default function Reports() {
               selectedDate={selectedDay?.date ?? null}
               onSelectDate={handleSelectDate}
             />
-            <div className="reports-calendar-legend">
-              <p className="reports-calendar-legend-title">STATUS</p>
-              <div className="calendar-legend-bar-wrap">
-                <div className="legend-bar" aria-hidden="true" />
-                {selectedDay?.wqi != null && (
-                  <div
-                    className="calendar-legend-indicator"
-                    style={{ left: `${wqiToBarPosition(selectedDay.wqi)}%` }}
-                    aria-hidden="true"
-                  />
-                )}
-              </div>
-              <div className="reports-calendar-legend-labels">
-                <span>Unsuitable (&gt;300)</span>
-                <span>Excellent (&lt;50)</span>
-              </div>
-            </div>
           </div>
         </aside>
       </div>
 
-      <div className="reports-filters">
-        <input
-          type="search"
-          className="reports-search"
-          placeholder="Search…"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          aria-label="Search reports"
+      {modalOpen && (
+        <WqiDetailModal
+          date={selectedDay?.date ?? null}
+          wqi={selectedDay?.wqi ?? null}
+          params={selectedDay?.params ?? null}
+          onClose={() => setModalOpen(false)}
         />
-        <select
-          className="metric-select"
-          aria-label="Node filter"
-          value={tableNodeFilter}
-          onChange={(e) => setTableNodeFilter(e.target.value)}
-        >
-          <option value="all">All nodes</option>
-          {nodes.map((node) => (
-            <option key={node.id} value={node.id}>
-              {node.id} — {node.name || node.id}
-            </option>
-          ))}
-        </select>
-        <input
-          type="date"
-          className="date-input"
-          aria-label="From date"
-          value={tableDateFrom}
-          onChange={(e) => setTableDateFrom(e.target.value)}
-        />
-        <input
-          type="date"
-          className="date-input"
-          aria-label="To date"
-          value={tableDateTo}
-          onChange={(e) => setTableDateTo(e.target.value)}
-        />
-        <div className="reports-export-wrap" ref={exportRef}>
-          <button
-            type="button"
-            className="ghost-btn reports-export-btn"
-            onClick={() => setExportOpen((o) => !o)}
-            aria-expanded={exportOpen}
-            aria-haspopup="true"
-            aria-label="Export options"
-          >
-            Export <span className="reports-export-caret" aria-hidden>▼</span>
-          </button>
-          {exportOpen && (
-            <div className="reports-export-menu" role="menu">
-              <button type="button" role="menuitem" onClick={() => handleExport("csv")}>
-                Export as CSV
-              </button>
-              <button type="button" role="menuitem" onClick={() => handleExport("pdf")}>
-                Export as PDF
-              </button>
-              <button type="button" role="menuitem" onClick={() => handleExport("text")}>
-                Export as Text
-              </button>
-              <button type="button" role="menuitem" onClick={() => handleExport("excel")}>
-                Export as Excel
-              </button>
-            </div>
-          )}
-        </div>
-      </div>
-
-      <section className="reports-table-card card">
-        <div className="card__header">
-          <h2 className="card__title">Sensor data</h2>
-          <p className="card__desc">All nodes and parameters, saved every hour. Use filters above to narrow results.</p>
-        </div>
-        <div className="card__body">
-          <div className="reports-data-table-wrap">
-            <table className="reports-data-table" role="table">
-              <thead>
-                <tr>
-                  <th>
                     <button
                       type="button"
                       className={`reports-th-btn ${tableSort.column === "date" ? "reports-th-btn--active" : ""}`}
