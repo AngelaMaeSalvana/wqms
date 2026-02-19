@@ -5,6 +5,7 @@ import "./side-nav.css";
 const navItems = [
   { to: "/dashboard", label: "Dashboard", icon: "📊" },
   { to: "/reports", label: "Reports", icon: "🗂️" },
+  { to: "/sensor-logs", label: "Sensor Logs", icon: "📋" },
   { to: "/map", label: "Map & Locations", icon: "📍" },
   { to: "/nodes", label: "Nodes", icon: "🔌" },
   { to: "/alerts", label: "Alerts", icon: "🔔" },

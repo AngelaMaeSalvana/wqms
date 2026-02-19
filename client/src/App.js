@@ -7,6 +7,7 @@ import ErrorBoundary from "./components/ErrorBoundary.js";
 
 import Dashboard from "./pages/Dashboard";
 import Reports from "./pages/Reports";
+import SensorLogs from "./pages/SensorLogs";
 import Map from "./pages/Map";
 import Alerts from "./pages/Alerts";
 import Nodes from "./pages/Nodes";
@@ -28,6 +29,7 @@ export default function App() {
               <Route path="/" element={<Navigate to="/dashboard" replace />} />
               <Route path="/dashboard" element={<Dashboard />} />
               <Route path="/reports" element={<Reports />} />
+              <Route path="/sensor-logs" element={<SensorLogs />} />
               <Route path="/map" element={<Map />} />
               <Route path="/nodes" element={<Nodes />} />
               <Route path="/alerts" element={<Alerts />} />
