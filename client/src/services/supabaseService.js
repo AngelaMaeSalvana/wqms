@@ -165,9 +165,11 @@ export async function saveNodesToSupabase(nodes) {
 
 const SETTINGS_KEYS = [
   'wqms_thresholds',
+  'wqms_threshold_classification',
   'wqms_calibration',
   'wqms_data_collection',
   'wqms_wqi_weights',
+  'wqms_notifications',
 ];
 
 export async function getSettingsFromSupabase() {

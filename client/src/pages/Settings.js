@@ -7,13 +7,8 @@ import {
   syncSettingsFromSupabase,
   saveSettingsToSupabaseAndLocal,
 } from "../utils/settingsStorage";
+import { sendEventNotification } from "../services/emailService";
 import "./Settings.css";
-
-const FONT_OPTIONS = [
-  { value: "small", label: "Small" },
-  { value: "medium", label: "Medium" },
-  { value: "large", label: "Large" },
-];
 
 const DEFAULT_THRESHOLDS = {
   temperatureMin: 18,
@@ -24,6 +19,97 @@ const DEFAULT_THRESHOLDS = {
   dissolvedOxygenMin: 4,
   nh3Max: 0.5,
 };
+
+/** TSS (mg/L) to NTU: 1 NTU ≈ 1.5 mg/L TSS → NTU = TSS / 1.5 */
+const tssToNtu = (tss) => Math.round((tss / 1.5) * 10) / 10;
+
+/** DENR DAO 2016-08/2021-19 water quality classifications and preset thresholds */
+const THRESHOLD_CLASSIFICATIONS = {
+  AA: {
+    temperatureMin: 26,
+    temperatureMax: 30,
+    pHMin: 6.5,
+    pHMax: 8.5,
+    turbidityMax: tssToNtu(25),
+    dissolvedOxygenMin: 5,
+    nh3Max: 0.05,
+  },
+  A: {
+    temperatureMin: 26,
+    temperatureMax: 30,
+    pHMin: 6.5,
+    pHMax: 8.5,
+    turbidityMax: tssToNtu(50),
+    dissolvedOxygenMin: 5,
+    nh3Max: 0.05,
+  },
+  B: {
+    temperatureMin: 26,
+    temperatureMax: 30,
+    pHMin: 6.5,
+    pHMax: 8.5,
+    turbidityMax: tssToNtu(65),
+    dissolvedOxygenMin: 5,
+    nh3Max: 0.05,
+  },
+  C: {
+    temperatureMin: 25,
+    temperatureMax: 31,
+    pHMin: 6.5,
+    pHMax: 9,
+    turbidityMax: tssToNtu(80),
+    dissolvedOxygenMin: 5,
+    nh3Max: 0.05,
+  },
+  D: {
+    temperatureMin: 25,
+    temperatureMax: 32,
+    pHMin: 6,
+    pHMax: 9,
+    turbidityMax: tssToNtu(110),
+    dissolvedOxygenMin: 2,
+    nh3Max: 0.75,
+  },
+  SA: {
+    temperatureMin: 26,
+    temperatureMax: 30,
+    pHMin: 7,
+    pHMax: 8.5,
+    turbidityMax: tssToNtu(25),
+    dissolvedOxygenMin: 6,
+    nh3Max: 0.04,
+  },
+  SB: {
+    temperatureMin: 26,
+    temperatureMax: 30,
+    pHMin: 7,
+    pHMax: 8.5,
+    turbidityMax: tssToNtu(50),
+    dissolvedOxygenMin: 6,
+    nh3Max: 0.05,
+  },
+  SC: {
+    temperatureMin: 25,
+    temperatureMax: 31,
+    pHMin: 6.5,
+    pHMax: 8.5,
+    turbidityMax: tssToNtu(80),
+    dissolvedOxygenMin: 5,
+    nh3Max: 0.05,
+  },
+  SD: {
+    temperatureMin: 25,
+    temperatureMax: 32,
+    pHMin: 6,
+    pHMax: 9,
+    turbidityMax: tssToNtu(110),
+    dissolvedOxygenMin: 2,
+    nh3Max: 0.75,
+  },
+};
+
+const CLASSIFICATION_OPTIONS = [...Object.keys(THRESHOLD_CLASSIFICATIONS), "Custom"];
+const CLASSIFICATION_STORAGE_KEY = "wqms_threshold_classification";
 
 const DEFAULT_CALIBRATION = {
   temperatureOffset: 0,
@@ -41,15 +127,30 @@ const DEFAULT_DATA_COLLECTION = {
   readingsLimit: 500,
 };
 
+const DEFAULT_NOTIFICATIONS = {
+  emailEnabled: false,
+  notificationEmail: "",
+};
+
 const WQI_WEIGHTS_KEY = "wqms_wqi_weights";
+const NOTIFICATIONS_KEY = "wqms_notifications";
 
 export default function Settings() {
   const { theme, setTheme } = useTheme();
-  const [fontSize, setFontSize] = useState(() => localStorage.getItem("fontPreference") || "medium");
-  const [thresholds, setThresholds] = useState(() => ({
-    ...DEFAULT_THRESHOLDS,
-    ...loadFromStorage("wqms_thresholds", {}),
-  }));
+  const [thresholdClassification, setThresholdClassification] = useState(() => {
+    const stored = loadFromStorage(CLASSIFICATION_STORAGE_KEY, "Custom");
+    return CLASSIFICATION_OPTIONS.includes(stored) ? stored : "Custom";
+  });
+  const [thresholds, setThresholds] = useState(() => {
+    const stored = loadFromStorage("wqms_thresholds", {});
+    const cls = loadFromStorage(CLASSIFICATION_STORAGE_KEY, "Custom");
+    const validCls = CLASSIFICATION_OPTIONS.includes(cls) ? cls : "Custom";
+    const preset = validCls !== "Custom" ? THRESHOLD_CLASSIFICATIONS[validCls] : null;
+    return {
+      ...DEFAULT_THRESHOLDS,
+      ...(preset || stored),
+    };
+  });
   const [calibration, setCalibration] = useState(() => ({
     ...DEFAULT_CALIBRATION,
     ...loadFromStorage("wqms_calibration", {}),
@@ -62,6 +163,10 @@ export default function Settings() {
     ...DEFAULT_WQI_WEIGHTS,
     ...loadFromStorage(WQI_WEIGHTS_KEY, {}),
   }));
+  const [notifications, setNotifications] = useState(() => ({
+    ...DEFAULT_NOTIFICATIONS,
+    ...loadFromStorage(NOTIFICATIONS_KEY, {}),
+  }));
   const [saveFeedback, setSaveFeedback] = useState(null);
   const [activeTab, setActiveTab] = useState("system"); // "system" | "preferences"
   const [settingsLoaded, setSettingsLoaded] = useState(false);
@@ -70,25 +175,41 @@ export default function Settings() {
   useEffect(() => {
     syncSettingsFromSupabase()
       .then(() => {
-        setThresholds((t) => ({ ...t, ...loadFromStorage("wqms_thresholds", {}) }));
+        const cls = loadFromStorage(CLASSIFICATION_STORAGE_KEY, "Custom");
+        const validCls = CLASSIFICATION_OPTIONS.includes(cls) ? cls : "Custom";
+        const stored = loadFromStorage("wqms_thresholds", {});
+        const preset = validCls !== "Custom" ? THRESHOLD_CLASSIFICATIONS[validCls] : null;
+        setThresholdClassification(validCls);
+        setThresholds((t) => ({ ...t, ...(preset || stored) }));
         setCalibration((c) => ({ ...c, ...loadFromStorage("wqms_calibration", {}) }));
         setDataCollection((d) => ({ ...d, ...loadFromStorage("wqms_data_collection", {}) }));
         setWqiWeights((w) => ({ ...w, ...loadFromStorage(WQI_WEIGHTS_KEY, {}) }));
+        setNotifications((n) => ({ ...n, ...loadFromStorage(NOTIFICATIONS_KEY, {}) }));
       })
       .finally(() => setSettingsLoaded(true));
   }, []);
 
-  useEffect(() => {
-    document.documentElement.setAttribute("data-font-size", fontSize);
-    localStorage.setItem("fontPreference", fontSize);
-  }, [fontSize]);
+  const isCustomClassification = thresholdClassification === "Custom";
 
   const updateThreshold = (key, value) => {
+    if (!isCustomClassification) return;
     const n = parseFloat(value);
     if (!isNaN(n)) {
       const next = { ...thresholds, [key]: n };
       setThresholds(next);
       saveToStorage("wqms_thresholds", next);
+    }
+  };
+
+  const handleClassificationChange = (value) => {
+    setThresholdClassification(value);
+    saveToStorage(CLASSIFICATION_STORAGE_KEY, value);
+    if (value !== "Custom") {
+      const preset = THRESHOLD_CLASSIFICATIONS[value];
+      if (preset) {
+        setThresholds(preset);
+        saveToStorage("wqms_thresholds", preset);
+      }
     }
   };
 
@@ -119,17 +240,31 @@ export default function Settings() {
     }
   };
 
+  const updateNotifications = (key, value) => {
+    const next = { ...notifications, [key]: value };
+    setNotifications(next);
+    saveToStorage(NOTIFICATIONS_KEY, next);
+  };
+
   const handleSaveAll = async () => {
-    document.documentElement.setAttribute("data-font-size", fontSize);
-    localStorage.setItem("fontPreference", fontSize);
+    const prevThresholds = loadFromStorage("wqms_last_synced_thresholds", {});
+    const thresholdKeys = ["temperatureMin", "temperatureMax", "pHMin", "pHMax", "turbidityMax", "dissolvedOxygenMin", "nh3Max"];
+    const thresholdsChanged = thresholdKeys.some((k) => prevThresholds[k] !== undefined && prevThresholds[k] !== thresholds[k]);
+
     const settingsByKey = {
       wqms_thresholds: thresholds,
+      wqms_threshold_classification: thresholdClassification,
       wqms_calibration: calibration,
       wqms_data_collection: dataCollection,
       [WQI_WEIGHTS_KEY]: wqiWeights,
+      [NOTIFICATIONS_KEY]: notifications,
     };
     try {
       await saveSettingsToSupabaseAndLocal(settingsByKey);
+      if (thresholdsChanged) {
+        sendEventNotification("threshold_update", { previous: prevThresholds, current: thresholds });
+      }
+      saveToStorage("wqms_last_synced_thresholds", thresholds);
       setSaveFeedback("Saved");
     } catch (e) {
       setSaveFeedback("Error saving");
@@ -143,7 +278,7 @@ export default function Settings() {
       <header className="page-header">
         <div>
           <h1 className="page-title">Settings</h1>
-          <p className="page-subtitle">Calibration, thresholds, theme &amp; font</p>
+          <p className="page-subtitle">Calibration, thresholds &amp; theme</p>
         </div>
       </header>
 
@@ -261,20 +396,43 @@ export default function Settings() {
 
         {/* Thresholds */}
         <section className="settings-section card">
-          <div className="card__header">
-            <h2 className="card__title">Thresholds</h2>
-            <p className="card__desc">Alert thresholds for water quality parameters</p>
+          <div className="card__header settings-threshold-header">
+            <div>
+              <h2 className="card__title">Thresholds</h2>
+              <p className="card__desc">Alert thresholds for water quality parameters</p>
+            </div>
+            <label className="settings-label settings-classification-select-wrap">
+              <span>Classification</span>
+              <select
+                className="settings-input settings-select"
+                value={thresholdClassification}
+                onChange={(e) => handleClassificationChange(e.target.value)}
+                aria-label="Water quality classification"
+              >
+                {CLASSIFICATION_OPTIONS.map((opt) => (
+                  <option key={opt} value={opt}>
+                    {opt}
+                  </option>
+                ))}
+              </select>
+            </label>
           </div>
           <div className="card__body">
+            <p className="settings-helper settings-threshold-helper">
+              {isCustomClassification
+                ? "Custom thresholds — edit values below."
+                : "DENR preset — values are fixed for this classification."}
+            </p>
             <div className="settings-grid">
               <label className="settings-label">
                 <span>Temperature min (°C)</span>
                 <input
                   type="number"
                   step="0.5"
-                  className="settings-input"
+                  className={`settings-input ${!isCustomClassification ? "settings-input--readonly" : ""}`}
                   value={thresholds.temperatureMin}
                   onChange={(e) => updateThreshold("temperatureMin", e.target.value)}
+                  readOnly={!isCustomClassification}
                   aria-label="Minimum temperature threshold"
                 />
               </label>
@@ -283,9 +441,10 @@ export default function Settings() {
                 <input
                   type="number"
                   step="0.5"
-                  className="settings-input"
+                  className={`settings-input ${!isCustomClassification ? "settings-input--readonly" : ""}`}
                   value={thresholds.temperatureMax}
                   onChange={(e) => updateThreshold("temperatureMax", e.target.value)}
+                  readOnly={!isCustomClassification}
                   aria-label="Maximum temperature threshold"
                 />
               </label>
@@ -294,9 +453,10 @@ export default function Settings() {
                 <input
                   type="number"
                   step="0.1"
-                  className="settings-input"
+                  className={`settings-input ${!isCustomClassification ? "settings-input--readonly" : ""}`}
                   value={thresholds.pHMin}
                   onChange={(e) => updateThreshold("pHMin", e.target.value)}
+                  readOnly={!isCustomClassification}
                   aria-label="Minimum pH threshold"
                 />
               </label>
@@ -305,9 +465,10 @@ export default function Settings() {
                 <input
                   type="number"
                   step="0.1"
-                  className="settings-input"
+                  className={`settings-input ${!isCustomClassification ? "settings-input--readonly" : ""}`}
                   value={thresholds.pHMax}
                   onChange={(e) => updateThreshold("pHMax", e.target.value)}
+                  readOnly={!isCustomClassification}
                   aria-label="Maximum pH threshold"
                 />
               </label>
@@ -316,10 +477,12 @@ export default function Settings() {
                 <input
                   type="number"
                   step="0.5"
-                  className="settings-input"
+                  className={`settings-input ${!isCustomClassification ? "settings-input--readonly" : ""}`}
                   value={thresholds.turbidityMax}
                   onChange={(e) => updateThreshold("turbidityMax", e.target.value)}
+                  readOnly={!isCustomClassification}
                   aria-label="Maximum turbidity threshold"
+                  title="Derived from TSS: 1 NTU ≈ 1.5 mg/L TSS"
                 />
               </label>
               <label className="settings-label">
@@ -327,9 +490,10 @@ export default function Settings() {
                 <input
                   type="number"
                   step="0.1"
-                  className="settings-input"
+                  className={`settings-input ${!isCustomClassification ? "settings-input--readonly" : ""}`}
                   value={thresholds.dissolvedOxygenMin}
                   onChange={(e) => updateThreshold("dissolvedOxygenMin", e.target.value)}
+                  readOnly={!isCustomClassification}
                   aria-label="Minimum dissolved oxygen threshold"
                 />
               </label>
@@ -338,9 +502,10 @@ export default function Settings() {
                 <input
                   type="number"
                   step="0.01"
-                  className="settings-input"
+                  className={`settings-input ${!isCustomClassification ? "settings-input--readonly" : ""}`}
                   value={thresholds.nh3Max}
                   onChange={(e) => updateThreshold("nh3Max", e.target.value)}
+                  readOnly={!isCustomClassification}
                   aria-label="Maximum NH3 threshold"
                 />
               </label>
@@ -540,11 +705,48 @@ export default function Settings() {
           hidden={activeTab !== "preferences"}
           className="settings-tab-panel"
         >
+        {/* Email Notifications */}
+        <section className="settings-section card">
+          <div className="card__header">
+            <h2 className="card__title">Email Notifications</h2>
+            <p className="card__desc">Receive alerts and notifications by email when enabled. Uses EmailJS—add your keys in .env and set the template To Email field to {"{{to_email}}"}.</p>
+          </div>
+          <div className="card__body">
+            <div className="settings-option-row">
+              <span className="settings-option-label">Enable email alerts</span>
+              <label className="settings-toggle-wrap">
+                <input
+                  type="checkbox"
+                  checked={!!notifications.emailEnabled}
+                  onChange={(e) => updateNotifications("emailEnabled", e.target.checked)}
+                  aria-label="Enable email notifications"
+                />
+                <span className="settings-toggle" aria-hidden="true" />
+              </label>
+            </div>
+            {notifications.emailEnabled && (
+              <div className="settings-option-row" style={{ marginTop: "12px" }}>
+                <label className="settings-label" style={{ flex: 1, minWidth: 0 }}>
+                  <span>Default notification email</span>
+                  <input
+                    type="email"
+                    className="settings-input"
+                    value={notifications.notificationEmail ?? ""}
+                    onChange={(e) => updateNotifications("notificationEmail", e.target.value)}
+                    placeholder="alerts@example.com"
+                    aria-label="Email address for alerts and notifications"
+                  />
+                </label>
+              </div>
+            )}
+          </div>
+        </section>
+
         {/* Theme */}
         <section className="settings-section card">
           <div className="card__header">
             <h2 className="card__title">Theme</h2>
-            <p className="card__desc">Dark or light mode</p>
+            <p className="card__desc">Dark, light, or follow your system preference</p>
           </div>
           <div className="card__body">
             <div className="settings-option-row">
@@ -568,33 +770,15 @@ export default function Settings() {
                 >
                   Light
                 </button>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        {/* Font preference */}
-        <section className="settings-section card">
-          <div className="card__header">
-            <h2 className="card__title">Font size</h2>
-            <p className="card__desc">Text size preference</p>
-          </div>
-          <div className="card__body">
-            <div className="settings-option-row">
-              <span className="settings-option-label">Size</span>
-              <div className="settings-font-buttons">
-                {FONT_OPTIONS.map((opt) => (
-                  <button
-                    key={opt.value}
-                    type="button"
-                    className={`settings-font-btn ${fontSize === opt.value ? "settings-font-btn--active" : ""}`}
-                    onClick={() => setFontSize(opt.value)}
-                    aria-pressed={fontSize === opt.value}
-                    aria-label={`Font size: ${opt.label}`}
-                  >
-                    {opt.label}
-                  </button>
-                ))}
+                <button
+                  type="button"
+                  className={`settings-theme-btn ${theme === "system" ? "settings-theme-btn--active" : ""}`}
+                  onClick={() => setTheme("system")}
+                  aria-pressed={theme === "system"}
+                  aria-label="Follow system"
+                >
+                  System
+                </button>
               </div>
             </div>
           </div>

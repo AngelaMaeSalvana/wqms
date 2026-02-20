@@ -194,6 +194,38 @@
   border-color: rgba(0, 0, 0, 0.35);
 }
 
+.settings-input--readonly {
+  opacity: 0.85;
+  cursor: not-allowed;
+  background: var(--panel-darker, rgba(0, 0, 0, 0.15));
+}
+
+/* Threshold section: header with classification dropdown */
+.settings-threshold-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.settings-threshold-header .card__title {
+  margin: 0 0 2px 0;
+}
+
+.settings-threshold-header .card__desc {
+  margin: 0;
+}
+
+.settings-classification-select-wrap {
+  flex-shrink: 0;
+  min-width: 140px;
+}
+
+.settings-threshold-helper {
+  margin-bottom: 8px;
+}
+
 .settings-option-row {
   display: flex;
   flex-wrap: wrap;
@@ -245,6 +277,63 @@
 [data-theme="light"] .settings-font-btn--active {
   background: rgba(27, 156, 133, 0.15);
   border-color: rgba(27, 156, 133, 0.4);
+}
+
+/* Toggle switch (checkbox) */
+.settings-toggle-wrap {
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+}
+
+.settings-toggle-wrap input {
+  position: absolute;
+  width: 0.1px;
+  height: 0.1px;
+  opacity: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+}
+
+.settings-toggle {
+  display: inline-block;
+  width: 44px;
+  height: 24px;
+  background: var(--panel-dark);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  transition: background 0.2s, border-color 0.2s;
+}
+
+.settings-toggle::after {
+  content: "";
+  display: block;
+  width: 18px;
+  height: 18px;
+  margin: 2px 0 0 2px;
+  background: var(--text-muted);
+  border-radius: 50%;
+  transition: transform 0.2s, margin 0.2s, background 0.2s;
+}
+
+.settings-toggle-wrap input:checked + .settings-toggle {
+  background: rgba(141, 218, 213, 0.2);
+  border-color: rgba(141, 218, 213, 0.5);
+}
+
+.settings-toggle-wrap input:checked + .settings-toggle::after {
+  transform: translateX(20px);
+  margin-left: 2px;
+  background: rgba(141, 218, 213, 0.9);
+}
+
+[data-theme="light"] .settings-toggle-wrap input:checked + .settings-toggle {
+  background: rgba(27, 156, 133, 0.15);
+  border-color: rgba(27, 156, 133, 0.4);
+}
+
+[data-theme="light"] .settings-toggle-wrap input:checked + .settings-toggle::after {
+  background: rgba(27, 156, 133, 0.9);
 }
 
 /* Crystal Report format */
