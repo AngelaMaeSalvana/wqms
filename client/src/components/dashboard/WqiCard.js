@@ -17,7 +17,6 @@ export function WqiCard({ value, label, minimal = false }) {
       <div className="card__header">
         <div>
           <h2 className="card__title">WQI</h2>
-          <p className="card__desc">Water Quality Index — combined score from all parameters; average for the selected day and node.</p>
         </div>
       </div>
       <div className="wqiBox">

@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>WQMS Alert</title>
+  </head>
+  <body style="margin:0;padding:0;background:#f5f7fb;font-family:Arial,Helvetica,sans-serif;">
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f5f7fb;padding:24px 0;">
+      <tr>
+        <td align="center">
+          <table role="presentation" width="640" cellspacing="0" cellpadding="0" style="background:#ffffff;border-radius:10px;overflow:hidden;box-shadow:0 6px 18px rgba(0,0,0,.06);">
+            
+            <!-- Header -->
+            <tr>
+              <td style="background:#1f4fbf;color:#fff;padding:18px 22px;">
+                <div style="font-size:18px;font-weight:bold;">WQMS System Alert</div>
+                <div style="font-size:13px;opacity:.9;margin-top:4px;">
+                  {{alert_level}} • {{site_name}} • {{timestamp}}
+                </div>
+              </td>
+            </tr>
+
+            <!-- Body -->
+            <tr>
+              <td style="padding:22px;">
+                <p style="margin:0 0 12px;font-size:14px;color:#222;">
+                  Hello {{to_name}},
+                </p>
+
+                <p style="margin:0 0 16px;font-size:14px;color:#222;line-height:1.5;">
+                  The Water Quality Monitoring System detected an event that requires attention.
+                </p>
+
+                <!-- Summary box -->
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border:1px solid #e6e9f2;border-radius:8px;">
+                  <tr>
+                    <td style="padding:14px 14px 6px;color:#111;font-size:14px;font-weight:bold;">
+                      Alert Summary
+                    </td>
+                  </tr>
+                  <tr>
+                    <td style="padding:0 14px 14px;font-size:13px;color:#222;line-height:1.6;">
+                      <div><b>Location/Site:</b> {{site_name}}</div>
+                      <div><b>Node ID:</b> {{node_id}}</div>
+                      <div><b>Alert Type:</b> {{alert_type}}</div>
+                      <div><b>Status:</b> {{alert_level}}</div>
+                      <div><b>Detected:</b> {{timestamp}}</div>
+                    </td>
+                  </tr>
+                </table>
+
+                <!-- Latest Readings (hidden for Info alerts via readings_section_style) -->
+                <div style="{{readings_section_style}}">
+                  <h3 style="margin:18px 0 10px;font-size:14px;color:#111;">Latest Readings</h3>
+                  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;border:1px solid #e6e9f2;border-radius:8px;overflow:hidden;">
+                    <tr style="background:#f0f3ff;">
+                      <td style="padding:10px 12px;font-size:12px;font-weight:bold;color:#111;border-bottom:1px solid #e6e9f2;">Parameter</td>
+                      <td style="padding:10px 12px;font-size:12px;font-weight:bold;color:#111;border-bottom:1px solid #e6e9f2;">Value</td>
+                      <td style="padding:10px 12px;font-size:12px;font-weight:bold;color:#111;border-bottom:1px solid #e6e9f2;">Normal Range</td>
+                    </tr>
+
+                    <tr>
+                      <td style="padding:10px 12px;font-size:12px;color:#222;border-bottom:1px solid #e6e9f2;">Temperature</td>
+                      <td style="padding:10px 12px;font-size:12px;color:#222;border-bottom:1px solid #e6e9f2;">{{temp}} °C</td>
+                      <td style="padding:10px 12px;font-size:12px;color:#222;border-bottom:1px solid #e6e9f2;">{{temp_range}}</td>
+                    </tr>
+
+                    <tr>
+                      <td style="padding:10px 12px;font-size:12px;color:#222;border-bottom:1px solid #e6e9f2;">pH</td>
+                      <td style="padding:10px 12px;font-size:12px;color:#222;border-bottom:1px solid #e6e9f2;">{{ph}}</td>
+                      <td style="padding:10px 12px;font-size:12px;color:#222;border-bottom:1px solid #e6e9f2;">{{ph_range}}</td>
+                    </tr>
+
+                    <tr>
+                      <td style="padding:10px 12px;font-size:12px;color:#222;border-bottom:1px solid #e6e9f2;">Dissolved Oxygen (DO)</td>
+                      <td style="padding:10px 12px;font-size:12px;color:#222;border-bottom:1px solid #e6e9f2;">{{do}} mg/L</td>
+                      <td style="padding:10px 12px;font-size:12px;color:#222;border-bottom:1px solid #e6e9f2;">{{do_range}}</td>
+                    </tr>
+
+                    <tr>
+                      <td style="padding:10px 12px;font-size:12px;color:#222;">Turbidity</td>
+                      <td style="padding:10px 12px;font-size:12px;color:#222;">{{turbidity}} NTU</td>
+                      <td style="padding:10px 12px;font-size:12px;color:#222;">{{turbidity_range}}</td>
+                    </tr>
+                  </table>
+                </div>
+
+                <!-- Message / Recommendation -->
+                <h3 style="margin:18px 0 10px;font-size:14px;color:#111;">Details</h3>
+                <p style="margin:0 0 14px;font-size:13px;color:#222;line-height:1.6;">
+                  {{message}}
+                </p>
+
+                <!-- CTA -->
+                <table role="presentation" cellspacing="0" cellpadding="0" style="margin-top:8px;">
+                  <tr>
+                    <td style="border-radius:8px;background:#1f4fbf;">
+                      <a href="{{dashboard_url}}"
+                         style="display:inline-block;padding:10px 14px;color:#fff;text-decoration:none;font-size:13px;font-weight:bold;">
+                        View Dashboard
+                      </a>
+                    </td>
+                    <td style="padding-left:10px;font-size:12px;color:#666;">
+                      or open: <span style="color:#1f4fbf;">{{dashboard_url}}</span>
+                    </td>
+                  </tr>
+                </table>
+
+                <hr style="border:none;border-top:1px solid #e6e9f2;margin:18px 0;" />
+
+                <!-- Footer -->
+                <p style="margin:0;font-size:12px;color:#666;line-height:1.6;">
+                  This is an automated notification from WQMS.<br/>
+                  If you believe this alert was triggered in error, please verify the sensor node and calibration settings.
+                </p>
+              </td>
+            </tr>
+
+          </table>
+
+          <div style="font-size:11px;color:#8a90a6;margin-top:10px;">
+            © {{year}} WQMS • {{org_name}}
+          </div>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>

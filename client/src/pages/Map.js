@@ -106,8 +106,6 @@ export default function Map() {
 
   useEffect(() => {
     fetchLatestReading();
-    const interval = setInterval(fetchLatestReading, 60000);
-    return () => clearInterval(interval);
   }, [fetchLatestReading]);
 
   const handleSensorTest = useCallback(

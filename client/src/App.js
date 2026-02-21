@@ -14,10 +14,23 @@ import Nodes from "./pages/Nodes";
 import Settings from "./pages/Settings";
 
 import "./App.css";
+import { sendEventNotification } from "./services/emailService";
+
+const APP_VERSION_KEY = "wqms_last_notified_version";
 
 export default function App() {
   useEffect(() => {
     syncSettingsFromSupabase();
+  }, []);
+
+  useEffect(() => {
+    const version = process.env.REACT_APP_VERSION;
+    if (!version) return;
+    const last = localStorage.getItem(APP_VERSION_KEY);
+    if (last !== version) {
+      sendEventNotification("system_update", { version });
+      localStorage.setItem(APP_VERSION_KEY, version);
+    }
   }, []);
 
   return (

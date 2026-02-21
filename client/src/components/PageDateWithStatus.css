@@ -20,3 +20,12 @@
   font-size: 0.75rem;
   color: var(--text-muted);
 }
+
+/* Hide date/time section on mobile and tablet devices */
+@media (max-width: 1024px) {
+  .page-date-with-status,
+  .page-date-with-status.page-meta,
+  .page-date-with-status.dash__date {
+    display: none !important;
+  }
+}

@@ -74,7 +74,9 @@ export function NodeSelector({ nodes = [], value, onChange, variant = "pill" }) 
         aria-label="Select sensor node"
         title={displayText}
       >
-        <option value="">Select node…</option>
+        <option value="" disabled>
+          Select node…
+        </option>
         {nodes.map((n) => (
           <option key={n.id} value={n.id}>
             {n.name}

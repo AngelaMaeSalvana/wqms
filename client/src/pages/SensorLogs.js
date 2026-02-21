@@ -85,7 +85,9 @@ function downloadBlob(filename, blob) {
   URL.revokeObjectURL(url);
 }
 
-const TABLE_PAGE_SIZE = 9;
+const MIN_PAGE_SIZE = 5;
+const EST_ROW_HEIGHT = 37;
+const EST_HEADER_HEIGHT = 38;
 
 export default function SensorLogs() {
   const lastUpdated = new Date();
@@ -100,7 +102,23 @@ export default function SensorLogs() {
   const [exportOpen, setExportOpen] = useState(false);
   const [sensorReadings, setSensorReadings] = useState([]);
   const exportRef = useRef(null);
+  const tableWrapRef = useRef(null);
+  const [pageSize, setPageSize] = useState(9);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
+
+  useEffect(() => {
+    const el = tableWrapRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver((entries) => {
+      for (const { contentRect } of entries) {
+        const h = contentRect.height;
+        const rows = Math.max(MIN_PAGE_SIZE, Math.floor((h - EST_HEADER_HEIGHT) / EST_ROW_HEIGHT));
+        setPageSize(rows);
+      }
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   const tableDateRange = useMemo(() => {
     if (tableDateFrom && tableDateTo) {
@@ -125,11 +143,6 @@ export default function SensorLogs() {
     const onFocus = () => loadNodes().then(() => setNodes(getNodes()));
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
-  }, []);
-
-  useEffect(() => {
-    const id = setInterval(() => setRefreshTrigger((t) => t + 1), 30 * 1000);
-    return () => clearInterval(id);
   }, []);
 
   useEffect(() => {
@@ -193,11 +206,11 @@ export default function SensorLogs() {
   }, [sensorReadings, nodes, search, tableNodeFilter, tableSort]);
 
   const totalRows = sensorTableRows.length;
-  const totalPages = Math.max(1, Math.ceil(totalRows / TABLE_PAGE_SIZE));
+  const totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
   const paginatedRows = useMemo(() => {
-    const start = (tablePage - 1) * TABLE_PAGE_SIZE;
-    return sensorTableRows.slice(start, start + TABLE_PAGE_SIZE);
-  }, [sensorTableRows, tablePage]);
+    const start = (tablePage - 1) * pageSize;
+    return sensorTableRows.slice(start, start + pageSize);
+  }, [sensorTableRows, tablePage, pageSize]);
 
   useEffect(() => {
     setTablePage(1);
@@ -367,7 +380,7 @@ export default function SensorLogs() {
           <p className="card__desc">All nodes and parameters, saved every hour. Use filters above to narrow results.</p>
         </div>
         <div className="card__body">
-          <div className="sensor-logs-data-table-wrap">
+          <div className="sensor-logs-data-table-wrap" ref={tableWrapRef}>
             <table className="sensor-logs-data-table" role="table">
               <thead>
                 <tr>
@@ -522,7 +535,7 @@ export default function SensorLogs() {
                   </tr>
                 ) : (
                   paginatedRows.map((row, i) => {
-                    const key = `${row.nodeId}-${row.date.getTime()}-${(tablePage - 1) * TABLE_PAGE_SIZE + i}`;
+                    const key = `${row.nodeId}-${row.date.getTime()}-${(tablePage - 1) * pageSize + i}`;
                     const dateStr = row.date.toLocaleDateString();
                     const timeStr = row.date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
                     const nodeLabel = row.nodeName !== row.nodeId ? `${row.nodeId} — ${row.nodeName}` : row.nodeId;
@@ -550,7 +563,7 @@ export default function SensorLogs() {
           {totalRows > 0 && (
             <div className="sensor-logs-table-pagination">
               <span className="sensor-logs-table-pagination-info">
-                Showing {(tablePage - 1) * TABLE_PAGE_SIZE + 1}–{Math.min(tablePage * TABLE_PAGE_SIZE, totalRows)} of {totalRows}
+                Showing {(tablePage - 1) * pageSize + 1}–{Math.min(tablePage * pageSize, totalRows)} of {totalRows}
               </span>
               <div className="sensor-logs-table-pagination-btns">
                 <button

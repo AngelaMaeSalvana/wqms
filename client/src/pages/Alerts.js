@@ -5,6 +5,7 @@ import PageDateWithStatus from "../components/PageDateWithStatus";
 import AlertDetailModal from "../components/AlertDetailModal";
 import EmptyState from "../components/EmptyState";
 import { buildAlertsForAllNodes } from "../utils/alertsData";
+import { useAlertEmailNotifications } from "../hooks/useAlertEmailNotifications";
 import { getNodes, loadNodes } from "../utils/nodesStorage";
 import api from "../services/api";
 import { applyCalibrationToReadings } from "../utils/calibration";
@@ -134,6 +135,8 @@ export default function Alerts() {
   }, [lastUpdated]);
 
   const allAlerts = useMemo(() => buildAlertsForAllNodes(nodes, readingsByNode), [nodes, readingsByNode]);
+
+  useAlertEmailNotifications(allAlerts, readingsByNode);
 
   const filteredAlerts = useMemo(() => {
     let list = [...allAlerts];

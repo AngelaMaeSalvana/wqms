@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useEffect, useRef, useCallback } from "react";
+import React, { useMemo, useState, useEffect, useCallback } from "react";
 import { createPortal } from "react-dom";
 import NodeSelector from "../components/dashboard/NodeSelector";
 import NodeStatus from "../components/dashboard/NodeStatus";
@@ -14,6 +14,7 @@ import { buildAlertsForAllNodes } from "../utils/alertsData";
 import { getNodes, loadNodes } from "../utils/nodesStorage";
 import api from "../services/api";
 import { useSensorTest } from "../hooks/useSensorTest";
+import { useAlertEmailNotifications } from "../hooks/useAlertEmailNotifications";
 import { applyCalibrationToReadings } from "../utils/calibration";
 import { PageLoader } from "../components/LoadingSkeleton";
 import "../pages/Map.css";
@@ -39,6 +40,22 @@ function toDateStr(d) {
   return `${y}-${m}-${day}`;
 }
 
+const SELECTED_NODE_STORAGE_KEY = "wqms_selected_node_id";
+
+function getStoredNodeId() {
+  try {
+    return localStorage.getItem(SELECTED_NODE_STORAGE_KEY) || "";
+  } catch {
+    return "";
+  }
+}
+
+function setStoredNodeId(id) {
+  try {
+    if (id) localStorage.setItem(SELECTED_NODE_STORAGE_KEY, id);
+  } catch {}
+}
+
 function useIsMobile(breakpoint = 768) {
   const [isMobile, setIsMobile] = useState(() =>
     typeof window !== "undefined" ? window.innerWidth <= breakpoint : false
@@ -55,7 +72,7 @@ function useIsMobile(breakpoint = 768) {
 
 export default function Dashboard() {
   const [nodes, setNodes] = useState([]);
-  const [selectedNodeId, setSelectedNodeId] = useState("");
+  const [selectedNodeId, setSelectedNodeId] = useState(getStoredNodeId);
   const [todayReadings, setTodayReadings] = useState([]);
   const [readingsByNode, setReadingsByNode] = useState({});
   const [readingsLoaded, setReadingsLoaded] = useState(false);
@@ -63,7 +80,6 @@ export default function Dashboard() {
   const [lastUpdated, setLastUpdated] = useState(() => new Date());
   const [isLoadingAlerts] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const autoRefreshIntervalRef = useRef(null);
 
   const getReadingsForNode = useCallback((nodeId) => readingsByNode[nodeId] || {}, [readingsByNode]);
   const sensorTest = useSensorTest(getReadingsForNode);
@@ -73,7 +89,14 @@ export default function Dashboard() {
       .then(() => {
         const list = getNodes();
         setNodes(list);
-        setSelectedNodeId((id) => (id && list.some((n) => n.id === id) ? id : list[0]?.id ?? ""));
+        const stored = getStoredNodeId();
+        const validStored = stored && list.some((n) => n.id === stored);
+        setSelectedNodeId((id) => {
+          const validCurrent = id && list.some((n) => n.id === id);
+          if (validCurrent) return id;
+          if (validStored) return stored;
+          return list[0]?.id ?? "";
+        });
       })
       .finally(() => setNodesLoaded(true));
   }, []);
@@ -149,6 +172,8 @@ export default function Dashboard() {
     );
   }, [builtAlerts, sensorTestAlerts]);
 
+  useAlertEmailNotifications(alerts, readingsByNode);
+
   /** Alerts for the selected node on the current date only (for Dashboard Alerts Summary card) */
   const dashboardAlerts = useMemo(() => {
     const nodeId = selectedNodeId || null;
@@ -174,17 +199,6 @@ export default function Dashboard() {
       setLastUpdated(new Date());
     }, 800);
   };
-
-  const handleRefreshRef = useRef(handleRefresh);
-  handleRefreshRef.current = handleRefresh;
-
-  useEffect(() => {
-    const LIVE_REFRESH_MS = 30 * 1000; // 30 seconds for real-time charts/reports
-    autoRefreshIntervalRef.current = setInterval(() => handleRefreshRef.current(), LIVE_REFRESH_MS);
-    return () => {
-      if (autoRefreshIntervalRef.current) clearInterval(autoRefreshIntervalRef.current);
-    };
-  }, []);
 
   /** Today's data from API/Supabase only. One point per reading for selected node. */
   const todayData = useMemo(() => {
@@ -306,7 +320,10 @@ export default function Dashboard() {
         <NodeSelector
           nodes={nodes}
           value={selectedNodeId}
-          onChange={setSelectedNodeId}
+          onChange={(id) => {
+            setSelectedNodeId(id);
+            setStoredNodeId(id);
+          }}
         />
         <NodeStatus status={selectedNode?.status} />
       </div>

@@ -351,6 +351,7 @@
   flex: 1;
   min-height: 0;
   align-content: flex-start;
+  overflow: visible;
 }
 
 .today-stats-grid .today-stat-block {

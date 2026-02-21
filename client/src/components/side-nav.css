@@ -221,8 +221,10 @@
     left: 0;
     right: 0;
     z-index: 300;
-    height: 56px;
-    padding: 0 16px;
+    height: calc(56px + env(safe-area-inset-top, 0px));
+    min-height: 56px;
+    padding: env(safe-area-inset-top, 0px) 16px 0 16px;
+    box-sizing: border-box;
     align-items: center;
     gap: 12px;
     background: var(--panel);
@@ -372,7 +374,7 @@
     .side-nav {
       position: fixed;
       left: 0;
-      top: 56px;
+      top: calc(56px + env(safe-area-inset-top, 0px));
       bottom: 0;
       width: 280px;
       max-width: 85vw;

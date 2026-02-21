@@ -1,4 +1,4 @@
-const express = require('express');
+﻿const express = require('express');
 const cors = require('cors');
 const mqtt = require('mqtt');
 const db = require('./db');
@@ -61,9 +61,10 @@ function connectMQTT() {
   });
 
   mqttClient.on('message', (topic, message) => {
+    const t_be_rx = new Date().toISOString();
     try {
       const data = JSON.parse(message.toString());
-      handleMQTTMessage(topic, data).catch((err) => console.error('❌ MQTT handler:', err));
+      handleMQTTMessage(topic, data, t_be_rx).catch((err) => console.error('❌ MQTT handler:', err));
     } catch (err) {
       console.error('❌ Error parsing MQTT message:', err);
     }
@@ -144,7 +145,7 @@ async function updateDailySummary(reading, nodeId) {
   }
 }
 
-async function handleMQTTMessage(topic, data) {
+async function handleMQTTMessage(topic, data, t_be_rx) {
   if (topic.includes('water-quality') || topic.includes('sensor-data')) {
     const reading = data.sensorReading || data;
     const rawId = reading.nodeId || reading.node || extractNodeIdFromTopic(topic);
@@ -163,18 +164,24 @@ async function handleMQTTMessage(topic, data) {
       tx_millis: reading.tx_millis != null ? (typeof reading.tx_millis === 'number' ? reading.tx_millis : parseInt(reading.tx_millis, 10)) : null,
       rx_millis: reading.rx_millis != null ? (typeof reading.rx_millis === 'number' ? reading.rx_millis : parseInt(reading.rx_millis, 10)) : null,
       timestamp,
+      t_node: reading.t_node ?? data.t_node ?? null,
+      t_fwd_rx: reading.t_fwd_rx ?? data.t_fwd_rx ?? null,
+      t_fwd_pub: reading.t_fwd_pub ?? data.t_fwd_pub ?? null,
+      t_be_rx: t_be_rx ?? null,
     };
     const result = await db.insertReading(row);
     console.log(`💾 Stored reading from Node ${nodeId} (ID: ${result.lastID})`);
     await updateDailySummary(reading, nodeId);
   } else if (topic.includes('alert')) {
     const alert = data.alert || data;
+    const alertTime = new Date().toISOString();
     const row = {
       node_id: alert.nodeId ?? alert.node ?? null,
       title: alert.title || 'Alert',
       detail: alert.detail ?? alert.message ?? '',
       severity: alert.severity || 'info',
-      timestamp: new Date().toISOString(),
+      timestamp: alertTime,
+      t_alert_trigger: t_be_rx ?? alertTime,
     };
     const result = await db.insertAlert(row);
     console.log(`🚨 Stored alert (ID: ${result.lastID})`);
@@ -276,6 +283,16 @@ app.post('/api/alerts', async (req, res) => {
     };
     const result = await db.insertAlert(row);
     res.json({ success: true, id: result.lastID, message: 'Alert stored successfully' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/timestamp-logs', async (req, res) => {
+  try {
+    const { startDate, endDate, nodeId, limit = 200 } = req.query;
+    const rows = await db.getTimestampLogs({ startDate, endDate, nodeId, limit });
+    res.json(rows);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

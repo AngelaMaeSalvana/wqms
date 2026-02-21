@@ -1,5 +1,7 @@
 import React, { useState, useRef, useEffect, useMemo, memo } from "react";
 import { createPortal } from "react-dom";
+import { jsPDF } from "jspdf";
+import { autoTable } from "jspdf-autotable";
 import "../utils/chartConfig";
 import { Line, Bar } from "react-chartjs-2";
 import PageDateWithStatus from "../components/PageDateWithStatus";
@@ -397,13 +399,6 @@ export default function Reports() {
   const [modalOpen, setModalOpen] = useState(false);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
 
-  /** Real-time refresh: refetch report and calendar data every 30 seconds */
-  useEffect(() => {
-    const LIVE_REFRESH_MS = 30 * 1000;
-    const id = setInterval(() => setRefreshTrigger((t) => t + 1), LIVE_REFRESH_MS);
-    return () => clearInterval(id);
-  }, []);
-
   useEffect(() => {
     loadNodes().then(() => setNodes(getNodes())).finally(() => setNodesLoaded(true));
   }, []);
@@ -581,6 +576,39 @@ export default function Reports() {
     [dateRangePickerView.year, dateRangePickerView.month]
   );
 
+  const handleExportReports = () => {
+    const param = PARAMETER_OPTIONS.find((p) => p.id === reportParameter);
+    const paramLabel = param?.label ?? reportParameter;
+    const unit = param?.unit ?? "";
+    const { labels, datasets } = reportChartData;
+    const minData = datasets.find((d) => d.label.startsWith("Min"))?.data ?? [];
+    const avgData = datasets.find((d) => d.label.startsWith("Avg"))?.data ?? [];
+    const maxData = datasets.find((d) => d.label.startsWith("Max"))?.data ?? [];
+    const rangeStr = reportPeriod === "week" ? formatDateRange(reportRangeStart, reportRangeEnd) : `${MONTH_NAMES[reportMonth]} ${reportYear}`;
+    const baseName = `wqms-report-${paramLabel.toLowerCase().replace(/\s+/g, "-")}-${rangeStr}`.replace(/[\/\s,]/g, "-");
+
+    const doc = new jsPDF({ orientation: "landscape" });
+    doc.setFontSize(12);
+    doc.text("WQMS Report", 14, 12);
+    doc.setFontSize(9);
+    doc.text(`${paramLabel} — ${rangeStr}  |  Exported: ${new Date().toLocaleString()}`, 14, 18);
+    const header = ["Period", `Min${unit}`, `Avg${unit}`, `Max${unit}`];
+    const body = labels.map((label, i) => [
+      label,
+      minData[i] != null ? String(minData[i]) : "—",
+      avgData[i] != null ? String(avgData[i]) : "—",
+      maxData[i] != null ? String(maxData[i]) : "—",
+    ]);
+    autoTable(doc, {
+      head: [header],
+      body: body.length ? body : [["No data", "—", "—", "—"]],
+      startY: 24,
+      styles: { fontSize: 8 },
+      headStyles: { fillColor: [27, 156, 133] },
+    });
+    doc.save(`${baseName}.pdf`);
+  };
+
   useEffect(() => {
     const handleClickOutside = (e) => {
       const inSelectors = dateRangePickerRef.current?.contains(e.target);
@@ -610,8 +638,8 @@ export default function Reports() {
         <PageDateWithStatus lastUpdated={lastUpdated} className="page-meta reports-header-meta" />
       </header>
 
-      <div className="reports-main-row">
-        <section className="reports-charts-col card">
+      <div className="reports-grid">
+        <section className="reports-grid__chart card">
           <div className="card__header reports-chart-header">
             <div>
               <h2 className="card__title">Report chart</h2>
@@ -840,7 +868,13 @@ export default function Reports() {
             )}
         </section>
 
-        <aside className="reports-calendar-col card" aria-label="Calendar (clickable)">
+        <section className="reports-grid__placeholder-left card reports-placeholder-card" aria-label="Reserved for future content">
+          <div className="card__body">
+            <div className="reports-placeholder-content" />
+          </div>
+        </section>
+
+        <aside className="reports-grid__calendar card" aria-label="Calendar (clickable)">
           <div className="reports-calendar-section">
             <CalendarCard
               monthName={MONTH_NAMES[calendarView.month]}
@@ -854,6 +888,38 @@ export default function Reports() {
             />
           </div>
         </aside>
+
+        <section className="reports-grid__placeholder card reports-placeholder-card" aria-label="Reserved for future content">
+          <div className="card__body">
+            <div className="reports-placeholder-content" />
+          </div>
+        </section>
+
+        <section className="reports-grid__placeholder-bottom card reports-placeholder-card" aria-label="Reserved for future content">
+          <div className="card__body">
+            <div className="reports-placeholder-content" />
+          </div>
+        </section>
+
+        <section className="reports-grid__export-upper card reports-placeholder-card" aria-label="Reserved for future content">
+          <div className="card__body">
+            <div className="reports-placeholder-content" />
+          </div>
+        </section>
+
+        <section className="reports-grid__export card reports-export-card">
+          <div className="card__body">
+            <button
+              type="button"
+              className="reports-export-btn"
+              onClick={handleExportReports}
+              aria-label="Export report as PDF"
+            >
+              <span className="reports-export-btn-icon" aria-hidden>↑</span>
+              Export statistics
+            </button>
+          </div>
+        </section>
       </div>
 
       {modalOpen && (

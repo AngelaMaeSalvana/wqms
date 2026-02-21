@@ -154,6 +154,14 @@ body,
   }
 }
 
+/* Hide page title on mobile and tablet — shown in nav breadcrumb */
+@media (max-width: 1024px), (max-height: 768px) {
+  .page-title,
+  .dash__title {
+    display: none;
+  }
+}
+
 .App {
   height: 100vh;
     max-height: 100vh;

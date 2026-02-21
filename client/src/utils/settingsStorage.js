@@ -10,6 +10,7 @@ export const SETTINGS_KEYS = {
   calibration: 'wqms_calibration',
   dataCollection: 'wqms_data_collection',
   wqiWeights: 'wqms_wqi_weights',
+  notifications: 'wqms_notifications',
 };
 
 export function loadFromStorage(key, fallback) {

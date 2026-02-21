@@ -71,23 +71,70 @@
   color: var(--text);
 }
 
-.reports-main-row {
-  display: flex;
+/* Reports grid layout — modular card grid similar to dashboard */
+.reports-grid {
+  display: grid;
+  grid-template-columns: 1fr minmax(260px, 340px);
+  grid-template-rows: 1fr 1fr 1fr minmax(120px, 0.5fr);
   gap: 16px;
   flex: 1;
   min-height: 0;
   align-items: stretch;
 }
 
-.reports-charts-col {
-  flex: 3;
-  min-width: 0;
+.reports-grid > * {
+  min-height: 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
 }
 
-.reports-charts-col.card {
+.reports-grid__chart {
+  grid-column: 1;
+  grid-row: 1;
+  min-width: 0;
+}
+
+.reports-grid__calendar {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.reports-grid__placeholder-left {
+  grid-column: 1;
+  grid-row: 2;
+}
+
+.reports-grid__placeholder {
+  grid-column: 2;
+  grid-row: 2;
+}
+
+.reports-grid__placeholder-bottom {
+  grid-column: 1;
+  grid-row: 3;
+}
+
+.reports-grid__placeholder.card {
+  min-height: 140px;
+}
+
+.reports-placeholder-card .card__body {
+  flex: 1;
+  min-height: 140px;
+}
+
+.reports-grid__export-upper {
+  grid-column: 2;
+  grid-row: 3;
+}
+
+.reports-grid__export {
+  grid-column: 2;
+  grid-row: 4;
+}
+
+.reports-grid__chart.card {
   min-height: 320px;
 }
 
@@ -405,22 +452,66 @@
   max-height: 320px;
 }
 
-.reports-calendar-col {
-  flex: 1;
-  max-width: 360px;
-  min-width: 280px;
+.reports-grid__calendar {
   display: flex;
   flex-direction: column;
+  flex: 1;
   min-height: 0;
   overflow: auto;
 }
 
+/* Export card */
+.reports-export-card .card__body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 120px;
+  padding: 20px;
+}
+
+.reports-export-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+  max-width: 280px;
+  padding: 14px 24px;
+  background: var(--accent, #1b9c85);
+  color: #fff;
+  border: none;
+  border-radius: 10px;
+  font-size: 1rem;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.2s, transform 0.15s;
+}
+
+.reports-export-btn:hover {
+  background: color-mix(in srgb, var(--accent, #1b9c85) 85%, black);
+}
+
+.reports-export-btn:active {
+  transform: scale(0.98);
+}
+
+.reports-export-btn-icon {
+  font-size: 1.1rem;
+  line-height: 1;
+  opacity: 0.95;
+}
+
+
 .reports-calendar-section {
-  flex-shrink: 0;
+  flex: 1;
   display: flex;
   flex-direction: column;
   gap: 0;
   max-width: none;
+  min-height: 0;
 }
 
 .reports-calendar-section .calendar-card {
@@ -428,6 +519,10 @@
   grid-row: unset;
   max-height: none;
   overflow: visible;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 
 .reports-calendar-section .section-header {
@@ -453,10 +548,11 @@
 .reports-calendar-section .calendar-grid {
   gap: 4px;
   padding: 0 2px;
-  grid-auto-rows: 32px;
-  flex: none;
+  grid-auto-rows: minmax(28px, 1fr);
+  flex: 1;
   min-height: 0;
   overflow: visible;
+  display: grid;
 }
 
 .reports-calendar-section .day {
@@ -796,23 +892,18 @@
 
 /* Responsive Media Queries */
 @media (max-width: 1535px), (max-height: 900px) {
-  .reports-main-row {
+  .reports-grid {
     gap: 14px;
-  }
-  .reports-calendar-col {
-    max-width: 320px;
   }
 }
 
 @media (max-width: 1280px), (max-height: 800px) {
-  .reports-main-row {
+  .reports-grid {
     gap: 12px;
+    grid-template-columns: 1fr minmax(240px, 300px);
   }
   .reports-chart-selectors {
     width: 180px;
-  }
-  .reports-calendar-col {
-    max-width: 300px;
   }
 }
 
@@ -824,16 +915,40 @@
 }
 
 @media (max-width: 1024px), (max-height: 768px) {
-  .reports-main-row {
-    flex-direction: column;
+  .reports-grid {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto auto auto auto auto auto auto;
     gap: 16px;
   }
-  .reports-charts-col {
+  .reports-grid__chart {
+    grid-column: 1;
+    grid-row: 1;
     max-height: 45vh;
   }
-  .reports-calendar-col {
-    max-width: none;
-    min-width: unset;
+  .reports-grid__placeholder-left {
+    grid-column: 1;
+    grid-row: 2;
+  }
+  .reports-grid__placeholder-bottom {
+    grid-column: 1;
+    grid-row: 3;
+  }
+  .reports-grid__calendar {
+    grid-column: 1;
+    grid-row: 4;
+  }
+  .reports-grid__placeholder {
+    grid-column: 1;
+    grid-row: 5;
+  }
+  .reports-grid__export-upper {
+    grid-column: 1;
+    grid-row: 6;
+  }
+  .reports-grid__export {
+    grid-column: 1;
+    grid-row: 7;
+    min-height: 120px;
   }
   .reports-chart-layout {
     flex-direction: column;

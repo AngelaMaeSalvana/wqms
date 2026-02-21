@@ -36,7 +36,6 @@ export function MiniMapCard({ nodes = [], selectedNode, onTestSensor, isTestingS
       <div className="card__header">
         <div>
           <h2 className="card__title">Mini Map</h2>
-          <p className="card__desc">Shows node location. Use the marker to run a sensor test.</p>
         </div>
       </div>
       <div className="card__body card__body--fill">

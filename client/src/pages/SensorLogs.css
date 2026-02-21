@@ -1,15 +1,14 @@
 .sensor-logs-page {
   display: flex;
   flex-direction: column;
+  gap: 16px;
   height: 100%;
   min-height: 0;
   overflow: hidden;
-  padding: 24px;
 }
 
 .sensor-logs-page .page-header {
   flex-shrink: 0;
-  margin-bottom: 20px;
 }
 
 .sensor-logs-page .sensor-logs-header-meta {
@@ -22,7 +21,6 @@
   flex-wrap: wrap;
   gap: 12px;
   align-items: center;
-  margin-bottom: 20px;
 }
 
 .sensor-logs-export-wrap {
@@ -153,9 +151,8 @@
 }
 
 .sensor-logs-data-table-wrap {
-  height: 368px;
-  min-height: 368px;
-  flex-shrink: 0;
+  flex: 1;
+  min-height: 200px;
   overflow: visible;
   padding-bottom: 0;
 }

@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import PageDateWithStatus from "../components/PageDateWithStatus";
 import { isSupabaseEnabled } from "../lib/supabaseClient";
 import { getNodes, loadNodes, saveNodes } from "../utils/nodesStorage";
+import { sendEventNotification } from "../services/emailService";
 import { PageLoader } from "../components/LoadingSkeleton";
 import "./Nodes.css";
 
@@ -129,6 +130,7 @@ export default function Nodes() {
     const next = [...nodes, node];
     setNodes(next);
     saveNodes(next);
+    sendEventNotification("node_added", { node });
     setNewNode({ ...emptyNode(), id: getNextNodeId(next) });
     setShowAddModal(false);
   };
