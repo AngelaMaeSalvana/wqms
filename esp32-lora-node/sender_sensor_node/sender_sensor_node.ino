@@ -516,6 +516,19 @@ static bool handleTestCommand(const char* cmd) {
 // Static buffers for OLED text (avoids String concatenation stack usage)
 static char oledLineBuf[64], oledLineBuf2[32];
 
+// -------------------- Last TX result (shown on idle monitoring screen) --------------------
+static uint32_t s_lastSeq      = 0;
+static int16_t  s_lastRssi     = 0;
+static int8_t   s_lastSnr      = 0;
+static bool     s_lastDelivered = false;  // true = ACK received, false = no ACK
+
+static void recordTxResult(uint32_t seq, int16_t rssi, int8_t snr, bool delivered) {
+  s_lastSeq       = seq;
+  s_lastRssi      = rssi;
+  s_lastSnr       = snr;
+  s_lastDelivered = delivered;
+}
+
 // -------------------- Idle OLED refresh --------------------
 #define OLED_HOLD_MS 1500  // How long TX/ACK screens persist before idle screen takes over
 static uint32_t s_lastOledActivityMs = 0;
@@ -528,13 +541,13 @@ static void oledActivity() {
 // Three display states:
 //   TEST MODE        - test evaluation mode is active (started from dashboard)
 //   DIAGNOSTICS MODE - a diag/read command is queued for the next transmission
-//   MONITORING MODE  - normal operation (default)
+//   MONITORING MODE  - normal operation; shows last SEQ, delivery status, RSSI
 static void refreshIdleOled() {
   if (millis() - s_lastOledActivityMs < OLED_HOLD_MS) return;
   s_lastOledActivityMs = millis();  // Throttle redraws to once per hold period
 
   char ntpBuf[20];
-  snprintf(ntpBuf, sizeof(ntpBuf), "%s", s_timeSynced ? "NTP: synced" : "NTP: unsynced");
+  snprintf(ntpBuf, sizeof(ntpBuf), "%s", s_timeSynced ? "NTP:OK" : "NTP:unsynced");
 
   if (testModeActive()) {
     uint32_t elapsed   = millis() - s_testStartMs;
@@ -547,18 +560,38 @@ static void refreshIdleOled() {
     oledShowLines("** TEST MODE **", oledLineBuf, oledLineBuf2, ntpBuf, "");
 
   } else if (runDiagNext) {
+    char lastBuf[32];
+    if (s_lastSeq > 0) {
+      snprintf(lastBuf, sizeof(lastBuf), "SEQ:%lu %s",
+               (unsigned long)s_lastSeq, s_lastDelivered ? "OK" : "FAIL");
+    } else {
+      snprintf(lastBuf, sizeof(lastBuf), "No TX yet");
+    }
     char slotBuf[32];
-    snprintf(slotBuf, sizeof(slotBuf), "Slot:%d/%d %lus cyc",
-             NODE_SLOT, TDMA_NUM_SLOTS - 1,
-             (unsigned long)((TDMA_SLOT_MS * TDMA_NUM_SLOTS) / 1000));
-    oledShowLines("DIAGNOSTICS MODE", "Diag queued", slotBuf, ntpBuf, "");
+    snprintf(slotBuf, sizeof(slotBuf), "Slot:%d  Cyc:%lus",
+             NODE_SLOT, (unsigned long)((TDMA_SLOT_MS * TDMA_NUM_SLOTS) / 1000));
+    oledShowLines("DIAGNOSTICS MODE", "Diag queued", lastBuf, slotBuf, ntpBuf);
 
   } else {
+    // Monitoring idle screen — shows last TX result prominently
+    char seqBuf[32];
+    char rssiBuf[32];
     char slotBuf[32];
-    snprintf(slotBuf, sizeof(slotBuf), "Slot:%d/%d %lus cyc",
-             NODE_SLOT, TDMA_NUM_SLOTS - 1,
-             (unsigned long)((TDMA_SLOT_MS * TDMA_NUM_SLOTS) / 1000));
-    oledShowLines("MONITORING MODE", NODE_ID " | " NODE_LOCATION, slotBuf, ntpBuf, "");
+
+    if (s_lastSeq > 0) {
+      snprintf(seqBuf,  sizeof(seqBuf),  "SEQ:%-5lu %s",
+               (unsigned long)s_lastSeq,
+               s_lastDelivered ? "DELIVERED" : "NO ACK");
+      snprintf(rssiBuf, sizeof(rssiBuf), "RSSI:%d  SNR:%d",
+               s_lastRssi, s_lastSnr);
+    } else {
+      snprintf(seqBuf,  sizeof(seqBuf),  "Waiting for slot...");
+      snprintf(rssiBuf, sizeof(rssiBuf), "");
+    }
+    snprintf(slotBuf, sizeof(slotBuf), "Slot:%d  Cyc:%lus",
+             NODE_SLOT, (unsigned long)((TDMA_SLOT_MS * TDMA_NUM_SLOTS) / 1000));
+
+    oledShowLines("MONITORING MODE", seqBuf, rssiBuf, slotBuf, ntpBuf);
   }
 }
 
@@ -620,8 +653,9 @@ static bool sendWithAck(uint32_t seq_id, const char* payload, uint8_t retries, u
               handleTestCommand(cmd);
             }
           }
+          recordTxResult(seq_id, lastRssi, lastSnr, true);
           snprintf(oledLineBuf, sizeof(oledLineBuf), "SEQ: %lu", (unsigned long)seq_id);
-          snprintf(oledLineBuf2, sizeof(oledLineBuf2), "RSSI: %d SNR:%d", lastRssi, lastSnr);
+          snprintf(oledLineBuf2, sizeof(oledLineBuf2), "RSSI:%d SNR:%d", lastRssi, lastSnr);
           const char* statusLine = runDiagNext        ? "DELIVERED + DIAG queued"
                                  : s_testModeActive   ? "DELIVERED + TEST MODE"
                                                       : "DELIVERED OK";
@@ -641,6 +675,7 @@ static bool sendWithAck(uint32_t seq_id, const char* payload, uint8_t retries, u
     delay(50);
   }
 
+  recordTxResult(seq_id, lastRssi, lastSnr, false);
   snprintf(oledLineBuf, sizeof(oledLineBuf), "SEQ: %lu", (unsigned long)seq_id);
   oledShowLines(s_testModeActive ? "TEST 915MHz"
               : runDiagNext      ? "DIAG 915MHz"
