@@ -60,20 +60,30 @@
 #define LORA_CRC_ON                true
 
 // -------------------- TDMA --------------------
-// Slot assignment: set NODE_SLOT to 0 for N1, 1 for N2, 2 for N3, etc.
-// All nodes must use the same TDMA_SLOT_MS and TDMA_NUM_SLOTS values.
-// Slot boundaries are computed from NTP epoch ms:
-//   current_slot = (epochMs / TDMA_SLOT_MS) % TDMA_NUM_SLOTS
-// A node transmits only when current_slot == NODE_SLOT and it hasn't
-// already transmitted in this slot (tracked by s_lastTxSlot).
-// TDMA_TX_WINDOW_MS: how early in the slot the node may transmit.
+// Slot assignment — only NODE_SLOT needs to change per node:
+//   N1 -> NODE_SLOT 0
+//   N2 -> NODE_SLOT 1
+//   N3 -> NODE_SLOT 2
+//   N4 -> NODE_SLOT 3  ... up to NODE_SLOT 7
+//
+// TDMA_NUM_SLOTS is fixed at 8 (max nodes). Unused slots are simply idle.
+// Adding a new node only requires flashing it with the next available slot
+// number — existing nodes never need to be reflashed.
+//
+// Cycle period = TDMA_NUM_SLOTS * TDMA_SLOT_MS = 8 * 6s = 48s
+// Each node transmits once per 48s cycle in its exclusive 6s window.
+//
+// Slot boundaries are computed from NTP epoch ms (shared clock):
+//   slot_index = (epochMs / TDMA_SLOT_MS) % TDMA_NUM_SLOTS
+//
+// TDMA_TX_WINDOW_MS: TX is only allowed in the first 3500ms of the slot.
 //   Must be > (TX airtime + ACK wait + retries) = ~2500ms at SF7.
-//   Remaining (TDMA_SLOT_MS - TDMA_TX_WINDOW_MS) is the guard band.
-#define NODE_SLOT          1           // THIS node's slot index (0-based). Change per node.
-#define TDMA_NUM_SLOTS     2           // Total number of nodes sharing the channel
-#define TDMA_SLOT_MS       6000UL      // Width of each slot in ms (cycle = NUM_SLOTS * SLOT_MS)
-#define TDMA_TX_WINDOW_MS  3500UL      // Max ms into slot that TX is allowed (guard = 2500ms)
-#define TDMA_FALLBACK_MS   12000UL     // Fallback interval when NTP is not yet synced
+//   Remaining 2500ms is the guard band against clock drift.
+#define NODE_SLOT          1           // THIS node's slot (0-based). N1=0, N2=1, N3=2 ...
+#define TDMA_NUM_SLOTS     8           // Fixed capacity — supports up to 8 nodes, never change
+#define TDMA_SLOT_MS       6000UL      // Slot width in ms  (cycle = 8 * 6s = 48s)
+#define TDMA_TX_WINDOW_MS  3500UL      // TX allowed in first 3500ms of slot (2500ms guard band)
+#define TDMA_FALLBACK_MS   48000UL     // Fallback interval when NTP unsynced (= 1 full cycle)
 
 // -------------------- Timing --------------------
 #define CMD_LISTEN_INTERVAL_MS  2000  // Listen for commands every 2 sec
