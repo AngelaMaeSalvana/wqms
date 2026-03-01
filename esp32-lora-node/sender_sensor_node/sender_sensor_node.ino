@@ -1,5 +1,9 @@
 /*
- * WQMS Sensor Node (Sender)
+ * WQMS Sensor Node — TEMPLATE FILE (do not flash directly)
+ * Copy this folder to node_N3/, node_N4/, etc. and set NODE_SLOT, NODE_ID,
+ * NODE_LOCATION, WIFI_SSID, and WIFI_PASSWORD before flashing.
+ * Ready-to-flash nodes: see node_N1/ and node_N2/.
+ *
  * Heltec LoRa32 V3 - Simulates water quality sensors for testing
  * Sends: dissolvedOxygen, turbidity, pH, flowRate, temperature
  * Field names match wqms dashboard - JSON structure constant; null when sensor disconnected
@@ -79,7 +83,7 @@
 // TDMA_TX_WINDOW_MS: TX is only allowed in the first 3500ms of the slot.
 //   Must be > (TX airtime + ACK wait + retries) = ~2500ms at SF7.
 //   Remaining 2500ms is the guard band against clock drift.
-#define NODE_SLOT          0           // THIS node's slot (0-based). N1=0, N2=1, N3=2 ...
+#define NODE_SLOT          0           // CHANGE THIS: N1=0, N2=1, N3=2, N4=3 ...
 #define TDMA_NUM_SLOTS     8           // Fixed capacity — supports up to 8 nodes, never change
 #define TDMA_SLOT_MS       6000UL      // Slot width in ms  (cycle = 8 * 6s = 48s)
 #define TDMA_TX_WINDOW_MS  3500UL      // TX allowed in first 3500ms of slot (2500ms guard band)
@@ -110,9 +114,10 @@ static const bool SENSOR_CONNECTED[] = {
   false   // flowRate - disconnected for dashboard testing
 };
 
-// -------------------- Node ID - must match wqms nodes (e.g. node_01, node_02) --------------------
-#define NODE_ID       "N1"
-#define NODE_LOCATION "Test Location 1"
+// -------------------- Node ID - must match wqms nodes (e.g. N1, N2, N3) --------------------
+// CHANGE THESE before flashing. NODE_ID must match the id registered in the dashboard.
+#define NODE_ID       "N?"           // CHANGE: "N1", "N2", "N3" ...
+#define NODE_LOCATION "Location ?"   // CHANGE: actual physical location name
 
 // -------------------- OLED --------------------
 SSD1306Wire factory_display(0x3c, 500000, SDA_OLED, SCL_OLED, GEOMETRY_128_64, RST_OLED);
