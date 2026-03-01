@@ -76,7 +76,7 @@
 #define TDMA_FALLBACK_MS   12000UL     // Fallback interval when NTP is not yet synced
 
 // -------------------- Timing --------------------
-#define CMD_LISTEN_INTERVAL_MS   500  // Listen for commands every 500 ms
+#define CMD_LISTEN_INTERVAL_MS  2000  // Listen for commands every 2 sec
 #define CMD_LISTEN_WINDOW_MS     400  // RX window for commands (ms)
 
 // -------------------- Buffers --------------------
@@ -627,18 +627,27 @@ static const char* runDiagnostics() {
 }
 
 // -------------------- TDMA state --------------------
-// s_lastTxSlot: the slot index in which we last transmitted.
-// Prevents transmitting more than once per slot.
-// Initialized to an impossible value so the first slot fires immediately.
+// s_lastTxSlot: the ABSOLUTE slot counter of the last transmission.
+// Using the absolute counter (not reduced by % NUM_SLOTS) means each slot
+// occurrence is unique, so the node correctly re-transmits every cycle.
+// Initialized to UINT64_MAX so the very first matching slot fires immediately.
 static uint64_t s_lastTxSlot = UINT64_MAX;
 
-// Returns the current TDMA slot index based on NTP epoch ms.
+// Returns the ABSOLUTE slot counter: total slots elapsed since epoch.
+// This number increases monotonically and is unique per slot occurrence.
 // Returns UINT64_MAX if NTP is not yet synced.
-static uint64_t tdmaCurrentSlot() {
+static uint64_t tdmaAbsoluteSlot() {
   if (!s_timeSynced) return UINT64_MAX;
   uint64_t now = epochMillis();
   if (now == 0) return UINT64_MAX;
-  return (now / TDMA_SLOT_MS) % TDMA_NUM_SLOTS;
+  return now / TDMA_SLOT_MS;  // no modulo - unique per slot occurrence
+}
+
+// Returns the slot INDEX (0..NUM_SLOTS-1) for display and assignment checks.
+static uint8_t tdmaSlotIndex() {
+  uint64_t abs = tdmaAbsoluteSlot();
+  if (abs == UINT64_MAX) return 0xFF;
+  return (uint8_t)(abs % TDMA_NUM_SLOTS);
 }
 
 // Returns ms elapsed since the start of the current slot.
@@ -651,13 +660,13 @@ static uint32_t tdmaSlotOffset() {
 }
 
 // Returns true when it is this node's turn to transmit and it hasn't
-// already transmitted in the current slot.
+// already transmitted in the current slot occurrence.
 static bool tdmaShouldTx() {
-  uint64_t slot = tdmaCurrentSlot();
-  if (slot == UINT64_MAX) return false;                   // NTP not synced
-  if (slot != (uint64_t)NODE_SLOT) return false;          // Not our slot
-  if (slot == s_lastTxSlot) return false;                 // Already sent this slot
-  if (tdmaSlotOffset() >= TDMA_TX_WINDOW_MS) return false; // Past TX window (guard band)
+  uint64_t absSlot = tdmaAbsoluteSlot();
+  if (absSlot == UINT64_MAX) return false;                  // NTP not synced
+  if ((absSlot % TDMA_NUM_SLOTS) != (uint64_t)NODE_SLOT) return false; // Not our slot
+  if (absSlot == s_lastTxSlot) return false;                // Already sent this occurrence
+  if (tdmaSlotOffset() >= TDMA_TX_WINDOW_MS) return false;  // Past TX window (guard band)
   return true;
 }
 
@@ -722,8 +731,8 @@ void loop() {
   if (shouldTx) {
     lastSendTime      = now;
     triggerReadingNow = false;
-    // Record the slot we're transmitting in so we don't re-transmit this slot
-    if (!inTest && s_timeSynced) s_lastTxSlot = tdmaCurrentSlot();
+    // Record the absolute slot counter so we don't re-transmit this slot occurrence
+    if (!inTest && s_timeSynced) s_lastTxSlot = tdmaAbsoluteSlot();
 
     // Re-check after potential expiry inside testModeActive() above
     inTest = testModeActive();
@@ -754,9 +763,9 @@ void loop() {
                     NODE_ID, (unsigned long)seq_id, (unsigned long long)t_node,
                     s_testRunId, (unsigned long)remaining);
     } else if (s_timeSynced) {
-      Serial.printf("[NODE] node_id=%s seq_id=%lu t_node=%llu [TDMA slot=%d offset=%lums]\n",
+      Serial.printf("[NODE] node_id=%s seq_id=%lu t_node=%llu [TDMA slot=%d abs=%llu offset=%lums]\n",
                     NODE_ID, (unsigned long)seq_id, (unsigned long long)t_node,
-                    NODE_SLOT, (unsigned long)tdmaSlotOffset());
+                    NODE_SLOT, (unsigned long long)tdmaAbsoluteSlot(), (unsigned long)tdmaSlotOffset());
     } else {
       Serial.printf("[NODE] node_id=%s seq_id=%lu t_node=%llu [TDMA fallback - NTP unsynced]\n",
                     NODE_ID, (unsigned long)seq_id, (unsigned long long)t_node);
