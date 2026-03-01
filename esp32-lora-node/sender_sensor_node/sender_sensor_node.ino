@@ -254,6 +254,7 @@ static bool connectWiFi() {
 
 // Perform NTP sync; WiFi is brought up temporarily if not already connected.
 // After sync, WiFi is disconnected to free radio resources for LoRa.
+// Retries once if the first attempt fails (DNS can be slow on cold boot).
 static void syncNTP() {
   bool wifiWasConnected = (WiFi.status() == WL_CONNECTED);
 
@@ -264,16 +265,30 @@ static void syncNTP() {
     return;
   }
 
-  oledShowLines("NTP Sync", "Syncing time...");
-  configTime(NTP_TIMEZONE_SECS, 0, NTP_SERVER_1, NTP_SERVER_2);
-
-  struct tm timeinfo;
+  // Two attempts: first attempt can fail on cold boot due to DNS lag.
+  // Each attempt polls for up to 10s (20 x 500ms) with live OLED progress.
   bool synced = false;
-  for (int i = 0; i < 40; i++) {
-    delay(500);
-    if (getLocalTime(&timeinfo)) {
-      synced = true;
-      break;
+  for (int attempt = 1; attempt <= 2 && !synced; attempt++) {
+    Serial.printf("[NTP] Attempt %d/2...\n", attempt);
+    configTime(NTP_TIMEZONE_SECS, 0, NTP_SERVER_1, NTP_SERVER_2);
+
+    struct tm timeinfo;
+    for (int i = 1; i <= 20 && !synced; i++) {
+      delay(500);
+      // Show live countdown so it's clear the node isn't frozen
+      char progressBuf[24];
+      snprintf(progressBuf, sizeof(progressBuf), "Try %d/2  [%2d/20]", attempt, i);
+      oledShowLines("NTP Sync", "Syncing time...", progressBuf);
+
+      if (getLocalTime(&timeinfo)) {
+        synced = true;
+      }
+    }
+
+    if (!synced && attempt < 2) {
+      Serial.println("[NTP] Attempt 1 failed, retrying...");
+      oledShowLines("NTP Sync", "Retry...", "");
+      delay(500);
     }
   }
 
@@ -285,9 +300,9 @@ static void syncNTP() {
     oledShowLines("NTP Sync", "OK", String("epoch=") + (unsigned long)now);
     delay(800);
   } else {
-    Serial.println("[NTP] Sync failed");
-    oledShowLines("NTP Sync", "FAILED", "Running w/o NTP");
-    delay(1200);
+    Serial.println("[NTP] Sync failed after 2 attempts - running w/o NTP");
+    oledShowLines("NTP Sync", "FAILED", "TDMA fallback mode", "Will retry in 1hr");
+    delay(1500);
   }
 
   // Disconnect WiFi so LoRa radio can operate without interference
