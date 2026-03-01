@@ -37,6 +37,7 @@ export async function loadNodes() {
         lat: r.lat,
         lng: r.lng,
         lastMaintenance: r.last_maintenance ?? r.lastMaintenance ?? null,
+        active: r.active !== false,
       })) : [];
       nodesCache = list;
       try {

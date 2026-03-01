@@ -1,10 +1,41 @@
-﻿const express = require('express');
+// Load server/.env so MQTT_* / SUPABASE_* are available in dev/prod runs
+const path = require('path');
+try {
+  require('dotenv').config({ path: path.join(__dirname, '.env') });
+} catch (_) { /* optional */ }
+
+const express = require('express');
 const cors = require('cors');
+const http = require('http');
+const WebSocket = require('ws');
 const mqtt = require('mqtt');
 const db = require('./db');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
+
+// HTTP server wrapping Express (needed for WebSocket upgrade)
+const httpServer = http.createServer(app);
+
+// WebSocket server — dashboard clients connect here for live telemetry + alerts
+const wss = new WebSocket.Server({ server: httpServer });
+
+/** Broadcast a JSON message to all connected WebSocket clients. */
+function wsBroadcast(type, payload) {
+  const msg = JSON.stringify({ type, payload, ts: new Date().toISOString() });
+  wss.clients.forEach((client) => {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(msg);
+    }
+  });
+}
+
+wss.on('connection', (ws) => {
+  console.log('🖥️  Dashboard client connected via WebSocket');
+  ws.send(JSON.stringify({ type: 'connected', payload: { message: 'WQMS backend connected' } }));
+  ws.on('close', () => console.log('🖥️  Dashboard client disconnected'));
+});
+
 let MQTT_URL = process.env.MQTT_URL || process.env.REACT_APP_MQTT_WS_URL || '';
 // HiveMQ Cloud: mqtt://host (no port) → mqtts://host:8883 for Node MQTT
 if (MQTT_URL && MQTT_URL.startsWith('mqtt://') && MQTT_URL.includes('hivemq') && !/:\d+(\/|$)/.test(MQTT_URL.slice(7))) {
@@ -61,7 +92,12 @@ function connectMQTT() {
   });
 
   mqttClient.on('message', (topic, message) => {
-    const t_be_rx = new Date().toISOString();
+    // Ignore command channels (used to control nodes / forwarder).
+    // These payloads may be raw strings (e.g. "test:start:...") and are not telemetry JSON.
+    if (typeof topic === 'string' && topic.endsWith('/command')) {
+      return;
+    }
+    const t_be_rx = Date.now();
     try {
       const data = JSON.parse(message.toString());
       handleMQTTMessage(topic, data, t_be_rx).catch((err) => console.error('❌ MQTT handler:', err));
@@ -91,67 +127,89 @@ function normalizeNodeId(id) {
   return s;
 }
 
-const { calculateWQI } = require('./utils/nh3Wqi');
+const { randomUUID } = require('crypto');
 
-async function updateDailySummary(reading, nodeId) {
-  const today = new Date().toISOString().split('T')[0];
-  const location = reading.location || 'Unknown';
-  const ph = reading.pH ?? reading.ph;
-  const tan = reading.tan ?? reading.TAN ?? 0.5;
-  const doVal = reading.dissolvedOxygen ?? reading.do;
-  const flowRate = reading.flowRate ?? reading.flow_rate ?? null;
-  const wqi = calculateWQI({
-    temperature: reading.temperature,
-    ph,
-    tan,
-    dissolvedOxygen: doVal,
-    turbidity: reading.turbidity,
-  });
+// ─── Active test run (in-memory; single concurrent run) ───────────────────────
+let activeTestRun = null; // { id, nodeId, endsAt, intervalMs, timer }
 
-  const existing = await db.getDailySummaryByDateAndNode(today, nodeId);
-  if (existing) {
-    const newCount = existing.reading_count + 1;
-    await db.upsertDailySummary({
-      date: today,
-      node_id: nodeId,
-      location: existing.location,
-      avg_temperature: (existing.avg_temperature * existing.reading_count + reading.temperature) / newCount,
-      avg_turbidity: (existing.avg_turbidity * existing.reading_count + reading.turbidity) / newCount,
-      avg_ph: (existing.avg_ph * existing.reading_count + (ph ?? 0)) / newCount,
-      avg_tan: (existing.avg_tan * existing.reading_count + tan) / newCount,
-      avg_dissolved_oxygen: (existing.avg_dissolved_oxygen * existing.reading_count + (doVal ?? 0)) / newCount,
-      avg_flow_rate: (existing.avg_flow_rate * existing.reading_count + (flowRate ?? 0)) / newCount,
-      avg_wqi: wqi != null && existing.avg_wqi != null ? (existing.avg_wqi * existing.reading_count + wqi) / newCount : (wqi ?? existing.avg_wqi),
-      min_wqi: wqi != null ? (existing.min_wqi != null ? Math.min(existing.min_wqi, wqi) : wqi) : existing.min_wqi,
-      max_wqi: wqi != null ? (existing.max_wqi != null ? Math.max(existing.max_wqi, wqi) : wqi) : existing.max_wqi,
-      reading_count: newCount,
-    });
-  } else {
-    await db.upsertDailySummary({
-      date: today,
-      node_id: nodeId,
-      location,
-      avg_temperature: reading.temperature,
-      avg_turbidity: reading.turbidity,
-      avg_ph: ph,
-      avg_tan: tan,
-      avg_dissolved_oxygen: doVal,
-      avg_flow_rate: flowRate,
-      avg_wqi: wqi,
-      min_wqi: wqi,
-      max_wqi: wqi,
-      reading_count: 1,
-    });
+function publishTestCommand(type, payload) {
+  if (!mqttClient?.connected) return;
+  const targetNode = payload?.nodeId ?? payload?.node_id ?? null;
+  const normalized = targetNode && targetNode !== 'all' ? normalizeNodeId(String(targetNode)) : null;
+  const topic = normalized
+    ? `water-quality/${normalized}/command`
+    : 'water-quality/command';
+
+  // 1) Canonical JSON command for apps/services
+  mqttClient.publish(topic, JSON.stringify({ type, ...payload }), { qos: 1 });
+
+  // 2) Firmware-friendly raw command for forwarder → LoRa → sender
+  // Forwarder accepts both JSON and raw text; raw format matches sender firmware parser.
+  let raw = null;
+  if (type === 'test_start' && payload?.test_run_id && payload?.interval_ms && payload?.duration_ms) {
+    raw = `test:start:${payload.interval_ms}:${payload.duration_ms}:${payload.test_run_id}`;
+  } else if (type === 'test_stop' && payload?.test_run_id) {
+    raw = `test:stop:${payload.test_run_id}`;
+  }
+  if (raw) {
+    mqttClient.publish(topic, raw, { qos: 1 });
+  }
+
+  console.log(`📤 Test command [${type}] published to ${topic}${raw ? ' (json+raw)' : ''}`);
+}
+
+async function expireTestRun(id) {
+  if (!activeTestRun || activeTestRun.id !== id) return;
+  clearTimeout(activeTestRun.timer);
+  activeTestRun = null;
+  try {
+    await db.closeTestRun({ id, status: 'completed', stopped_at: Date.now() });
+    publishTestCommand('test_stop', { test_run_id: id });
+    wsBroadcast('test_run_expired', { test_run_id: id });
+    console.log(`✅ Test run ${id} completed (duration expired)`);
+  } catch (err) {
+    console.error('❌ expireTestRun:', err.message);
   }
 }
+
 
 async function handleMQTTMessage(topic, data, t_be_rx) {
   if (topic.includes('water-quality') || topic.includes('sensor-data')) {
     const reading = data.sensorReading || data;
     const rawId = reading.nodeId || reading.node || extractNodeIdFromTopic(topic);
     const nodeId = normalizeNodeId(rawId);
+
+    // Accept both seq and seq_id field names from the forwarder
+    const seqRaw = reading.seq ?? reading.seq_id ?? data.seq ?? data.seq_id;
+    if (seqRaw == null) {
+      console.warn(`⚠️  Telemetry from ${nodeId} missing seq/seq_id — message discarded`);
+      return;
+    }
+    const seq = typeof seqRaw === 'number' ? seqRaw : parseInt(seqRaw, 10);
+    if (!Number.isFinite(seq)) {
+      console.warn(`⚠️  Telemetry from ${nodeId} has invalid seq "${seqRaw}" — message discarded`);
+      return;
+    }
+
+    // t_fwd_rx is the PRIMARY latency start timestamp (forwarder epoch ms when LoRa packet arrived).
+    // Sensor nodes may not have reliable NTP so t_node can be 0/null — always prefer t_fwd_rx.
+    // t_be_rx is stamped at the top of this handler (= Date.now()) and must never be overwritten.
+    const t_fwd_rx_val = (reading.t_fwd_rx ?? data.t_fwd_rx) != null
+      ? parseInt(reading.t_fwd_rx ?? data.t_fwd_rx, 10) : null;
+    if (t_fwd_rx_val == null) {
+      console.warn(`⚠️  Telemetry from ${nodeId} seq=${seq} missing t_fwd_rx — latency metrics will be degraded`);
+    }
+
     // Forwarder adds timestamp (ISO); use it when present
     const timestamp = reading.timestamp || data.timestamp || new Date().toISOString();
+
+    const fwdToBeMs = t_fwd_rx_val != null ? t_be_rx - t_fwd_rx_val : null;
+    console.log(
+      `📡 MQTT telemetry: node=${nodeId} seq=${seq}`,
+      `| t_fwd_rx=${t_fwd_rx_val ?? 'null'} t_be_rx=${t_be_rx}`,
+      fwdToBeMs != null ? `| fwd→be: ${fwdToBeMs}ms` : '',
+    );
+
     const row = {
       node_id: nodeId,
       location: reading.location || 'Unknown',
@@ -160,31 +218,46 @@ async function handleMQTTMessage(topic, data, t_be_rx) {
       ph: reading.pH ?? reading.ph,
       dissolved_oxygen: reading.dissolvedOxygen ?? reading.do,
       flow_rate: reading.flowRate ?? reading.flow_rate ?? null,
-      seq: reading.seq != null ? (typeof reading.seq === 'number' ? reading.seq : parseInt(reading.seq, 10)) : null,
+      seq,
       tx_millis: reading.tx_millis != null ? (typeof reading.tx_millis === 'number' ? reading.tx_millis : parseInt(reading.tx_millis, 10)) : null,
       rx_millis: reading.rx_millis != null ? (typeof reading.rx_millis === 'number' ? reading.rx_millis : parseInt(reading.rx_millis, 10)) : null,
       timestamp,
-      t_node: reading.t_node ?? data.t_node ?? null,
-      t_fwd_rx: reading.t_fwd_rx ?? data.t_fwd_rx ?? null,
-      t_fwd_pub: reading.t_fwd_pub ?? data.t_fwd_pub ?? null,
-      t_be_rx: t_be_rx ?? null,
+      t_node:    (reading.t_node    ?? data.t_node)    != null ? parseInt(reading.t_node    ?? data.t_node,    10) : null,
+      t_fwd_rx:  t_fwd_rx_val,
+      t_fwd_pub: (reading.t_fwd_pub ?? data.t_fwd_pub) != null ? parseInt(reading.t_fwd_pub ?? data.t_fwd_pub, 10) : null,
+      t_be_rx,
     };
-    const result = await db.insertReading(row);
-    console.log(`💾 Stored reading from Node ${nodeId} (ID: ${result.lastID})`);
-    await updateDailySummary(reading, nodeId);
+
+    // Forward telemetry to all dashboard clients (DB write is handled exclusively by bridge.js)
+    wsBroadcast('telemetry', row);
+
   } else if (topic.includes('alert')) {
     const alert = data.alert || data;
-    const alertTime = new Date().toISOString();
+    // t_alert_trigger = epoch ms when the backend received the alert (bigint, same as t_be_rx)
+    const t_alert_trigger = t_be_rx;
+    const seqRaw = alert.seq ?? data.seq;
+    const seq = seqRaw != null ? (typeof seqRaw === 'number' ? seqRaw : parseInt(seqRaw, 10)) : null;
     const row = {
-      node_id: alert.nodeId ?? alert.node ?? null,
+      node_id: normalizeNodeId(alert.nodeId ?? alert.node ?? null),
       title: alert.title || 'Alert',
       detail: alert.detail ?? alert.message ?? '',
       severity: alert.severity || 'info',
-      timestamp: alertTime,
-      t_alert_trigger: t_be_rx ?? alertTime,
+      type: alert.type ?? null,
+      node_name: alert.node_name ?? alert.nodeName ?? null,
+      parameter: alert.parameter ?? null,
+      value: alert.value != null ? parseFloat(alert.value) : null,
+      threshold_min: alert.threshold_min ?? alert.thresholdMin ?? null,
+      threshold_max: alert.threshold_max ?? alert.thresholdMax ?? null,
+      status: alert.status ?? 'active',
+      seq,
+      timestamp: new Date(t_be_rx).toISOString(),
+      t_alert_trigger,
     };
     const result = await db.insertAlert(row);
-    console.log(`🚨 Stored alert (ID: ${result.lastID})`);
+    console.log(`🚨 Stored alert from Node ${row.node_id} | seq=${seq ?? 'n/a'} | id=${result.lastID}`);
+
+    // Publish alert event to all dashboard clients via dedicated alert channel
+    wsBroadcast('alert', { ...row, db_id: result.lastID });
   }
 }
 
@@ -209,8 +282,14 @@ app.get('/api/readings/latest', async (req, res) => {
 
 app.get('/api/readings', async (req, res) => {
   try {
-    const { startDate, endDate, nodeId, limit = 100 } = req.query;
-    const rows = await db.getReadings({ startDate, endDate, nodeId, limit });
+    const { startDate, endDate, nodeId, testRunId, test_run_id, limit = 100 } = req.query;
+    const rows = await db.getReadings({
+      startDate,
+      endDate,
+      nodeId,
+      testRunId: testRunId || test_run_id || null,
+      limit,
+    });
     res.json(rows);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -240,8 +319,8 @@ app.get('/api/readings/date/:date', async (req, res) => {
 
 app.get('/api/alerts', async (req, res) => {
   try {
-    const { limit = 50, severity } = req.query;
-    const rows = await db.getAlerts({ limit: parseInt(limit), severity });
+    const { limit = 50, severity, startDate, endDate } = req.query;
+    const rows = await db.getAlerts({ limit: parseInt(limit), severity, startDate, endDate });
     res.json(rows);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -288,6 +367,114 @@ app.post('/api/alerts', async (req, res) => {
   }
 });
 
+// ─── Test Run endpoints ───────────────────────────────────────────────────────
+
+/** GET /api/test-run/active — returns the currently active test run or null */
+app.get('/api/test-run/active', (req, res) => {
+  if (!activeTestRun) return res.json(null);
+  res.json({
+    id: activeTestRun.id,
+    nodeId: activeTestRun.nodeId,
+    startedAt: activeTestRun.startedAt,
+    endsAt: activeTestRun.endsAt,
+    intervalMs: activeTestRun.intervalMs,
+    durationMs: Math.max(0, activeTestRun.endsAt - (activeTestRun.startedAt ?? activeTestRun.endsAt)),
+    remainingMs: Math.max(0, activeTestRun.endsAt - Date.now()),
+  });
+});
+
+/**
+ * POST /api/test-run/start
+ * Body: { durationMs, intervalMs, nodeId? }
+ * Creates a test run, publishes test_start MQTT command to nodes.
+ */
+app.post('/api/test-run/start', async (req, res) => {
+  try {
+    if (activeTestRun && Date.now() < activeTestRun.endsAt) {
+      return res.status(409).json({ error: 'A test run is already active', test_run_id: activeTestRun.id });
+    }
+
+    const { durationMs, intervalMs, nodeId } = req.body;
+    if (!durationMs || durationMs <= 0) return res.status(400).json({ error: 'durationMs is required and must be > 0' });
+    if (!intervalMs || intervalMs <= 0) return res.status(400).json({ error: 'intervalMs is required and must be > 0' });
+
+    const id = randomUUID();
+    const started_at = Date.now();
+    const ends_at = started_at + Number(durationMs);
+
+    await db.createTestRun({ id, started_at, ends_at, duration_ms: Number(durationMs), interval_ms: Number(intervalMs), node_id: nodeId ?? null });
+
+    const timer = setTimeout(() => expireTestRun(id), Number(durationMs));
+    activeTestRun = { id, nodeId: nodeId ?? 'all', startedAt: started_at, endsAt: ends_at, intervalMs: Number(intervalMs), timer };
+
+    publishTestCommand('test_start', {
+      test_run_id: id,
+      interval_ms: Number(intervalMs),
+      duration_ms: Number(durationMs),
+      node_id: nodeId ?? null,
+    });
+
+    wsBroadcast('test_run_started', { test_run_id: id, ends_at, interval_ms: Number(intervalMs), node_id: nodeId ?? null });
+    console.log(`🧪 Test run started: ${id} | duration=${durationMs}ms | interval=${intervalMs}ms | node=${nodeId ?? 'all'}`);
+
+    res.json({ test_run_id: id, started_at, ends_at, duration_ms: Number(durationMs), interval_ms: Number(intervalMs) });
+  } catch (err) {
+    console.error('❌ test-run/start:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * POST /api/test-run/stop
+ * Body: { test_run_id }
+ * Manually stops an active test run.
+ */
+app.post('/api/test-run/stop', async (req, res) => {
+  try {
+    const { test_run_id } = req.body;
+    if (!activeTestRun) return res.status(404).json({ error: 'No active test run' });
+    if (test_run_id && activeTestRun.id !== test_run_id) {
+      return res.status(404).json({ error: 'test_run_id does not match active run' });
+    }
+
+    const id = activeTestRun.id;
+    clearTimeout(activeTestRun.timer);
+    activeTestRun = null;
+
+    await db.closeTestRun({ id, status: 'stopped', stopped_at: Date.now() });
+    publishTestCommand('test_stop', { test_run_id: id });
+    wsBroadcast('test_run_stopped', { test_run_id: id });
+    console.log(`🛑 Test run stopped: ${id}`);
+
+    res.json({ ok: true, test_run_id: id, status: 'stopped' });
+  } catch (err) {
+    console.error('❌ test-run/stop:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/** GET /api/test-run/:id — fetch a specific test run record */
+app.get('/api/test-run/:id', async (req, res) => {
+  try {
+    const run = await db.getTestRun(req.params.id);
+    if (!run) return res.status(404).json({ error: 'Not found' });
+    res.json(run);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/** GET /api/test-runs — list all test runs (for Reports) */
+app.get('/api/test-runs', async (req, res) => {
+  try {
+    const { limit = 50 } = req.query;
+    const rows = await db.getTestRunsList({ limit: parseInt(limit) });
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get('/api/timestamp-logs', async (req, res) => {
   try {
     const { startDate, endDate, nodeId, limit = 200 } = req.query;
@@ -298,9 +485,10 @@ app.get('/api/timestamp-logs', async (req, res) => {
   }
 });
 
-app.listen(PORT, () => {
+httpServer.listen(PORT, () => {
   console.log(`🚀 Backend server running on http://localhost:${PORT}`);
   console.log(`📡 API endpoints at http://localhost:${PORT}/api`);
+  console.log(`🔌 WebSocket server on ws://localhost:${PORT}`);
   if (MQTT_URL) {
     connectMQTT();
   }
@@ -309,6 +497,7 @@ app.listen(PORT, () => {
 process.on('SIGINT', () => {
   console.log('\n🛑 Shutting down server...');
   if (mqttClient) mqttClient.end();
+  wss.close();
   db.close()
     .then(() => {
       console.log('✅ Database connection closed');

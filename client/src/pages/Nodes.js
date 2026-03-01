@@ -1,17 +1,19 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { createPortal } from "react-dom";
+import { useNavigate } from "react-router-dom";
 import PageDateWithStatus from "../components/PageDateWithStatus";
 import { isSupabaseEnabled } from "../lib/supabaseClient";
 import { getNodes, loadNodes, saveNodes } from "../utils/nodesStorage";
 import { sendEventNotification } from "../services/emailService";
 import { PageLoader } from "../components/LoadingSkeleton";
+import { NodeStatus } from "../components/dashboard/NodeStatus";
+import { useNodeStatus } from "../hooks/useNodeStatus";
 import "./Nodes.css";
 
 const emptyNode = () => ({
   id: "",
   name: "",
   location: "",
-  status: "online",
   coords: "",
   lastMaintenance: "",
 });
@@ -44,6 +46,7 @@ function parseCoordinates(str) {
 const NODES_PAGE_SIZE = 8;
 
 export default function Nodes() {
+  const navigate = useNavigate();
   const [nodes, setNodes] = useState([]);
   const [nodesPage, setNodesPage] = useState(1);
   const [newNode, setNewNode] = useState(emptyNode);
@@ -53,6 +56,8 @@ export default function Nodes() {
   const [nodesSearch, setNodesSearch] = useState("");
   const [lastUpdated] = useState(() => new Date());
   const [isLoading, setIsLoading] = useState(true);
+
+  const { nodeStatuses } = useNodeStatus(nodes);
 
   useEffect(() => {
     loadNodes().then(() => setNodes(getNodes())).finally(() => setIsLoading(false));
@@ -76,10 +81,13 @@ export default function Nodes() {
   const nextNodeId = getNextNodeId(nodes);
   const addFormId = newNode.id.trim() || nextNodeId;
 
+  const inactiveCount = useMemo(() => nodes.filter((n) => n.active === false).length, [nodes]);
+
   const filteredNodes = useMemo(() => {
+    const activeNodes = nodes.filter((n) => n.active !== false);
     const q = nodesSearch.trim().toLowerCase();
-    if (!q) return nodes;
-    return nodes.filter(
+    if (!q) return activeNodes;
+    return activeNodes.filter(
       (n) =>
         (n.id && n.id.toLowerCase().includes(q)) ||
         (n.name && n.name.toLowerCase().includes(q)) ||
@@ -122,7 +130,6 @@ export default function Nodes() {
       id,
       name,
       location,
-      status: newNode.status || "online",
       lat: parsed.lat,
       lng: parsed.lng,
       lastMaintenance: newNode.lastMaintenance ? new Date(newNode.lastMaintenance).toISOString() : null,
@@ -144,7 +151,6 @@ export default function Nodes() {
       id: node.id,
       name: node.name,
       location: node.location,
-      status: node.status || "online",
       coords: lat !== "" && lng !== "" ? `${lat}, ${lng}` : "",
       lastMaintenance: lastM ? (typeof lastM === "string" ? lastM.slice(0, 10) : new Date(lastM).toISOString().slice(0, 10)) : "",
     });
@@ -161,7 +167,6 @@ export default function Nodes() {
       id,
       name,
       location,
-      status: editForm.status || "online",
       lat: parsed.lat,
       lng: parsed.lng,
       lastMaintenance: editForm.lastMaintenance ? new Date(editForm.lastMaintenance + "T00:00:00Z").toISOString() : null,
@@ -188,6 +193,14 @@ export default function Nodes() {
     }
   };
 
+  const handleToggleActive = (nodeId) => {
+    const next = nodes.map((n) =>
+      n.id === nodeId ? { ...n, active: n.active === false ? true : false } : n
+    );
+    setNodes(next);
+    saveNodes(next);
+  };
+
   return (
     <div className="nodes-page">
       <header className="page-header nodes-page-header">
@@ -198,7 +211,7 @@ export default function Nodes() {
           )}
         </div>
         <div className="nodes-header-actions">
-          <PageDateWithStatus lastUpdated={lastUpdated} className="page-meta" />
+          <PageDateWithStatus lastUpdated={lastUpdated} className="page-meta" showClassification={false} />
         </div>
       </header>
 
@@ -264,19 +277,6 @@ export default function Nodes() {
                     aria-label="Location"
                   />
                 </label>
-                <label className="nodes-label">
-                  <span>Status</span>
-                  <select
-                    className="nodes-input nodes-select"
-                    value={newNode.status}
-                    onChange={(e) => setNewNode((n) => ({ ...n, status: e.target.value }))}
-                    aria-label="Node status"
-                  >
-                    <option value="online">Online</option>
-                    <option value="testing">Testing</option>
-                    <option value="offline">Offline</option>
-                  </select>
-                </label>
                 <label className="nodes-label nodes-label--full">
                   <span>Coordinates</span>
                   <input
@@ -300,17 +300,30 @@ export default function Nodes() {
             <div>
               <h2 className="card__title">All nodes</h2>
               <p className="card__desc">
-                Edit or delete any node. Changes appear on the Map and Dashboard.
+                Edit or deactivate any node. Changes appear on the Map and Dashboard.
               </p>
             </div>
-            <input
-              type="search"
-              className="nodes-search"
-              placeholder="Search nodes…"
-              value={nodesSearch}
-              onChange={(e) => setNodesSearch(e.target.value)}
-              aria-label="Search nodes"
-            />
+            <div className="nodes-list-header-right">
+              <button
+                type="button"
+                className="nodes-btn nodes-btn--secondary nodes-inactive-link-btn"
+                onClick={() => navigate("/nodes/inactive")}
+                aria-label={`View inactive nodes${inactiveCount > 0 ? ` (${inactiveCount})` : ""}`}
+              >
+                Inactive Nodes
+                {inactiveCount > 0 && (
+                  <span className="nodes-inactive-count">{inactiveCount}</span>
+                )}
+              </button>
+              <input
+                type="search"
+                className="nodes-search"
+                placeholder="Search nodes…"
+                value={nodesSearch}
+                onChange={(e) => setNodesSearch(e.target.value)}
+                aria-label="Search nodes"
+              />
+            </div>
           </div>
           <div className="card__body">
             <ul className="nodes-list">
@@ -349,19 +362,6 @@ export default function Nodes() {
                             aria-label="Location"
                           />
                         </label>
-                        <label className="nodes-label">
-                          <span>Status</span>
-                          <select
-                            className="nodes-input nodes-select"
-                            value={editForm.status}
-                            onChange={(e) => setEditForm((f) => ({ ...f, status: e.target.value }))}
-                            aria-label="Status"
-                          >
-                            <option value="online">Online</option>
-                            <option value="testing">Testing</option>
-                            <option value="offline">Offline</option>
-                          </select>
-                        </label>
                         <label className="nodes-label nodes-label--full">
                           <span>Coordinates</span>
                           <input
@@ -396,32 +396,37 @@ export default function Nodes() {
                     </form>
                   </li>
                 ) : (
-                  <li key={n.id} className="nodes-list-item">
+                  <li key={n.id} className={`nodes-list-item${n.active === false ? " nodes-list-item--inactive" : ""}`}>
                     <div className="nodes-list-item__info">
                       <strong>{n.id}</strong> — {n.name} ({n.location})
                       <span className="nodes-list-item__meta">
-                        {n.lat}, {n.lng} · {n.status}
+                        {n.lat}, {n.lng}
                         {n.lastMaintenance || n.last_maintenance
                           ? ` · Last maintenance: ${new Date(n.lastMaintenance || n.last_maintenance).toLocaleDateString()}`
                           : ""}
                       </span>
+                      {n.active === false && (
+                        <span className="nodes-list-item__inactive-badge">Inactive</span>
+                      )}
                     </div>
+                    <NodeStatus status={n.active === false ? 'inactive' : (nodeStatuses[n.id] ?? 'offline')} />
                     <div className="nodes-list-item__actions">
                       <button
                         type="button"
                         className="nodes-btn nodes-btn--secondary nodes-btn--small"
                         onClick={() => handleEdit(n)}
                         aria-label={`Edit ${n.id}`}
+                        disabled={n.active === false}
                       >
                         Edit
                       </button>
                       <button
                         type="button"
-                        className="nodes-btn nodes-btn--danger nodes-btn--small"
-                        onClick={() => handleDelete(n.id)}
-                        aria-label={`Delete ${n.id}`}
+                        className={`nodes-btn nodes-btn--small ${n.active === false ? "nodes-btn--activate" : "nodes-btn--danger"}`}
+                        onClick={() => handleToggleActive(n.id)}
+                        aria-label={n.active === false ? `Activate ${n.id}` : `Deactivate ${n.id}`}
                       >
-                        Deactivate
+                        {n.active === false ? "Activate" : "Deactivate"}
                       </button>
                     </div>
                   </li>
@@ -523,19 +528,6 @@ export default function Nodes() {
                     onChange={(e) => setNewNode((n) => ({ ...n, location: e.target.value }))}
                     aria-label="Location"
                   />
-                </label>
-                <label className="nodes-label">
-                  <span>Status</span>
-                  <select
-                    className="nodes-input nodes-select"
-                    value={newNode.status}
-                    onChange={(e) => setNewNode((n) => ({ ...n, status: e.target.value }))}
-                    aria-label="Node status"
-                  >
-                    <option value="online">Online</option>
-                    <option value="testing">Testing</option>
-                    <option value="offline">Offline</option>
-                  </select>
                 </label>
                 <label className="nodes-label nodes-label--full">
                   <span>Coordinates</span>

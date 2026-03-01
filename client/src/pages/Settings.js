@@ -6,8 +6,11 @@ import {
   saveToStorage,
   syncSettingsFromSupabase,
   saveSettingsToSupabaseAndLocal,
+  DEFAULT_MAINTENANCE,
+  SETTINGS_KEYS,
 } from "../utils/settingsStorage";
 import { sendEventNotification } from "../services/emailService";
+import { DEFAULT_ALERT_LOGIC, getAlertLogic, saveAlertLogic } from "../utils/alertsData";
 import "./Settings.css";
 
 const DEFAULT_THRESHOLDS = {
@@ -167,6 +170,11 @@ export default function Settings() {
     ...DEFAULT_NOTIFICATIONS,
     ...loadFromStorage(NOTIFICATIONS_KEY, {}),
   }));
+  const [alertLogic, setAlertLogic] = useState(() => getAlertLogic());
+  const [maintenance, setMaintenance] = useState(() => ({
+    ...DEFAULT_MAINTENANCE,
+    ...loadFromStorage(SETTINGS_KEYS.maintenance, {}),
+  }));
   const [saveFeedback, setSaveFeedback] = useState(null);
   const [activeTab, setActiveTab] = useState("system"); // "system" | "preferences"
   const [settingsLoaded, setSettingsLoaded] = useState(false);
@@ -185,6 +193,7 @@ export default function Settings() {
         setDataCollection((d) => ({ ...d, ...loadFromStorage("wqms_data_collection", {}) }));
         setWqiWeights((w) => ({ ...w, ...loadFromStorage(WQI_WEIGHTS_KEY, {}) }));
         setNotifications((n) => ({ ...n, ...loadFromStorage(NOTIFICATIONS_KEY, {}) }));
+        setMaintenance((m) => ({ ...m, ...loadFromStorage(SETTINGS_KEYS.maintenance, {}) }));
       })
       .finally(() => setSettingsLoaded(true));
   }, []);
@@ -246,6 +255,24 @@ export default function Settings() {
     saveToStorage(NOTIFICATIONS_KEY, next);
   };
 
+  const updateAlertLogic = (key, value) => {
+    const n = parseFloat(value);
+    if (!isNaN(n) && n >= 0) {
+      const next = { ...alertLogic, [key]: n };
+      setAlertLogic(next);
+      saveAlertLogic(next);
+    }
+  };
+
+  const updateMaintenance = (key, value) => {
+    const n = parseInt(value, 10);
+    if (!isNaN(n) && n >= 1) {
+      const next = { ...maintenance, [key]: n };
+      setMaintenance(next);
+      saveToStorage(SETTINGS_KEYS.maintenance, next);
+    }
+  };
+
   const handleSaveAll = async () => {
     const prevThresholds = loadFromStorage("wqms_last_synced_thresholds", {});
     const thresholdKeys = ["temperatureMin", "temperatureMax", "pHMin", "pHMax", "turbidityMax", "dissolvedOxygenMin", "nh3Max"];
@@ -258,6 +285,7 @@ export default function Settings() {
       wqms_data_collection: dataCollection,
       [WQI_WEIGHTS_KEY]: wqiWeights,
       [NOTIFICATIONS_KEY]: notifications,
+      [SETTINGS_KEYS.maintenance]: maintenance,
     };
     try {
       await saveSettingsToSupabaseAndLocal(settingsByKey);
@@ -614,6 +642,54 @@ export default function Settings() {
           </div>
         </section>
 
+        {/* Alert Logic */}
+        <section className="settings-section card">
+          <div className="card__header">
+            <h2 className="card__title">Alert Logic</h2>
+            <p className="card__desc">Advanced detection behaviour for each parameter.</p>
+          </div>
+          <div className="card__body">
+            <div className="settings-grid">
+              <label className="settings-label">
+                <span>pH hysteresis offset</span>
+                <input
+                  type="number"
+                  min={0}
+                  max={2}
+                  step="0.05"
+                  className="settings-input"
+                  value={alertLogic.pHHysteresisOffset ?? DEFAULT_ALERT_LOGIC.pHHysteresisOffset}
+                  onChange={(e) => updateAlertLogic("pHHysteresisOffset", e.target.value)}
+                  aria-label="pH hysteresis offset"
+                />
+                <span className="settings-helper">
+                  pH alert clears only once value returns past threshold ± this offset. Default: 0.2
+                </span>
+              </label>
+              <label className="settings-label">
+                <span>NH₃ slope limit (mg/L per interval)</span>
+                <input
+                  type="number"
+                  min={0}
+                  max={5}
+                  step="0.01"
+                  className="settings-input"
+                  value={alertLogic.nh3SlopeLimit ?? DEFAULT_ALERT_LOGIC.nh3SlopeLimit}
+                  onChange={(e) => updateAlertLogic("nh3SlopeLimit", e.target.value)}
+                  aria-label="NH3 slope limit"
+                />
+                <span className="settings-helper">
+                  Rapid-rise alert fires if NH₃ delta between consecutive readings exceeds this. Default: 0.15
+                </span>
+              </label>
+            </div>
+            <p className="settings-helper" style={{ marginTop: "0.75rem" }}>
+              <strong>Dissolved O₂:</strong> alert requires 2 consecutive readings below minimum (temporal persistence).<br />
+              <strong>Turbidity:</strong> alert uses a 2-sample moving average instead of the raw instantaneous value.
+            </p>
+          </div>
+        </section>
+
         {/* Data collection & updates */}
         <section className="settings-section card">
           <div className="card__header">
@@ -739,6 +815,64 @@ export default function Settings() {
                 </label>
               </div>
             )}
+          </div>
+        </section>
+
+        {/* Maintenance Schedule */}
+        <section className="settings-section card">
+          <div className="card__header">
+            <h2 className="card__title">Maintenance Schedule</h2>
+            <p className="card__desc">
+              Set how often nodes should be serviced. An alert is raised when a node exceeds this interval since its last recorded maintenance.
+            </p>
+          </div>
+          <div className="card__body">
+            <div className="settings-maintenance-options">
+              {[
+                { label: "2 Weeks", days: 14 },
+                { label: "1 Month", days: 30 },
+                { label: "2 Months", days: 60 },
+                { label: "3 Months", days: 90 },
+                { label: "6 Months", days: 180 },
+                { label: "Custom", days: null },
+              ].map((opt) => {
+                const isCustomOption = opt.days === null;
+                const isPreset = !isCustomOption;
+                const isActive = isPreset
+                  ? maintenance.intervalDays === opt.days
+                  : ![14, 30, 60, 90, 180].includes(maintenance.intervalDays);
+                return (
+                  <button
+                    key={opt.label}
+                    type="button"
+                    className={`settings-maintenance-chip${isActive ? " settings-maintenance-chip--active" : ""}`}
+                    onClick={() => {
+                      if (isPreset) updateMaintenance("intervalDays", opt.days);
+                    }}
+                    aria-pressed={isActive}
+                  >
+                    {opt.label}
+                  </button>
+                );
+              })}
+            </div>
+            <div className="settings-maintenance-custom">
+              <label className="settings-label" style={{ maxWidth: 260 }}>
+                <span>Custom interval (days)</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={365}
+                  className="settings-input"
+                  value={maintenance.intervalDays}
+                  onChange={(e) => updateMaintenance("intervalDays", e.target.value)}
+                  aria-label="Maintenance interval in days"
+                />
+              </label>
+              <p className="settings-helper">
+                Current: alert fires after <strong>{maintenance.intervalDays} day{maintenance.intervalDays !== 1 ? "s" : ""}</strong> without maintenance.
+              </p>
+            </div>
           </div>
         </section>
 

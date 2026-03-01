@@ -279,6 +279,49 @@
   border-color: rgba(27, 156, 133, 0.4);
 }
 
+/* ── Maintenance Schedule card ── */
+.settings-maintenance-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.settings-maintenance-chip {
+  padding: 8px 18px;
+  border: 1px solid var(--border);
+  background: var(--panel-dark);
+  color: var(--text);
+  border-radius: 999px;
+  font-size: 0.875rem;
+  font-family: inherit;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.18s, border-color 0.18s, color 0.18s;
+}
+
+.settings-maintenance-chip:hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.settings-maintenance-chip--active {
+  background: rgba(141, 218, 213, 0.18);
+  border-color: rgba(141, 218, 213, 0.5);
+  color: var(--text);
+}
+
+[data-theme="light"] .settings-maintenance-chip--active {
+  background: rgba(27, 156, 133, 0.12);
+  border-color: rgba(27, 156, 133, 0.4);
+}
+
+.settings-maintenance-custom {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
 /* Toggle switch (checkbox) */
 .settings-toggle-wrap {
   display: inline-flex;

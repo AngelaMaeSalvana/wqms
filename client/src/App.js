@@ -4,6 +4,8 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import Layout from "./components/Layout.js";
 import { syncSettingsFromSupabase } from "./utils/settingsStorage";
 import ErrorBoundary from "./components/ErrorBoundary.js";
+import { TestRunProvider } from "./contexts/TestRunContext";
+import TestRunToast from "./components/TestRunToast";
 
 import Dashboard from "./pages/Dashboard";
 import Reports from "./pages/Reports";
@@ -11,7 +13,9 @@ import SensorLogs from "./pages/SensorLogs";
 import Map from "./pages/Map";
 import Alerts from "./pages/Alerts";
 import Nodes from "./pages/Nodes";
+import InactiveNodes from "./pages/InactiveNodes";
 import Settings from "./pages/Settings";
+import PerformanceTest from "./pages/PerformanceTest";
 
 import "./App.css";
 import { sendEventNotification } from "./services/emailService";
@@ -36,23 +40,28 @@ export default function App() {
   return (
     <ErrorBoundary>
       <BrowserRouter>
-        <>
-          <Routes>
-            <Route element={<Layout />}>
-              <Route path="/" element={<Navigate to="/dashboard" replace />} />
-              <Route path="/dashboard" element={<Dashboard />} />
-              <Route path="/reports" element={<Reports />} />
-              <Route path="/sensor-logs" element={<SensorLogs />} />
-              <Route path="/map" element={<Map />} />
-              <Route path="/nodes" element={<Nodes />} />
-              <Route path="/alerts" element={<Alerts />} />
-              <Route path="/settings" element={<Settings />} />
-            </Route>
-          </Routes>
-          <span className="app-dev-notice" aria-hidden="true">
-            This app is still in development phase
-          </span>
-        </>
+        <TestRunProvider>
+          <>
+            <Routes>
+              <Route element={<Layout />}>
+                <Route path="/" element={<Navigate to="/dashboard" replace />} />
+                <Route path="/dashboard" element={<Dashboard />} />
+                <Route path="/reports" element={<Reports />} />
+                <Route path="/sensor-logs" element={<SensorLogs />} />
+                <Route path="/map" element={<Map />} />
+                <Route path="/nodes" element={<Nodes />} />
+                <Route path="/nodes/inactive" element={<InactiveNodes />} />
+                <Route path="/alerts" element={<Alerts />} />
+                <Route path="/settings" element={<Settings />} />
+                <Route path="/performance-test" element={<PerformanceTest />} />
+              </Route>
+            </Routes>
+            <TestRunToast />
+            <span className="app-dev-notice" aria-hidden="true">
+              This app is still in development phase
+            </span>
+          </>
+        </TestRunProvider>
       </BrowserRouter>
     </ErrorBoundary>
   );

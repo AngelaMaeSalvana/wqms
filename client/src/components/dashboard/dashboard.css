@@ -131,6 +131,15 @@
   color: var(--text);
 }
 
+.node-selector-floating__item--inactive {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.node-selector-floating__item--inactive:hover {
+  background: transparent;
+}
+
 @media (max-width: 1024px), (max-height: 768px) {
   .node-selector-floating {
     display: flex !important;
@@ -274,6 +283,19 @@
 .wqi-card--minimal .wqiLabel {
   font-size: 0.9rem;
   margin-top: 0;
+}
+
+/* Today card header: title + classification */
+.today-card__header {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.today-card__classification {
+  flex-shrink: 0;
 }
 
 /* Today card tabs view */
@@ -514,6 +536,20 @@
 
 .alerts-summary-card .card__body {
   padding-top: 8px;
+  /* Don't force the body to stretch — let it size to its content */
+  flex: 0 1 auto;
+  overflow: visible;
+}
+
+/* Only scroll when there are enough items to need it */
+.alerts-summary-card--scrollable .card__body {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.alerts-summary-card--scrollable .alerts-notifications-list {
+  overflow-y: auto;
 }
 
 .export-dropdown {
@@ -681,39 +717,6 @@
   border-radius: 12px;
 }
 
-.alerts-summary-breakdown {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-bottom: 10px;
-}
-
-.alerts-summary-badge {
-  font-size: 0.75rem;
-  font-weight: 600;
-  padding: 4px 8px;
-  border-radius: 6px;
-}
-
-.alerts-summary-badge--critical {
-  background: rgba(239, 68, 68, 0.2);
-  color: var(--danger);
-}
-
-.alerts-summary-badge--warning {
-  background: rgba(234, 179, 8, 0.2);
-  color: var(--warning);
-}
-
-.alerts-summary-badge--info {
-  background: rgba(34, 197, 94, 0.2);
-  color: var(--success);
-}
-
-.alerts-summary-emoji {
-  margin-right: 4px;
-}
-
 .alerts-summary-pills {
   display: flex;
   flex-wrap: wrap;
@@ -722,7 +725,10 @@
 }
 
 .alerts-summary-pill {
-  padding: 6px 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
   font-size: 0.8rem;
   font-weight: 500;
   font-family: inherit;
@@ -739,10 +745,73 @@
   background: rgba(255, 255, 255, 0.06);
 }
 
+/* Active state — neutral (All) */
 .alerts-summary-pill--active {
   color: var(--text);
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+/* Active state — per severity */
+.alerts-summary-pill--critical.alerts-summary-pill--active {
+  background: rgba(212, 91, 91, 0.15);
+  border-color: rgba(212, 91, 91, 0.4);
+  color: var(--danger, #d45b5b);
+}
+
+.alerts-summary-pill--warning.alerts-summary-pill--active {
+  background: rgba(240, 165, 0, 0.15);
+  border-color: rgba(240, 165, 0, 0.4);
+  color: var(--warning, #f0a500);
+}
+
+.alerts-summary-pill--info.alerts-summary-pill--active {
+  background: rgba(68, 211, 126, 0.15);
+  border-color: rgba(68, 211, 126, 0.4);
+  color: var(--success, #44d37e);
+}
+
+/* Colored dot inside the pill */
+.alerts-summary-pill-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.alerts-summary-pill-dot--critical { background: var(--danger, #d45b5b); }
+.alerts-summary-pill-dot--warning  { background: var(--warning, #f0a500); }
+.alerts-summary-pill-dot--info     { background: var(--success, #44d37e); }
+
+/* Count badge inside the pill */
+.alerts-summary-pill-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  border-radius: 999px;
   background: rgba(255, 255, 255, 0.1);
-  border-color: var(--primary);
+  color: var(--text-muted);
+  line-height: 1;
+}
+
+.alerts-summary-pill-count--critical {
+  background: rgba(212, 91, 91, 0.2);
+  color: var(--danger, #d45b5b);
+}
+
+.alerts-summary-pill-count--warning {
+  background: rgba(240, 165, 0, 0.2);
+  color: var(--warning, #f0a500);
+}
+
+.alerts-summary-pill-count--info {
+  background: rgba(68, 211, 126, 0.2);
+  color: var(--success, #44d37e);
 }
 
 .alerts-summary-footer {
@@ -782,7 +851,7 @@
 .alerts-notifications-list {
   flex: 1;
   min-height: 0;
-  overflow-y: auto;
+  overflow-y: visible;
   gap: 0;
 }
 

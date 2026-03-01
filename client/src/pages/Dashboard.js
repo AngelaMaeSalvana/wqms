@@ -14,6 +14,7 @@ import { buildAlertsForAllNodes } from "../utils/alertsData";
 import { getNodes, loadNodes } from "../utils/nodesStorage";
 import api from "../services/api";
 import { useSensorTest } from "../hooks/useSensorTest";
+import { useNodeStatus } from "../hooks/useNodeStatus";
 import { useAlertEmailNotifications } from "../hooks/useAlertEmailNotifications";
 import { applyCalibrationToReadings } from "../utils/calibration";
 import { PageLoader } from "../components/LoadingSkeleton";
@@ -75,27 +76,29 @@ export default function Dashboard() {
   const [selectedNodeId, setSelectedNodeId] = useState(getStoredNodeId);
   const [todayReadings, setTodayReadings] = useState([]);
   const [readingsByNode, setReadingsByNode] = useState({});
+  const [prevReadingsByNode, setPrevReadingsByNode] = useState({});
   const [readingsLoaded, setReadingsLoaded] = useState(false);
   const [nodesLoaded, setNodesLoaded] = useState(false);
   const [lastUpdated, setLastUpdated] = useState(() => new Date());
   const [isLoadingAlerts] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
-  const getReadingsForNode = useCallback((nodeId) => readingsByNode[nodeId] || {}, [readingsByNode]);
-  const sensorTest = useSensorTest(getReadingsForNode);
+  const sensorTest = useSensorTest();
+  const { nodeStatuses } = useNodeStatus(nodes);
 
   useEffect(() => {
     loadNodes()
       .then(() => {
         const list = getNodes();
         setNodes(list);
+        const activeList = list.filter((n) => n.active !== false);
         const stored = getStoredNodeId();
-        const validStored = stored && list.some((n) => n.id === stored);
+        const validStored = stored && activeList.some((n) => n.id === stored);
         setSelectedNodeId((id) => {
-          const validCurrent = id && list.some((n) => n.id === id);
+          const validCurrent = id && activeList.some((n) => n.id === id);
           if (validCurrent) return id;
           if (validStored) return stored;
-          return list[0]?.id ?? "";
+          return activeList[0]?.id ?? list[0]?.id ?? "";
         });
       })
       .finally(() => setNodesLoaded(true));
@@ -115,35 +118,42 @@ export default function Dashboard() {
         const list = applyCalibrationToReadings(Array.isArray(rows) ? rows : []);
         setTodayReadings(list);
         const byNode = {};
-        list.forEach((r) => {
+        const prevByNode = {};
+        const sorted = [...list].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+        sorted.forEach((r) => {
           const nid = r.node_id || r.nodeId || "1";
-          if (!byNode[nid] || new Date(r.timestamp) > new Date(byNode[nid].timestamp)) {
-            byNode[nid] = {
-              ...r,
-              temperature: r.temperature,
-              pH: r.ph,
-              ph: r.ph,
-              turbidity: r.turbidity,
-              dissolvedOxygen: r.dissolved_oxygen,
-              dissolved_oxygen: r.dissolved_oxygen,
-              do: r.dissolved_oxygen,
-              tan: r.tan ?? r.TAN,
-              nh3: getNH3FromReading(r),
-              NH3: getNH3FromReading(r),
-              flowRate: r.flow_rate ?? r.flowRate,
-            };
-          }
+          const mapped = {
+            ...r,
+            temperature: r.temperature,
+            pH: r.ph,
+            ph: r.ph,
+            turbidity: r.turbidity,
+            dissolvedOxygen: r.dissolved_oxygen,
+            dissolved_oxygen: r.dissolved_oxygen,
+            do: r.dissolved_oxygen,
+            tan: r.tan ?? r.TAN,
+            nh3: getNH3FromReading(r),
+            NH3: getNH3FromReading(r),
+            flowRate: r.flow_rate ?? r.flowRate,
+          };
+          if (byNode[nid]) prevByNode[nid] = byNode[nid];
+          byNode[nid] = mapped;
         });
         setReadingsByNode(byNode);
+        setPrevReadingsByNode(prevByNode);
       })
       .catch(() => {
         setTodayReadings([]);
         setReadingsByNode({});
+        setPrevReadingsByNode({});
       })
       .finally(() => setReadingsLoaded(true));
   }, [lastUpdated]);
 
-  const builtAlerts = useMemo(() => buildAlertsForAllNodes(nodes, readingsByNode), [nodes, readingsByNode]);
+  const builtAlerts = useMemo(
+    () => buildAlertsForAllNodes(nodes, readingsByNode, nodeStatuses, prevReadingsByNode),
+    [nodes, readingsByNode, nodeStatuses, prevReadingsByNode]
+  );
 
   const sensorTestAlerts = useMemo(() => {
     const res = sensorTest.results;
@@ -293,8 +303,8 @@ export default function Dashboard() {
   const isMobile = useIsMobile(768);
 
   const handleSensorTest = useCallback(
-    (nodeId, forceRun = false) => {
-      sensorTest.runTest(nodeId ?? selectedNode?.id, forceRun);
+    (nodeId) => {
+      sensorTest.runTest(nodeId ?? selectedNode?.id);
     },
     [selectedNode?.id, sensorTest]
   );
@@ -313,19 +323,19 @@ export default function Dashboard() {
         <div>
           <h1 className="dash__title">Dashboard</h1>
         </div>
-        <PageDateWithStatus lastUpdated={lastUpdated} className="dash__date" />
+        <PageDateWithStatus lastUpdated={lastUpdated} className="dash__date" showClassification={false} />
       </header>
 
       <div className="dash__controls">
         <NodeSelector
-          nodes={nodes}
+          nodes={nodes.filter((n) => n.active !== false)}
           value={selectedNodeId}
           onChange={(id) => {
             setSelectedNodeId(id);
             setStoredNodeId(id);
           }}
         />
-        <NodeStatus status={selectedNode?.status} />
+        <NodeStatus status={selectedNode ? (nodeStatuses[selectedNode.id] ?? 'offline') : 'offline'} />
       </div>
 
       <div className="dash__grid">
@@ -349,7 +359,7 @@ export default function Dashboard() {
             selectedNode={selectedNode}
             onTestSensor={handleSensorTest}
             isTestingSensor={sensorTest.isTesting}
-            sensorTestResults={sensorTest.results}
+            sensorTestResults={sensorTest.allResults}
           />
         </section>
         <section className="dash__cell dash__cell--alerts">
@@ -374,7 +384,7 @@ export default function Dashboard() {
             aria-labelledby="sensor-test-modal-title"
           >
             <header className="section-header">
-              <h2 id="sensor-test-modal-title">Sensor Test Results</h2>
+              <h2 id="sensor-test-modal-title">Sensor Status</h2>
               <button
                 type="button"
                 className="ghost-btn"
@@ -388,7 +398,7 @@ export default function Dashboard() {
               {sensorTest.isTesting ? (
                 <div className="sensor-test-loading">
                   <span className="sensor-test-loading-icon">⚙️</span>
-                  <p>Testing sensors...</p>
+                  <p>Checking sensor data...</p>
                 </div>
               ) : sensorTest.results ? (
                 <>
@@ -400,11 +410,15 @@ export default function Dashboard() {
                         ? "✅"
                         : sensorTest.results.status === "warning"
                         ? "⚠️"
+                        : sensorTest.results.status === "offline"
+                        ? "📡"
                         : "❌"}
                     </span>
                     <p className="sensor-test-summary-message">{sensorTest.results.message}</p>
                     <p className="sensor-test-summary-time">
-                      {new Date(sensorTest.results.timestamp).toLocaleString()}
+                      {sensorTest.results.dataAge
+                        ? `Last data: ${sensorTest.results.dataAge}`
+                        : `Checked: ${new Date(sensorTest.results.timestamp).toLocaleString()}`}
                     </p>
                   </div>
                   <div className="sensor-test-list">
@@ -417,7 +431,7 @@ export default function Dashboard() {
                         </div>
                         <div className="sensor-test-item-value">
                           <span className={`sensor-test-badge sensor-test-badge--${s.status}`}>
-                            {s.status === "pass" ? "PASS" : "FAIL"}
+                            {s.status === "pass" ? "PASS" : s.status === "stale" ? "NO DATA" : "FAIL"}
                           </span>
                           <span>{s.value}</span>
                         </div>
@@ -427,9 +441,9 @@ export default function Dashboard() {
                   <button
                     type="button"
                     className="ghost-btn sensor-test-run-again"
-                    onClick={() => handleSensorTest(sensorTest.results.nodeId, true)}
+                    onClick={() => handleSensorTest(sensorTest.results.nodeId)}
                   >
-                    Run Test Again
+                    Refresh
                   </button>
                 </>
               ) : null}

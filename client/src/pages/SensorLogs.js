@@ -1,4 +1,6 @@
-import React, { useState, useRef, useEffect, useMemo } from "react";
+import React, { useState, useRef, useEffect, useMemo, useCallback } from "react";
+import { createPortal } from "react-dom";
+import { useNavigate } from "react-router-dom";
 import { jsPDF } from "jspdf";
 import { autoTable } from "jspdf-autotable";
 import PageDateWithStatus from "../components/PageDateWithStatus";
@@ -85,11 +87,13 @@ function downloadBlob(filename, blob) {
   URL.revokeObjectURL(url);
 }
 
-const MIN_PAGE_SIZE = 5;
-const EST_ROW_HEIGHT = 37;
-const EST_HEADER_HEIGHT = 38;
+const ROW_HEIGHT = 41;       // px per data row (padding 8px top+bottom + ~25px content)
+const THEAD_HEIGHT = 41;     // px for the thead row
+const PAGINATION_HEIGHT = 57; // px for pagination bar (padding + border + content)
+const MIN_ROWS = 5;
 
 export default function SensorLogs() {
+  const navigate = useNavigate();
   const lastUpdated = new Date();
   const [search, setSearch] = useState("");
   const [tableDateFrom, setTableDateFrom] = useState("");
@@ -100,24 +104,60 @@ export default function SensorLogs() {
   const [nodes, setNodes] = useState([]);
   const [nodesLoaded, setNodesLoaded] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
+  const [sortPanelOpen, setSortPanelOpen] = useState(false);
   const [sensorReadings, setSensorReadings] = useState([]);
+  const [pageSize, setPageSize] = useState(15);
+  const [selectedRow, setSelectedRow] = useState(null);
   const exportRef = useRef(null);
+  const sortPanelRef = useRef(null);
   const tableWrapRef = useRef(null);
-  const [pageSize, setPageSize] = useState(9);
+  const cardBodyRef = useRef(null);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
 
+  const [isMobile, setIsMobile] = useState(() =>
+    typeof window !== "undefined" ? window.innerWidth <= 768 : false
+  );
   useEffect(() => {
-    const el = tableWrapRef.current;
-    if (!el) return;
-    const ro = new ResizeObserver((entries) => {
-      for (const { contentRect } of entries) {
-        const h = contentRect.height;
-        const rows = Math.max(MIN_PAGE_SIZE, Math.floor((h - EST_HEADER_HEIGHT) / EST_ROW_HEIGHT));
-        setPageSize(rows);
-      }
-    });
-    ro.observe(el);
-    return () => ro.disconnect();
+    const mq = window.matchMedia("(max-width: 768px)");
+    const handler = () => setIsMobile(mq.matches);
+    handler();
+    mq.addEventListener("change", handler);
+    return () => mq.removeEventListener("change", handler);
+  }, []);
+
+  const closeDetail = useCallback(() => setSelectedRow(null), []);
+
+  // Compute page size from viewport height minus all surrounding chrome.
+  // We measure the card body's top offset from the viewport so we account
+  // for the sidebar, header, filters, card header, and padding at every
+  // breakpoint — no hard-coded offsets needed.
+  useEffect(() => {
+    const computeRows = () => {
+      const cardBody = cardBodyRef.current;
+      if (!cardBody) return;
+      const rect = cardBody.getBoundingClientRect();
+      // rect.top = distance from viewport top to where the card body starts
+      // rect.height = current rendered height (may be 0 on scroll-layout)
+      // We want: viewport height - card body top - bottom padding - pagination
+      const vh = window.innerHeight;
+      // On scroll-layout the card body has no fixed height, so we derive
+      // available height from the viewport minus the card body's top position
+      // and a small bottom margin (14–24 px depending on breakpoint).
+      const bottomGap = vh <= 600 ? 12 : vh <= 768 ? 14 : 24;
+      const available = vh - rect.top - bottomGap - PAGINATION_HEIGHT - THEAD_HEIGHT;
+      const rows = Math.max(MIN_ROWS, Math.floor(available / ROW_HEIGHT));
+      setPageSize(rows);
+    };
+
+    // Run once after mount (layout has painted)
+    const raf = requestAnimationFrame(computeRows);
+
+    // Re-run on resize (handles orientation change, window resize, zoom)
+    window.addEventListener("resize", computeRows);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener("resize", computeRows);
+    };
   }, []);
 
   const tableDateRange = useMemo(() => {
@@ -286,9 +326,12 @@ export default function SensorLogs() {
       if (exportRef.current && !exportRef.current.contains(e.target)) {
         setExportOpen(false);
       }
+      if (sortPanelRef.current && !sortPanelRef.current.contains(e.target)) {
+        setSortPanelOpen(false);
+      }
     };
-    document.addEventListener("click", handleClickOutside);
-    return () => document.removeEventListener("click", handleClickOutside);
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
   if (!nodesLoaded) {
@@ -305,7 +348,11 @@ export default function SensorLogs() {
         <div>
           <h1 className="page-title">Sensor Logs</h1>
         </div>
-        <PageDateWithStatus lastUpdated={lastUpdated} className="page-meta sensor-logs-header-meta" />
+        <PageDateWithStatus
+          lastUpdated={lastUpdated}
+          className="page-meta sensor-logs-header-meta"
+          showClassification={false}
+        />
       </header>
 
       <div className="sensor-logs-filters">
@@ -317,33 +364,126 @@ export default function SensorLogs() {
           onChange={(e) => setSearch(e.target.value)}
           aria-label="Search sensor logs"
         />
-        <select
-          className="sensor-logs-node-select"
-          aria-label="Node filter"
-          value={tableNodeFilter}
-          onChange={(e) => setTableNodeFilter(e.target.value)}
-        >
-          <option value="all">All nodes</option>
-          {nodes.map((node) => (
-            <option key={node.id} value={node.id}>
-              {node.id} — {node.name || node.id}
-            </option>
-          ))}
-        </select>
-        <input
-          type="date"
-          className="sensor-logs-date-input"
-          aria-label="From date"
-          value={tableDateFrom}
-          onChange={(e) => setTableDateFrom(e.target.value)}
-        />
-        <input
-          type="date"
-          className="sensor-logs-date-input"
-          aria-label="To date"
-          value={tableDateTo}
-          onChange={(e) => setTableDateTo(e.target.value)}
-        />
+
+        {/* Sort & Filter flyout */}
+        <div className="sl-sort-dropdown" ref={sortPanelRef}>
+          <button
+            type="button"
+            className={`ghost-btn sl-sort-btn${sortPanelOpen ? " sl-sort-btn--active" : ""}`}
+            onClick={() => setSortPanelOpen((v) => !v)}
+            aria-haspopup="true"
+            aria-expanded={sortPanelOpen}
+            aria-label="Sort and filter"
+          >
+            <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path d="M2 4h12M4 8h8M6 12h4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/>
+            </svg>
+            Sort
+            <svg width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden="true" className="sl-sort-chevron">
+              <path d="M2 3.5l3 3 3-3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+            {(tableSort.column !== "date" || tableSort.direction !== "desc" || tableNodeFilter !== "all" || tableDateFrom || tableDateTo) && (
+              <span className="sl-sort-badge" aria-label="Filters active" />
+            )}
+          </button>
+
+          {sortPanelOpen && (
+            <div className="sl-sort-panel" role="menu">
+              {/* Sort By */}
+              <div className="sl-sort-section">
+                <span className="sl-sort-section-label">Sort by</span>
+                {[
+                  { col: "date", dir: "desc", label: "Newest first" },
+                  { col: "date", dir: "asc",  label: "Oldest first" },
+                  { col: "wqi",  dir: "desc", label: "WQI (high to low)" },
+                  { col: "wqi",  dir: "asc",  label: "WQI (low to high)" },
+                ].map((opt) => {
+                  const isActive = tableSort.column === opt.col && tableSort.direction === opt.dir;
+                  return (
+                    <button
+                      key={opt.label}
+                      type="button"
+                      role="menuitemradio"
+                      aria-checked={isActive}
+                      className={`sl-sort-item${isActive ? " sl-sort-item--active" : ""}`}
+                      onClick={() => setTableSort({ column: opt.col, direction: opt.dir })}
+                    >
+                      {isActive && (
+                        <svg width="10" height="10" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                          <circle cx="6" cy="6" r="4" fill="currentColor"/>
+                        </svg>
+                      )}
+                      {opt.label}
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="sl-sort-divider" />
+
+              {/* Node filter */}
+              <div className="sl-sort-section">
+                <span className="sl-sort-section-label">Node</span>
+                {[{ id: "all", label: "All nodes" }, ...nodes.map((n) => ({ id: n.id, label: `${n.id} — ${n.name || n.id}` }))].map((opt) => {
+                  const isActive = tableNodeFilter === opt.id;
+                  return (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      role="menuitemradio"
+                      aria-checked={isActive}
+                      className={`sl-sort-item${isActive ? " sl-sort-item--active" : ""}`}
+                      onClick={() => setTableNodeFilter(opt.id)}
+                    >
+                      {isActive && (
+                        <svg width="10" height="10" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                          <circle cx="6" cy="6" r="4" fill="currentColor"/>
+                        </svg>
+                      )}
+                      {opt.label}
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="sl-sort-divider" />
+
+              {/* Date range */}
+              <div className="sl-sort-section sl-sort-section--dates">
+                <span className="sl-sort-section-label">Date range</span>
+                <label className="sl-sort-date-label">
+                  From
+                  <input
+                    type="date"
+                    className="sl-sort-date-input"
+                    aria-label="From date"
+                    value={tableDateFrom}
+                    onChange={(e) => setTableDateFrom(e.target.value)}
+                  />
+                </label>
+                <label className="sl-sort-date-label">
+                  To
+                  <input
+                    type="date"
+                    className="sl-sort-date-input"
+                    aria-label="To date"
+                    value={tableDateTo}
+                    onChange={(e) => setTableDateTo(e.target.value)}
+                  />
+                </label>
+                {(tableDateFrom || tableDateTo) && (
+                  <button
+                    type="button"
+                    className="sl-sort-clear-dates"
+                    onClick={() => { setTableDateFrom(""); setTableDateTo(""); }}
+                  >
+                    Clear dates
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
         <div className="sensor-logs-export-wrap" ref={exportRef}>
           <button
             type="button"
@@ -372,6 +512,14 @@ export default function SensorLogs() {
             </div>
           )}
         </div>
+        <button
+          type="button"
+          className="ghost-btn sensor-logs-perf-btn"
+          onClick={() => navigate("/performance-test")}
+          aria-label="Performance Test"
+        >
+          Performance Test
+        </button>
       </div>
 
       <section className="sensor-logs-table-card card">
@@ -379,151 +527,74 @@ export default function SensorLogs() {
           <h2 className="card__title">Sensor data</h2>
           <p className="card__desc">All nodes and parameters, saved every hour. Use filters above to narrow results.</p>
         </div>
-        <div className="card__body">
+        <div className="card__body" ref={cardBodyRef}>
           <div className="sensor-logs-data-table-wrap" ref={tableWrapRef}>
             <table className="sensor-logs-data-table" role="table">
               <thead>
                 <tr>
                   <th>
-                    <button
-                      type="button"
-                      className={`sensor-logs-th-btn ${tableSort.column === "date" ? "sensor-logs-th-btn--active" : ""}`}
-                      onClick={() =>
-                        setTableSort((s) => ({
-                          column: "date",
-                          direction: s.column === "date" && s.direction === "desc" ? "asc" : "desc",
-                        }))
-                      }
-                    >
+                    <button type="button" className={`sensor-logs-th-btn ${tableSort.column === "date" ? "sensor-logs-th-btn--active" : ""}`}
+                      onClick={() => setTableSort((s) => ({ column: "date", direction: s.column === "date" && s.direction === "desc" ? "asc" : "desc" }))}>
                       Date {tableSort.column === "date" && (tableSort.direction === "asc" ? "↑" : "↓")}
                     </button>
                   </th>
                   <th>
-                    <button
-                      type="button"
-                      className={`sensor-logs-th-btn ${tableSort.column === "time" ? "sensor-logs-th-btn--active" : ""}`}
-                      onClick={() =>
-                        setTableSort((s) => ({
-                          column: "time",
-                          direction: s.column === "time" && s.direction === "desc" ? "asc" : "desc",
-                        }))
-                      }
-                    >
+                    <button type="button" className={`sensor-logs-th-btn ${tableSort.column === "time" ? "sensor-logs-th-btn--active" : ""}`}
+                      onClick={() => setTableSort((s) => ({ column: "time", direction: s.column === "time" && s.direction === "desc" ? "asc" : "desc" }))}>
                       Time {tableSort.column === "time" && (tableSort.direction === "asc" ? "↑" : "↓")}
                     </button>
                   </th>
                   <th>
-                    <button
-                      type="button"
-                      className={`sensor-logs-th-btn ${tableSort.column === "node" ? "sensor-logs-th-btn--active" : ""}`}
-                      onClick={() =>
-                        setTableSort((s) => ({
-                          column: "node",
-                          direction: s.column === "node" && s.direction === "asc" ? "desc" : "asc",
-                        }))
-                      }
-                    >
+                    <button type="button" className={`sensor-logs-th-btn ${tableSort.column === "node" ? "sensor-logs-th-btn--active" : ""}`}
+                      onClick={() => setTableSort((s) => ({ column: "node", direction: s.column === "node" && s.direction === "asc" ? "desc" : "asc" }))}>
                       Node {tableSort.column === "node" && (tableSort.direction === "asc" ? "↑" : "↓")}
                     </button>
                   </th>
-                  <th>
-                    <button
-                      type="button"
-                      className={`sensor-logs-th-btn ${tableSort.column === "temperature" ? "sensor-logs-th-btn--active" : ""}`}
-                      onClick={() =>
-                        setTableSort((s) => ({
-                          column: "temperature",
-                          direction: s.column === "temperature" && s.direction === "desc" ? "asc" : "desc",
-                        }))
-                      }
-                    >
+                  {/* Desktop-only columns */}
+                  <th className="sensor-logs-col-desktop">
+                    <button type="button" className={`sensor-logs-th-btn ${tableSort.column === "temperature" ? "sensor-logs-th-btn--active" : ""}`}
+                      onClick={() => setTableSort((s) => ({ column: "temperature", direction: s.column === "temperature" && s.direction === "desc" ? "asc" : "desc" }))}>
                       Temp {tableSort.column === "temperature" && (tableSort.direction === "asc" ? "↑" : "↓")}
                     </button>
                   </th>
-                  <th>
-                    <button
-                      type="button"
-                      className={`sensor-logs-th-btn ${tableSort.column === "pH" ? "sensor-logs-th-btn--active" : ""}`}
-                      onClick={() =>
-                        setTableSort((s) => ({
-                          column: "pH",
-                          direction: s.column === "pH" && s.direction === "desc" ? "asc" : "desc",
-                        }))
-                      }
-                    >
+                  <th className="sensor-logs-col-desktop">
+                    <button type="button" className={`sensor-logs-th-btn ${tableSort.column === "pH" ? "sensor-logs-th-btn--active" : ""}`}
+                      onClick={() => setTableSort((s) => ({ column: "pH", direction: s.column === "pH" && s.direction === "desc" ? "asc" : "desc" }))}>
                       pH {tableSort.column === "pH" && (tableSort.direction === "asc" ? "↑" : "↓")}
                     </button>
                   </th>
-                  <th>
-                    <button
-                      type="button"
-                      className={`sensor-logs-th-btn ${tableSort.column === "turbidity" ? "sensor-logs-th-btn--active" : ""}`}
-                      onClick={() =>
-                        setTableSort((s) => ({
-                          column: "turbidity",
-                          direction: s.column === "turbidity" && s.direction === "desc" ? "asc" : "desc",
-                        }))
-                      }
-                    >
+                  <th className="sensor-logs-col-desktop">
+                    <button type="button" className={`sensor-logs-th-btn ${tableSort.column === "turbidity" ? "sensor-logs-th-btn--active" : ""}`}
+                      onClick={() => setTableSort((s) => ({ column: "turbidity", direction: s.column === "turbidity" && s.direction === "desc" ? "asc" : "desc" }))}>
                       Turb {tableSort.column === "turbidity" && (tableSort.direction === "asc" ? "↑" : "↓")}
                     </button>
                   </th>
-                  <th>
-                    <button
-                      type="button"
-                      className={`sensor-logs-th-btn ${tableSort.column === "dissolvedOxygen" ? "sensor-logs-th-btn--active" : ""}`}
-                      onClick={() =>
-                        setTableSort((s) => ({
-                          column: "dissolvedOxygen",
-                          direction: s.column === "dissolvedOxygen" && s.direction === "desc" ? "asc" : "desc",
-                        }))
-                      }
-                    >
+                  <th className="sensor-logs-col-desktop">
+                    <button type="button" className={`sensor-logs-th-btn ${tableSort.column === "dissolvedOxygen" ? "sensor-logs-th-btn--active" : ""}`}
+                      onClick={() => setTableSort((s) => ({ column: "dissolvedOxygen", direction: s.column === "dissolvedOxygen" && s.direction === "desc" ? "asc" : "desc" }))}>
                       DO {tableSort.column === "dissolvedOxygen" && (tableSort.direction === "asc" ? "↑" : "↓")}
                     </button>
                   </th>
-                  <th>
-                    <button
-                      type="button"
-                      className={`sensor-logs-th-btn ${tableSort.column === "nh3" ? "sensor-logs-th-btn--active" : ""}`}
-                      onClick={() =>
-                        setTableSort((s) => ({
-                          column: "nh3",
-                          direction: s.column === "nh3" && s.direction === "desc" ? "asc" : "desc",
-                        }))
-                      }
-                    >
+                  <th className="sensor-logs-col-desktop">
+                    <button type="button" className={`sensor-logs-th-btn ${tableSort.column === "nh3" ? "sensor-logs-th-btn--active" : ""}`}
+                      onClick={() => setTableSort((s) => ({ column: "nh3", direction: s.column === "nh3" && s.direction === "desc" ? "asc" : "desc" }))}>
                       NH₃ {tableSort.column === "nh3" && (tableSort.direction === "asc" ? "↑" : "↓")}
                     </button>
                   </th>
-                  <th>
-                    <button
-                      type="button"
-                      className={`sensor-logs-th-btn ${tableSort.column === "flowRate" ? "sensor-logs-th-btn--active" : ""}`}
-                      onClick={() =>
-                        setTableSort((s) => ({
-                          column: "flowRate",
-                          direction: s.column === "flowRate" && s.direction === "desc" ? "asc" : "desc",
-                        }))
-                      }
-                    >
+                  <th className="sensor-logs-col-desktop">
+                    <button type="button" className={`sensor-logs-th-btn ${tableSort.column === "flowRate" ? "sensor-logs-th-btn--active" : ""}`}
+                      onClick={() => setTableSort((s) => ({ column: "flowRate", direction: s.column === "flowRate" && s.direction === "desc" ? "asc" : "desc" }))}>
                       Flow {tableSort.column === "flowRate" && (tableSort.direction === "asc" ? "↑" : "↓")}
                     </button>
                   </th>
                   <th>
-                    <button
-                      type="button"
-                      className={`sensor-logs-th-btn ${tableSort.column === "wqi" ? "sensor-logs-th-btn--active" : ""}`}
-                      onClick={() =>
-                        setTableSort((s) => ({
-                          column: "wqi",
-                          direction: s.column === "wqi" && s.direction === "desc" ? "asc" : "desc",
-                        }))
-                      }
-                    >
+                    <button type="button" className={`sensor-logs-th-btn ${tableSort.column === "wqi" ? "sensor-logs-th-btn--active" : ""}`}
+                      onClick={() => setTableSort((s) => ({ column: "wqi", direction: s.column === "wqi" && s.direction === "desc" ? "asc" : "desc" }))}>
                       WQI {tableSort.column === "wqi" && (tableSort.direction === "asc" ? "↑" : "↓")}
                     </button>
                   </th>
+                  {/* Mobile chevron column */}
+                  <th className="sensor-logs-col-mobile" aria-hidden="true" />
                 </tr>
               </thead>
               <tbody>
@@ -540,19 +611,27 @@ export default function SensorLogs() {
                     const timeStr = row.date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
                     const nodeLabel = row.nodeName !== row.nodeId ? `${row.nodeId} — ${row.nodeName}` : row.nodeId;
                     return (
-                      <tr key={key}>
+                      <tr
+                        key={key}
+                        className={isMobile ? "sensor-logs-row-clickable" : ""}
+                        onClick={isMobile ? () => setSelectedRow(row) : undefined}
+                        tabIndex={isMobile ? 0 : undefined}
+                        onKeyDown={isMobile ? (e) => e.key === "Enter" && setSelectedRow(row) : undefined}
+                        aria-label={isMobile ? `View details for ${dateStr} ${timeStr}` : undefined}
+                      >
                         <td>{highlightMatch(dateStr, search)}</td>
                         <td>{highlightMatch(timeStr, search)}</td>
                         <td>
                           <span className="sensor-logs-data-table-node-id">{highlightMatch(nodeLabel, search)}</span>
                         </td>
-                        <td>{highlightMatch(row.temperature, search)}</td>
-                        <td>{highlightMatch(row.pH, search)}</td>
-                        <td>{highlightMatch(row.turbidity, search)}</td>
-                        <td>{highlightMatch(row.dissolvedOxygen, search)}</td>
-                        <td>{highlightMatch(row.nh3, search)}</td>
-                        <td>{highlightMatch(row.flowRate, search)}</td>
+                        <td className="sensor-logs-col-desktop">{highlightMatch(row.temperature, search)}</td>
+                        <td className="sensor-logs-col-desktop">{highlightMatch(row.pH, search)}</td>
+                        <td className="sensor-logs-col-desktop">{highlightMatch(row.turbidity, search)}</td>
+                        <td className="sensor-logs-col-desktop">{highlightMatch(row.dissolvedOxygen, search)}</td>
+                        <td className="sensor-logs-col-desktop">{highlightMatch(row.nh3, search)}</td>
+                        <td className="sensor-logs-col-desktop">{highlightMatch(row.flowRate, search)}</td>
                         <td>{highlightMatch(row.wqi != null ? row.wqi : "—", search)}</td>
+                        <td className="sensor-logs-col-mobile sensor-logs-row-chevron" aria-hidden="true">›</td>
                       </tr>
                     );
                   })
@@ -573,7 +652,8 @@ export default function SensorLogs() {
                   disabled={tablePage <= 1}
                   aria-label="Previous page"
                 >
-                  Previous
+                  <span className="sensor-logs-pagination-label">Previous</span>
+                  <span className="sensor-logs-pagination-icon" aria-hidden="true">‹</span>
                 </button>
                 <span className="sensor-logs-table-pagination-page">
                   Page {tablePage} of {totalPages}
@@ -585,13 +665,61 @@ export default function SensorLogs() {
                   disabled={tablePage >= totalPages}
                   aria-label="Next page"
                 >
-                  Next
+                  <span className="sensor-logs-pagination-label">Next</span>
+                  <span className="sensor-logs-pagination-icon" aria-hidden="true">›</span>
                 </button>
               </div>
             </div>
           )}
         </div>
       </section>
+
+      {/* Mobile row detail bottom sheet */}
+      {selectedRow && createPortal(
+        <div className="sl-detail-overlay" onClick={closeDetail} role="presentation">
+          <div
+            className="sl-detail-sheet"
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Reading details"
+          >
+            <div className="sl-detail-handle" />
+            <div className="sl-detail-header">
+              <div className="sl-detail-header-info">
+                <span className="sl-detail-date">
+                  {selectedRow.date.toLocaleDateString()} · {selectedRow.date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                </span>
+                <span className="sl-detail-node">
+                  {selectedRow.nodeName !== selectedRow.nodeId
+                    ? `${selectedRow.nodeId} — ${selectedRow.nodeName}`
+                    : selectedRow.nodeId}
+                </span>
+              </div>
+              <button type="button" className="sl-detail-close" onClick={closeDetail} aria-label="Close">×</button>
+            </div>
+            <div className="sl-detail-grid">
+              {[
+                { label: "Temperature", value: selectedRow.temperature, unit: "°C" },
+                { label: "pH", value: selectedRow.pH, unit: "" },
+                { label: "Turbidity", value: selectedRow.turbidity, unit: "NTU" },
+                { label: "Dissolved O₂", value: selectedRow.dissolvedOxygen, unit: "mg/L" },
+                { label: "NH₃", value: selectedRow.nh3, unit: "mg/L" },
+                { label: "Flow Rate", value: selectedRow.flowRate, unit: "L/min" },
+                { label: "WQI", value: selectedRow.wqi, unit: "", highlight: true },
+              ].map(({ label, value, unit, highlight }) => (
+                <div key={label} className={`sl-detail-item${highlight ? " sl-detail-item--highlight" : ""}`}>
+                  <span className="sl-detail-item-label">{label}</span>
+                  <span className="sl-detail-item-value">
+                    {value != null ? `${value}${unit ? " " + unit : ""}` : "—"}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
     </div>
   );
 }

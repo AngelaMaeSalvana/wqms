@@ -125,6 +125,12 @@
   color: var(--text);
 }
 
+.alert-detail-modal__escalation-note {
+  color: var(--warning, #f0a500);
+  font-size: 0.85em;
+  font-style: italic;
+}
+
 .alert-detail-modal__footer {
   margin-top: 24px;
   padding-top: 20px;

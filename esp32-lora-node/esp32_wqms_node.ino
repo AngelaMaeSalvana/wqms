@@ -38,6 +38,7 @@ PubSubClient mqttClient(espClient);
 unsigned long lastPublishTime = 0;
 unsigned long lastReconnectAttempt = 0;
 const unsigned long RECONNECT_INTERVAL = 5000; // 5 seconds
+unsigned long seqCounter = 0; // Monotonically increasing sequence number
 
 // MQTT topic strings
 String mqttTopic;
@@ -282,6 +283,8 @@ void publishSensorData() {
   // Add node information
   doc["nodeId"] = NODE_ID;
   doc["location"] = NODE_LOCATION;
+  doc["seq"] = ++seqCounter;
+  doc["tx_millis"] = millis();
   
   // Add sensor readings (only if valid)
   if (readings.temperature != SENSOR_ERROR_VALUE) {

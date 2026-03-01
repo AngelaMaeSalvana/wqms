@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { MetricSkeleton } from "../LoadingSkeleton";
+import CurrentClassification from "../CurrentClassification";
 import "./dashboard.css";
 
 const PARAMS = [
@@ -100,10 +101,11 @@ export function TodayCard({ todayStats, selectedNode, readingsLoaded = false, va
 
   return (
     <div className={`card card--fill today-card today-card--${variant}`}>
-      <div className="card__header">
+      <div className="card__header today-card__header">
         <div>
           <h2 className="card__title">Today&apos;s Overview</h2>
         </div>
+        <CurrentClassification className="today-card__classification" />
       </div>
       <div className="card__body card__body--fill">
         {!hasStats && readingsLoaded ? (

@@ -15,6 +15,7 @@ export function MiniMapCard({ nodes = [], selectedNode, onTestSensor, isTestingS
     return DEFAULT_CENTER;
   }, [selectedNode]);
 
+  // sensorTestResults is a map of { [nodeId]: result }
   const markers = useMemo(
     () =>
       nodes
@@ -25,8 +26,8 @@ export function MiniMapCard({ nodes = [], selectedNode, onTestSensor, isTestingS
           lng: n.lng,
           nodeId: n.id,
           onTestSensor,
-          isTesting: isTestingSensor && (sensorTestResults?.nodeId === n.id || !sensorTestResults),
-          testStatus: sensorTestResults?.nodeId === n.id ? sensorTestResults?.status : null,
+          isTesting: isTestingSensor,
+          testStatus: sensorTestResults?.[n.id]?.status ?? null,
         })),
     [nodes, onTestSensor, isTestingSensor, sensorTestResults]
   );

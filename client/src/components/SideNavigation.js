@@ -13,6 +13,7 @@ const navItems = [
 ];
 
 const pathToTitle = (pathname) => {
+  if (pathname === "/nodes/inactive") return "Inactive Nodes";
   const item = navItems.find((n) => n.to === pathname);
   return item ? item.label : "Dashboard";
 };

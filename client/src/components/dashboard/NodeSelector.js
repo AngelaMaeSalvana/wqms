@@ -42,17 +42,18 @@ export function NodeSelector({ nodes = [], value, onChange, variant = "pill" }) 
             aria-label="Sensor nodes"
           >
             {nodes.map((n) => {
-              const label = n.name + (n.location ? ` — ${n.location}` : "");
+              const inactive = n.active === false;
+              const label = n.name + (n.location ? ` — ${n.location}` : "") + (inactive ? " (Inactive)" : "");
               return (
                 <button
                   key={n.id}
                   type="button"
                   role="option"
                   aria-selected={n.id === value}
-                  className={`node-selector-floating__item ${n.id === value ? "active" : ""}`}
+                  aria-disabled={inactive}
+                  className={`node-selector-floating__item ${n.id === value ? "active" : ""} ${inactive ? "node-selector-floating__item--inactive" : ""}`}
                   onClick={() => {
-                    onChange?.(n.id);
-                    setOpen(false);
+                    if (!inactive) { onChange?.(n.id); setOpen(false); }
                   }}
                 >
                   {label}
@@ -77,12 +78,21 @@ export function NodeSelector({ nodes = [], value, onChange, variant = "pill" }) 
         <option value="" disabled>
           Select node…
         </option>
-        {nodes.map((n) => (
-          <option key={n.id} value={n.id}>
-            {n.name}
-            {n.location ? ` — ${n.location}` : ""}
-          </option>
-        ))}
+        {nodes.map((n) => {
+          const inactive = n.active === false;
+          return (
+            <option
+              key={n.id}
+              value={n.id}
+              disabled={inactive}
+              style={inactive ? { color: "gray" } : undefined}
+            >
+              {n.name}
+              {n.location ? ` — ${n.location}` : ""}
+              {inactive ? " (Inactive)" : ""}
+            </option>
+          );
+        })}
       </select>
     </div>
   );

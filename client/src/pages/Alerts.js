@@ -13,6 +13,26 @@ import { exportToCSV, exportToExcel, formatAlertsForExport } from "../utils/expo
 import { PageLoader } from "../components/LoadingSkeleton";
 import "./Alerts.css";
 
+/** Normalize a DB alert row to the shape the UI expects. */
+function normalizeDbAlert(row) {
+  return {
+    id: row.id,
+    nodeId: row.node_id ?? null,
+    nodeName: row.node_name ?? null,
+    type: row.type ?? null,
+    title: row.title || "Alert",
+    detail: row.detail || "",
+    severity: row.severity || "info",
+    parameter: row.parameter ?? null,
+    value: row.value != null ? Number(row.value) : null,
+    thresholdMin: row.threshold_min ?? null,
+    thresholdMax: row.threshold_max ?? null,
+    status: row.status ?? "active",
+    timestamp: row.timestamp ? new Date(row.timestamp).getTime() : null,
+    createdAt: row.created_at ?? row.timestamp ?? null,
+  };
+}
+
 function toDateStr(d) {
   const date = d instanceof Date ? d : new Date(d);
   const y = date.getFullYear();
@@ -66,9 +86,10 @@ function getRelativeTime(date) {
 }
 
 export default function Alerts() {
-  const [lastUpdated, setLastUpdated] = useState(() => new Date());
+  const lastUpdated = useRef(new Date()).current;
   const [nodes, setNodes] = useState([]);
   const [readingsByNode, setReadingsByNode] = useState({});
+  const [alerts, setAlerts] = useState([]);
   const [search, setSearch] = useState("");
   const [severityFilter, setSeverityFilter] = useState("all");
   const [dateFrom, setDateFrom] = useState("");
@@ -91,55 +112,81 @@ export default function Alerts() {
     setReadIds(next);
   };
   const [exportOpen, setExportOpen] = useState(false);
-  const [nodesLoaded, setNodesLoaded] = useState(false);
-  const [readingsLoaded, setReadingsLoaded] = useState(false);
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
   const exportDropdownRef = useRef(null);
+  const filtersDropdownRef = useRef(null);
 
   useEffect(() => {
-    loadNodes().then(() => setNodes(getNodes())).finally(() => setNodesLoaded(true));
-  }, []);
-  useEffect(() => {
-    const onFocus = () => loadNodes().then(() => setNodes(getNodes()));
-    window.addEventListener("focus", onFocus);
-    return () => window.removeEventListener("focus", onFocus);
+    loadNodes().then(() => setNodes(getNodes()));
   }, []);
 
-  // Fetch today's readings so threshold alerts appear (same pattern as Dashboard).
   useEffect(() => {
-    setReadingsLoaded(false);
-    const today = toDateStr(new Date());
-    api.getReadings({ startDate: today, endDate: today, limit: 200 })
-      .then((rows) => {
+    let cancelled = false;
+    setIsLoading(true);
+
+    async function loadAlerts() {
+      // 1. Load nodes + today's readings in parallel.
+      const [loadedNodes] = await Promise.all([
+        loadNodes().then(() => getNodes()),
+      ]);
+
+      const today = toDateStr(new Date());
+      let byNode = {};
+      let prevByNode = {};
+      try {
+        const rows = await api.getReadings({ startDate: today, endDate: today, limit: 200 });
         const list = applyCalibrationToReadings(Array.isArray(rows) ? rows : []);
-        const byNode = {};
-        list.forEach((r) => {
+        // Sort ascending so we can pick latest and second-latest per node.
+        const sorted = [...list].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+        sorted.forEach((r) => {
           const nid = r.node_id || r.nodeId || "1";
-          if (!byNode[nid] || new Date(r.timestamp) > new Date(byNode[nid].timestamp)) {
-            byNode[nid] = {
-              temperature: r.temperature,
-              pH: r.ph,
-              ph: r.ph,
-              turbidity: r.turbidity,
-              dissolvedOxygen: r.dissolved_oxygen,
-              dissolved_oxygen: r.dissolved_oxygen,
-              do: r.dissolved_oxygen,
-              nh3: r.nh3,
-              NH3: r.nh3,
-            };
+          const reading = {
+            temperature: r.temperature,
+            pH: r.ph, ph: r.ph,
+            turbidity: r.turbidity,
+            dissolvedOxygen: r.dissolved_oxygen,
+            dissolved_oxygen: r.dissolved_oxygen,
+            do: r.dissolved_oxygen,
+            nh3: r.nh3, NH3: r.nh3,
+            timestamp: r.timestamp,
+          };
+          if (byNode[nid]) {
+            // byNode already has an earlier reading — push it to prev before replacing
+            prevByNode[nid] = byNode[nid];
           }
+          byNode[nid] = reading;
         });
-        setReadingsByNode(byNode);
-      })
-      .catch(() => setReadingsByNode({}))
-      .finally(() => setReadingsLoaded(true));
-  }, [lastUpdated]);
+      } catch { /* readings unavailable — still show DB alerts */ }
 
-  const allAlerts = useMemo(() => buildAlertsForAllNodes(nodes, readingsByNode), [nodes, readingsByNode]);
+      if (!cancelled) setReadingsByNode(byNode);
 
-  useAlertEmailNotifications(allAlerts, readingsByNode);
+      // 2. Detect live threshold/status alerts and upsert them to the DB.
+      const liveAlerts = buildAlertsForAllNodes(loadedNodes, byNode, {}, prevByNode);
+      if (liveAlerts.length > 0) {
+        try { await api.upsertAlerts(liveAlerts); } catch { /* non-fatal */ }
+      }
+
+      // 3. Fetch the full persisted alerts list from the DB.
+      try {
+        const dbRows = await api.getAlerts({ limit: 500 });
+        if (!cancelled) setAlerts((Array.isArray(dbRows) ? dbRows : []).map(normalizeDbAlert));
+      } catch {
+        // Fallback: show live-computed alerts if DB fetch fails.
+        if (!cancelled) setAlerts(liveAlerts);
+      }
+
+      if (!cancelled) setIsLoading(false);
+    }
+
+    loadAlerts();
+    return () => { cancelled = true; };
+  }, []);
+
+  useAlertEmailNotifications(alerts, readingsByNode);
 
   const filteredAlerts = useMemo(() => {
-    let list = [...allAlerts];
+    let list = [...alerts];
     const q = search.trim().toLowerCase();
     if (q) {
       list = list.filter(
@@ -173,7 +220,7 @@ export default function Alerts() {
       list.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
     }
     return list;
-  }, [allAlerts, search, severityFilter, dateFrom, dateTo, sortBy]);
+  }, [alerts, search, severityFilter, dateFrom, dateTo, sortBy]);
 
   useEffect(() => {
     if (!exportOpen) return;
@@ -185,6 +232,17 @@ export default function Alerts() {
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [exportOpen]);
+
+  useEffect(() => {
+    if (!filtersOpen) return;
+    const handleClickOutside = (e) => {
+      if (filtersDropdownRef.current && !filtersDropdownRef.current.contains(e.target)) {
+        setFiltersOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [filtersOpen]);
 
   const exportData = useMemo(() => formatAlertsForExport(filteredAlerts), [filteredAlerts]);
 
@@ -198,7 +256,6 @@ export default function Alerts() {
     setExportOpen(false);
   };
 
-  const isPageLoading = !nodesLoaded || !readingsLoaded;
 
   const handleExportPdf = () => {
     const doc = new jsPDF({ orientation: "landscape" });
@@ -228,7 +285,7 @@ export default function Alerts() {
     setExportOpen(false);
   };
 
-  if (isPageLoading) {
+  if (isLoading) {
     return (
       <div className="alerts-page">
         <PageLoader />
@@ -242,10 +299,10 @@ export default function Alerts() {
         <div>
           <h1 className="page-title">Alerts</h1>
         </div>
-        <PageDateWithStatus lastUpdated={lastUpdated} className="page-meta" />
+        <PageDateWithStatus lastUpdated={lastUpdated} className="page-meta" showClassification={false} />
       </header>
 
-      <div className="alerts-filters">
+      <div className="alerts-toolbar">
         <input
           type="search"
           className="alerts-search"
@@ -254,52 +311,149 @@ export default function Alerts() {
           onChange={(e) => setSearch(e.target.value)}
           aria-label="Search alerts"
         />
-        <select
-          className="metric-select"
-          aria-label="Severity filter"
-          value={severityFilter}
-          onChange={(e) => setSeverityFilter(e.target.value)}
-        >
-          <option value="all">All severities</option>
-          <option value="high">High</option>
-          <option value="medium">Medium</option>
-          <option value="low">Low</option>
-        </select>
-        <input
-          type="date"
-          className="date-input"
-          aria-label="From date"
-          value={dateFrom}
-          onChange={(e) => setDateFrom(e.target.value)}
-        />
-        <input
-          type="date"
-          className="date-input"
-          aria-label="To date"
-          value={dateTo}
-          onChange={(e) => setDateTo(e.target.value)}
-        />
-        <select
-          className="metric-select alerts-sort"
-          aria-label="Sort by"
-          value={sortBy}
-          onChange={(e) => setSortBy(e.target.value)}
-        >
-          <option value="newest">Newest first</option>
-          <option value="oldest">Oldest first</option>
-          <option value="severity">Severity</option>
-        </select>
-        <div className="alerts-export-wrap">
+
+        <div className="alerts-toolbar-actions">
+          {/* Sort & Filter flyout */}
+          <div className="alerts-filters-dropdown" ref={filtersDropdownRef}>
+            <button
+              type="button"
+              className={`alerts-toolbar-btn${filtersOpen ? " alerts-toolbar-btn--active" : ""}`}
+              onClick={() => setFiltersOpen((v) => !v)}
+              aria-haspopup="true"
+              aria-expanded={filtersOpen}
+              aria-label="Sort and filter"
+            >
+              <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <path d="M2 4h12M4 8h8M6 12h4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/>
+              </svg>
+              Sort
+              <svg width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden="true" className="alerts-toolbar-chevron">
+                <path d="M2 3.5l3 3 3-3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+              {(severityFilter !== "all" || dateFrom || dateTo || sortBy !== "newest") && (
+                <span className="alerts-filters-badge" aria-label="Filters active" />
+              )}
+            </button>
+
+            {filtersOpen && (
+              <div className="alerts-filters-panel" role="menu">
+                <div className="alerts-filters-panel-section">
+                  <span className="alerts-filters-panel-label">Sort by</span>
+                  {[
+                    { value: "newest", label: "Newest first" },
+                    { value: "oldest", label: "Oldest first" },
+                    { value: "severity", label: "Severity" },
+                  ].map((opt) => (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      role="menuitemradio"
+                      aria-checked={sortBy === opt.value}
+                      className={`alerts-filters-panel-item${sortBy === opt.value ? " alerts-filters-panel-item--active" : ""}`}
+                      onClick={() => setSortBy(opt.value)}
+                    >
+                      {sortBy === opt.value && (
+                        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                          <circle cx="6" cy="6" r="4" fill="currentColor"/>
+                        </svg>
+                      )}
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="alerts-filters-panel-divider" />
+
+                <div className="alerts-filters-panel-section">
+                  <span className="alerts-filters-panel-label">Severity</span>
+                  {[
+                    { value: "all", label: "All severities" },
+                    { value: "high", label: "High" },
+                    { value: "medium", label: "Medium" },
+                    { value: "low", label: "Low" },
+                  ].map((opt) => (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      role="menuitemradio"
+                      aria-checked={severityFilter === opt.value}
+                      className={`alerts-filters-panel-item${severityFilter === opt.value ? " alerts-filters-panel-item--active" : ""}`}
+                      onClick={() => setSeverityFilter(opt.value)}
+                    >
+                      {severityFilter === opt.value && (
+                        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                          <circle cx="6" cy="6" r="4" fill="currentColor"/>
+                        </svg>
+                      )}
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="alerts-filters-panel-divider" />
+
+                <div className="alerts-filters-panel-section alerts-filters-panel-section--dates">
+                  <span className="alerts-filters-panel-label">Date range</span>
+                  <label className="alerts-filters-date-label">
+                    From
+                    <input
+                      type="date"
+                      className="alerts-filters-date-input"
+                      aria-label="From date"
+                      value={dateFrom}
+                      onChange={(e) => setDateFrom(e.target.value)}
+                    />
+                  </label>
+                  <label className="alerts-filters-date-label">
+                    To
+                    <input
+                      type="date"
+                      className="alerts-filters-date-input"
+                      aria-label="To date"
+                      value={dateTo}
+                      onChange={(e) => setDateTo(e.target.value)}
+                    />
+                  </label>
+                  {(dateFrom || dateTo) && (
+                    <button
+                      type="button"
+                      className="alerts-filters-clear-dates"
+                      onClick={() => { setDateFrom(""); setDateTo(""); }}
+                    >
+                      Clear dates
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Mark all as read */}
+          {filteredAlerts.some((a) => !readIds.has(a.id || a.timestamp)) && (
+            <button
+              type="button"
+              className="alerts-toolbar-btn"
+              onClick={() => markAllAsRead(filteredAlerts.map((a) => a.id || a.timestamp))}
+              aria-label="Mark all alerts as read"
+            >
+              Mark all as read
+            </button>
+          )}
+
+          {/* Export */}
           <div className="alerts-export-dropdown" ref={exportDropdownRef}>
             <button
               type="button"
-              className="alerts-export-btn"
+              className={`alerts-toolbar-btn${exportOpen ? " alerts-toolbar-btn--active" : ""}`}
               onClick={() => setExportOpen((v) => !v)}
               aria-haspopup="true"
               aria-expanded={exportOpen}
               aria-label="Export filtered alerts"
             >
-              Export <span className="alerts-export-chevron">▼</span>
+              Export
+              <svg width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden="true" className="alerts-toolbar-chevron">
+                <path d="M2 3.5l3 3 3-3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
             </button>
             {exportOpen && (
               <div className="alerts-export-menu" role="menu">
@@ -342,7 +496,7 @@ export default function Alerts() {
               icon="🔔"
               title="No alerts"
               message={
-                allAlerts.length === 0
+                alerts.length === 0
                   ? "No alerts — all systems operating normally."
                   : "No alerts match your filters. Alerts are generated from threshold breaches, node status (offline/testing), and maintenance due."
               }
@@ -376,15 +530,6 @@ export default function Alerts() {
                   );
                 })}
               </ul>
-              {filteredAlerts.some((a) => !readIds.has(a.id || a.timestamp)) && (
-                <button
-                  type="button"
-                  className="alerts-mark-all-read"
-                  onClick={() => markAllAsRead(filteredAlerts.map((a) => a.id || a.timestamp))}
-                >
-                  Mark all as read
-                </button>
-              )}
             </>
           )}
         </div>

@@ -3,38 +3,13 @@ import { createPortal } from "react-dom";
 import { MapContainer, TileLayer } from "react-leaflet";
 import MapMarkersOverlay from "../components/map/MapMarkersOverlay";
 import PageDateWithStatus from "../components/PageDateWithStatus";
-import api from "../services/api";
-import { calculateWQI, getWQIClass } from "../utils/wqiCalculator";
 import { getNodes, loadNodes } from "../utils/nodesStorage";
-import { useSensorTest, getStoredTestResults } from "../hooks/useSensorTest";
-import { applyCalibration } from "../utils/calibration";
+import { useSensorTest } from "../hooks/useSensorTest";
 import { PageLoader } from "../components/LoadingSkeleton";
 import "./Map.css";
 
 const FALLBACK_CENTER = [8.462591, 124.707831];
 const DEFAULT_ZOOM = 11;
-
-function normalizeReading(r) {
-  if (!r) return null;
-  const temp = r.temperature ?? null;
-  const turb = r.turbidity ?? null;
-  const ph = r.pH ?? r.ph ?? null;
-  const ammonia = r.nh3 ?? r.NH3 ?? null;
-  const doVal = r.dissolvedOxygen ?? r.dissolved_oxygen ?? r.do ?? r.DO ?? null;
-  let wqi = r.wqi ?? r.WQI;
-  if (wqi == null && temp != null && turb != null && ph != null && ammonia != null && doVal != null) {
-    wqi = calculateWQI({ temperature: temp, turbidity: turb, pH: ph, nh3: ammonia, dissolvedOxygen: doVal });
-  }
-  return {
-    temperature: temp,
-    turbidity: turb,
-    pH: ph,
-    nh3: ammonia,
-    dissolvedOxygen: doVal,
-    wqi: wqi != null ? Math.round(wqi) : null,
-    nodeId: r.nodeId ?? r.node ?? null,
-  };
-}
 
 const MAP_NODES_PAGE_SIZE = 3;
 
@@ -42,31 +17,8 @@ export default function Map() {
   const [nodes, setNodes] = useState([]);
   const [mapNodesPage, setMapNodesPage] = useState(1);
   const [nodesLoaded, setNodesLoaded] = useState(false);
-  const [currentMetrics, setCurrentMetrics] = useState({
-    temperature: null,
-    turbidity: null,
-    pH: null,
-    nh3: null,
-    dissolvedOxygen: null,
-    wqi: null,
-    nodeId: null,
-  });
   const [lastUpdated] = useState(() => new Date());
-
-  const getReadingsForNode = useCallback(
-    (nodeId) =>
-      currentMetrics.nodeId === nodeId
-        ? {
-            temperature: currentMetrics.temperature,
-            ph: currentMetrics.pH,
-            turbidity: currentMetrics.turbidity,
-            dissolvedOxygen: currentMetrics.dissolvedOxygen,
-            nh3: currentMetrics.nh3,
-          }
-        : {},
-    [currentMetrics]
-  );
-  const sensorTest = useSensorTest(getReadingsForNode);
+  const sensorTest = useSensorTest();
 
   const allNodes = useMemo(() => nodes, [nodes]);
   const mapCenter = useMemo(() => {
@@ -87,84 +39,39 @@ export default function Map() {
     return () => window.removeEventListener("focus", onFocus);
   }, []);
 
-  const fetchLatestReading = useCallback(async () => {
-    try {
-      const r = await api.getLatestReading();
-      const calibrated = applyCalibration(r);
-      const norm = normalizeReading(calibrated);
-      if (norm) {
-        setCurrentMetrics((prev) => ({
-          ...prev,
-          ...norm,
-          nodeId: norm.nodeId ?? prev.nodeId,
-        }));
-      }
-    } catch (err) {
-      console.debug("Map: could not fetch latest reading", err.message);
-    }
-  }, []);
-
-  useEffect(() => {
-    fetchLatestReading();
-  }, [fetchLatestReading]);
-
   const handleSensorTest = useCallback(
-    async (nodeId, forceRun = false) => {
-      const id = nodeId ?? currentMetrics.nodeId ?? 1;
-      if (!id) return;
-      if (!forceRun) {
-        const stored = getStoredTestResults(id);
-        if (stored) {
-          sensorTest.runTest(id, false);
-          return;
-        }
-      }
-      try {
-        const r = await api.getLatestReading(id);
-        const calibrated = applyCalibration(r);
-        const readings = {
-          temperature: calibrated.temperature ?? calibrated.temp ?? null,
-          ph: calibrated.pH ?? calibrated.ph ?? null,
-          turbidity: calibrated.turbidity ?? null,
-          dissolvedOxygen: calibrated.dissolved_oxygen ?? calibrated.dissolvedOxygen ?? calibrated.do ?? null,
-          nh3: calibrated.nh3 ?? calibrated.NH3 ?? null,
-        };
-        sensorTest.runTest(id, true, readings);
-      } catch (e) {
-        sensorTest.runTest(id, true, {});
-      }
+    (nodeId) => {
+      if (!nodeId) return;
+      sensorTest.runTest(nodeId);
     },
-    [currentMetrics.nodeId, sensorTest]
+    [sensorTest]
   );
 
-  const nodeIdForMarker = currentMetrics.nodeId ?? "N-001";
-  const isTestingThisNode = sensorTest.isTesting && (sensorTest.results?.nodeId === nodeIdForMarker || !sensorTest.results);
-  const testStatusForNode = sensorTest.results?.nodeId === nodeIdForMarker ? sensorTest.results?.status : null;
-
-  const mapMarkers = allNodes.filter((n) => n.lat != null && n.lng != null).map((n) => {
-    const stored = getStoredTestResults(n.id);
-    const statusForNode = sensorTest.results?.nodeId === n.id ? sensorTest.results?.status : stored?.status ?? null;
+  const mapMarkers = allNodes.filter((n) => n.lat != null && n.lng != null && n.active !== false).map((n) => {
+    const inactive = n.active === false;
+    const statusForNode = sensorTest.allResults[n.id]?.status ?? null;
     return {
       key: n.id,
       lat: n.lat,
       lng: n.lng,
       nodeId: n.id,
-      onTestSensor: handleSensorTest,
-      isTesting: sensorTest.isTesting && (sensorTest.results?.nodeId === n.id || !sensorTest.results),
-      testStatus: statusForNode,
+      inactive,
+      onTestSensor: inactive ? null : handleSensorTest,
+      isTesting: !inactive && sensorTest.isTesting && sensorTest.results === null,
+      testStatus: inactive ? null : statusForNode,
     };
   });
 
   const [mapTableSort, setMapTableSort] = useState({ column: "node", direction: "asc" });
   const [mapNodesSearch, setMapNodesSearch] = useState("");
 
-  const nodesTableData = allNodes.map((n) => {
-    const stored = getStoredTestResults(n.id);
-    const result = sensorTest.results?.nodeId === n.id ? sensorTest.results : stored;
-    let repairStatus = "Not tested";
-    if (result?.status === "success") repairStatus = "OK";
-    else if (result?.status === "warning") repairStatus = "Needs repair";
-    else if (result?.status === "error") repairStatus = "Needs fix";
+  const nodesTableData = allNodes.filter((n) => n.active !== false).map((n) => {
+    const result = sensorTest.allResults[n.id] ?? null;
+    let repairStatus = "Not checked";
+    if (result?.status === "success") repairStatus = "All sensors OK";
+    else if (result?.status === "warning") repairStatus = "Sensor issue";
+    else if (result?.status === "error") repairStatus = "Sensor failure";
+    else if (result?.status === "offline") repairStatus = "Node offline";
     const lastTestTs = result?.timestamp ? new Date(result.timestamp).getTime() : 0;
     return {
       ...n,
@@ -198,7 +105,7 @@ export default function Map() {
         cmp = va.localeCompare(vb);
       } else if (column === "lastTest") cmp = (a.lastTestTimestamp ?? 0) - (b.lastTestTimestamp ?? 0);
       else if (column === "sensorStatus") {
-        const order = { success: 0, warning: 1, error: 2, null: 3 };
+        const order = { success: 0, warning: 1, error: 2, offline: 3, null: 4 };
         const oa = order[a.resultStatus ?? "null"] ?? 3;
         const ob = order[b.resultStatus ?? "null"] ?? 3;
         cmp = oa - ob;
@@ -247,7 +154,7 @@ export default function Map() {
         <div>
           <h1 className="page-title">Map &amp; Locations</h1>
         </div>
-        <PageDateWithStatus lastUpdated={lastUpdated} className="page-meta" />
+        <PageDateWithStatus lastUpdated={lastUpdated} className="page-meta" showClassification={false} />
       </header>
 
       <section className="card map-card">
@@ -361,39 +268,49 @@ export default function Map() {
                 </tr>
               </thead>
               <tbody>
-                {paginatedNodesTableData.map((row) => (
-                  <tr key={row.id}>
-                    <td>
-                      <span className="map-nodes-table__node-name">{row.name}</span>
-                      <span className="map-nodes-table__node-id">{row.id}</span>
-                    </td>
-                    <td>{row.location}</td>
-                    <td className="map-nodes-table__coords">
-                      {row.lat != null && row.lng != null
-                        ? `${row.lat.toFixed(4)}, ${row.lng.toFixed(4)}`
-                        : "—"}
-                    </td>
-                    <td>{row.lastTest}</td>
-                    <td>
-                      <span
-                        className={`map-nodes-table__status map-nodes-table__status--${row.resultStatus ?? "none"}`}
-                        title={row.resultStatus ? row.repairStatus : "No test run today"}
-                      >
-                        {row.repairStatus}
-                      </span>
-                    </td>
-                    <td>
-                      <button
-                        type="button"
-                        className="ghost-btn map-nodes-table__test-btn"
-                        onClick={() => handleSensorTest(row.id)}
-                        aria-label={`Test sensor for ${row.name}`}
-                      >
-                        Test sensor
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+                {paginatedNodesTableData.map((row) => {
+                  const inactive = row.active === false;
+                  return (
+                    <tr key={row.id} className={inactive ? "map-nodes-table__row--inactive" : ""}>
+                      <td>
+                        <span className="map-nodes-table__node-name">{row.name}</span>
+                        <span className="map-nodes-table__node-id">{row.id}</span>
+                        {inactive && <span className="map-nodes-table__inactive-badge">Inactive</span>}
+                      </td>
+                      <td>{row.location}</td>
+                      <td className="map-nodes-table__coords">
+                        {row.lat != null && row.lng != null
+                          ? `${row.lat.toFixed(4)}, ${row.lng.toFixed(4)}`
+                          : "—"}
+                      </td>
+                      <td>{inactive ? "—" : row.lastTest}</td>
+                      <td>
+                        {inactive ? (
+                          <span className="map-nodes-table__status map-nodes-table__status--none">Inactive</span>
+                        ) : (
+                          <span
+                            className={`map-nodes-table__status map-nodes-table__status--${row.resultStatus ?? "none"}`}
+                            title={row.resultStatus ? row.repairStatus : "No test run today"}
+                          >
+                            {row.repairStatus}
+                          </span>
+                        )}
+                      </td>
+                      <td>
+                        {!inactive && (
+                          <button
+                            type="button"
+                            className="ghost-btn map-nodes-table__test-btn"
+                            onClick={() => handleSensorTest(row.id)}
+                            aria-label={`Test sensor for ${row.name}`}
+                          >
+                            Test sensor
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -446,7 +363,7 @@ export default function Map() {
             aria-labelledby="sensor-test-modal-title"
           >
             <header className="section-header">
-              <h2 id="sensor-test-modal-title">Sensor Test Results</h2>
+              <h2 id="sensor-test-modal-title">Sensor Status</h2>
               <button
                 type="button"
                 className="ghost-btn"
@@ -460,7 +377,7 @@ export default function Map() {
               {sensorTest.isTesting ? (
                 <div className="sensor-test-loading">
                   <span className="sensor-test-loading-icon">⚙️</span>
-                  <p>Testing sensors...</p>
+                  <p>Checking sensor data...</p>
                 </div>
               ) : sensorTest.results ? (
                 <>
@@ -472,11 +389,15 @@ export default function Map() {
                         ? "✅"
                         : sensorTest.results.status === "warning"
                         ? "⚠️"
+                        : sensorTest.results.status === "offline"
+                        ? "📡"
                         : "❌"}
                     </span>
                     <p className="sensor-test-summary-message">{sensorTest.results.message}</p>
                     <p className="sensor-test-summary-time">
-                      {new Date(sensorTest.results.timestamp).toLocaleString()}
+                      {sensorTest.results.dataAge
+                        ? `Last data: ${sensorTest.results.dataAge}`
+                        : `Checked: ${new Date(sensorTest.results.timestamp).toLocaleString()}`}
                     </p>
                   </div>
                   <div className="sensor-test-list">
@@ -489,7 +410,7 @@ export default function Map() {
                         </div>
                         <div className="sensor-test-item-value">
                           <span className={`sensor-test-badge sensor-test-badge--${s.status}`}>
-                            {s.status === "pass" ? "PASS" : "FAIL"}
+                            {s.status === "pass" ? "PASS" : s.status === "stale" ? "NO DATA" : "FAIL"}
                           </span>
                           <span>{s.value}</span>
                         </div>
@@ -499,9 +420,9 @@ export default function Map() {
                   <button
                     type="button"
                     className="ghost-btn sensor-test-run-again"
-                    onClick={() => handleSensorTest(sensorTest.results.nodeId ?? nodeIdForMarker, true)}
+                    onClick={() => handleSensorTest(sensorTest.results.nodeId)}
                   >
-                    Run Test Again
+                    Refresh
                   </button>
                 </>
               ) : null}

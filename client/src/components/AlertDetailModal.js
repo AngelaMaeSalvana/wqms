@@ -5,7 +5,7 @@ import "./AlertDetailModal.css";
 const SEVERITY_LABELS = {
   high: "Needs attention",
   medium: "Check when you can",
-  low: "For your info",
+  low: "Early warning",
   info: "Information",
 };
 
@@ -88,6 +88,14 @@ export function AlertDetailModal({ alert: a, onClose }) {
                           )}
                         </span>
                       )}
+                    </dd>
+                  </>
+                )}
+                {a.wqiEscalated && (
+                  <>
+                    <dt>Escalation</dt>
+                    <dd className="alert-detail-modal__escalation-note">
+                      WQI escalated — severity raised due to overall water quality impact
                     </dd>
                   </>
                 )}

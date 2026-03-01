@@ -27,7 +27,28 @@
 #define NODE_LOCATION "Villanueva"            // Location name for this node
 
 // ============================================
-// Publishing Configuration
+// TDMA (Time Division Multiple Access)
+// ============================================
+// Each node gets an exclusive time slot so transmissions never collide.
+// Slot boundaries are derived from NTP epoch ms — all nodes share the same clock.
+//
+// NODE_SLOT:      This node's slot index (0-based). Must be unique per node.
+//                   N1 -> 0, N2 -> 1, N3 -> 2, ...
+// TDMA_NUM_SLOTS: Total number of nodes sharing the channel. Must match on all nodes.
+// TDMA_SLOT_MS:   Width of each slot in ms. Must match on all nodes.
+//                   Cycle period = TDMA_NUM_SLOTS * TDMA_SLOT_MS
+//                   e.g. 2 nodes * 6000ms = 12s cycle (each node sends ~every 12s)
+// TDMA_TX_WINDOW_MS: How early in the slot TX is allowed. Must be > TX+ACK time (~2500ms).
+//                    Remainder is the guard band.
+// TDMA_FALLBACK_MS:  Interval used when NTP is not yet synced (node won't be silent).
+#define NODE_SLOT          0                  // Change to 1 for N2, 2 for N3, etc.
+#define TDMA_NUM_SLOTS     2                  // Total nodes on the channel
+#define TDMA_SLOT_MS       6000               // Slot width in ms
+#define TDMA_TX_WINDOW_MS  3500               // TX allowed within first 3500ms of slot
+#define TDMA_FALLBACK_MS   12000              // Fallback interval when NTP unsynced
+
+// ============================================
+// Publishing Configuration (legacy WiFi-direct node only)
 // ============================================
 #define PUBLISH_INTERVAL_MS 5000              // How often to publish data (milliseconds)
 #define MQTT_TOPIC_PREFIX "water-quality"     // MQTT topic prefix

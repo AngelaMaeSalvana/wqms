@@ -1,5 +1,12 @@
 import React from "react";
 
+function toMidnight(d) {
+  if (!d) return null;
+  const date = typeof d === "string" ? new Date(d + "T00:00:00") : new Date(d);
+  date.setHours(0, 0, 0, 0);
+  return date;
+}
+
 export default function CalendarCard({
   monthName,
   year,
@@ -9,7 +16,12 @@ export default function CalendarCard({
   isSameDate,
   selectedDate,
   onSelectDate,
+  rangeStart,
+  rangeEnd,
 }) {
+  const rsDate = toMidnight(rangeStart);
+  const reDate = toMidnight(rangeEnd);
+
   return (
     <section className="card calendar-card">
       <header className="section-header">
@@ -38,6 +50,11 @@ export default function CalendarCard({
 
           const isSelected = selectedDate && isSameDate?.(day.date, selectedDate);
           if (isSelected) className += " selected";
+
+          // Highlight days that fall within the shared filter range (including overflow days from adjacent months)
+          const dayMid = toMidnight(day.date);
+          const inRange = rsDate && reDate && dayMid >= rsDate && dayMid <= reDate;
+          if (inRange) className += " in-filter-range";
 
           return (
             <span

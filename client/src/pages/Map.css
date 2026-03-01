@@ -260,6 +260,16 @@
   color: #d45b5b;
 }
 
+.sensor-test-badge--stale {
+  background: rgba(160, 160, 160, 0.15);
+  color: var(--text-muted);
+}
+
+.sensor-test-summary--offline {
+  background: rgba(100, 100, 120, 0.12);
+  border-color: rgba(160, 160, 180, 0.25);
+}
+
 .sensor-test-run-again {
   width: 100%;
   margin-top: 24px;
@@ -439,9 +449,33 @@
   color: #d45b5b;
 }
 
+.map-nodes-table__status--offline {
+  background: rgba(100, 100, 120, 0.15);
+  color: #9090a8;
+}
+
 .map-nodes-table__status--none {
   background: rgba(255, 255, 255, 0.06);
   color: var(--text-muted);
+}
+
+.map-nodes-table__row--inactive {
+  opacity: 0.45;
+}
+
+.map-nodes-table__inactive-badge {
+  display: inline-block;
+  margin-left: 6px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 5px;
+  vertical-align: middle;
 }
 
 .map-nodes-table__test-btn {

@@ -11,7 +11,19 @@ export const SETTINGS_KEYS = {
   dataCollection: 'wqms_data_collection',
   wqiWeights: 'wqms_wqi_weights',
   notifications: 'wqms_notifications',
+  maintenance: 'wqms_maintenance',
 };
+
+export const DEFAULT_MAINTENANCE = {
+  intervalDays: 30,
+};
+
+export function getMaintenanceSettings() {
+  return {
+    ...DEFAULT_MAINTENANCE,
+    ...loadFromStorage(SETTINGS_KEYS.maintenance, {}),
+  };
+}
 
 export function loadFromStorage(key, fallback) {
   try {
@@ -25,6 +37,9 @@ export function loadFromStorage(key, fallback) {
 export function saveToStorage(key, value) {
   try {
     localStorage.setItem(key, JSON.stringify(value));
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('wqms:storage', { detail: { key, value } }));
+    }
   } catch (e) {
     console.warn('Could not save to localStorage', e);
   }
@@ -40,7 +55,7 @@ export async function syncSettingsFromSupabase() {
     const map = await getSettingsFromSupabase();
     if (map && typeof map === 'object') {
       Object.entries(map).forEach(([key, value]) => {
-        if (value && typeof value === 'object') {
+        if (value != null) {
           saveToStorage(key, value);
         }
       });

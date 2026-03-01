@@ -135,11 +135,11 @@ export const useMQTT = (brokerUrl = null, options = {}) => {
       if (callback) {
         clientRef.current.on('message', (receivedTopic, message) => {
           if (receivedTopic === topic) {
+            const t_dash_rx = Date.now();
             try {
               const data = JSON.parse(message.toString());
-              callback(data, receivedTopic);
+              callback({ ...data, t_dash_rx }, receivedTopic);
             } catch (err) {
-              // If not JSON, pass as string
               callback(message.toString(), receivedTopic);
             }
           }
@@ -215,11 +215,13 @@ export const useWaterQualityMQTT = (client, onData, topics = ['water-quality/+',
 
     // Set up message handler
     const messageHandler = (topic, message) => {
+      // t_dash_rx: epoch ms when this message arrived in the browser.
+      // Used to compute Forwarder-to-Dashboard latency = t_dash_rx - t_fwd_rx.
+      const t_dash_rx = Date.now();
       try {
         const data = JSON.parse(message.toString());
-        onData(data, topic);
+        onData({ ...data, t_dash_rx }, topic);
       } catch (err) {
-        // If not JSON, pass as string
         onData(message.toString(), topic);
       }
     };

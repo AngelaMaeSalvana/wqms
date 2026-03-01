@@ -264,7 +264,7 @@ const ManualInput = ({ onSave, onClose }) => {
 
               <div className="input-group">
                 <label htmlFor="tan">
-                  TAN (Total Ammonia Nitrogen) (mg/L) <span className="weight-label">→ NH₃ calculated</span>
+                  TAN (Total Ammonia Nitrogen) (mg/L) <span className="weight-label">&#8594; NH₃ calculated</span>
                 </label>
                 <input
                   id="tan"

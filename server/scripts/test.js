@@ -1,16 +1,43 @@
 /**
- * Publish test reading(s) to HiveMQ (simulates LoRa forwarder).
- * Use this to verify: MQTT → Bridge → Supabase without the physical forwarder.
+ * Alert Logic Test Publisher
  *
- * Schema (sensor_readings): node_id, location, temperature, turbidity, ph,
- * dissolved_oxygen, flow_rate, seq, tx_millis, rx_millis, timestamp. No TAN; NH3 default 0.5 mg/L in app.
+ * Publishes crafted MQTT readings to exercise the 3-layer alert system:
+ *   Layer 1 — Threshold Deviation (LOW / MEDIUM / HIGH)
+ *   Layer 2 — Persistence Escalation (repeat readings to escalate)
+ *   Layer 3 — WQI Escalation (multi-param degradation, rapid WQI drop)
  *
- * ~40% of readings include one parameter exceeding alert thresholds (temp, pH, turbidity, or DO)
- * so you can test threshold alerts on the dashboard.
+ * Usage:
+ *   node scripts/test.js                  → single normal (no-alert) reading
+ *   node scripts/test.js --scenario <name> [--repeat <n>]
  *
- * Run: node scripts/test.js [count]
- * (from server/ directory; loads .env)
- * Optional: count = number of readings to send (default 1).
+ * Scenarios:
+ *   normal            All parameters within limits — no alerts expected
+ *   low-do            DO just inside early-warning zone (LOW)
+ *   medium-do         DO 5–10% below min (MEDIUM)
+ *   high-do           DO >10% below min (HIGH)
+ *   low-ph            pH just above max (LOW)
+ *   medium-ph         pH 5–10% above max (MEDIUM)
+ *   high-ph           pH >10% above max (HIGH)
+ *   low-turbidity     Turbidity just above max (LOW)
+ *   medium-turbidity  Turbidity 5–10% above max (MEDIUM)
+ *   high-turbidity    Turbidity >10% above max (HIGH)
+ *   low-temp          Temperature just below min (LOW)
+ *   high-temp         Temperature >10% above max (HIGH)
+ *   low-nh3           NH3 just above max (LOW)
+ *   high-nh3          NH3 >10% above max (HIGH)
+ *   nh3-slope         NH3 rapid rise (slope alert)
+ *   multi-param       Multiple parameters degraded (triggers WQI system-level HIGH)
+ *   wqi-drop          Two readings: first good, second bad (WQI rapid drop)
+ *   persistence       Send 3 identical LOW-DO readings to escalate via persistence
+ *   all-clear         All parameters well within limits — clears persistence counters
+ *
+ * --repeat <n>  Send the same scenario payload n times (useful for persistence testing).
+ *
+ * Examples:
+ *   node scripts/test.js --scenario high-do
+ *   node scripts/test.js --scenario low-do --repeat 3
+ *   node scripts/test.js --scenario persistence
+ *   node scripts/test.js --scenario wqi-drop
  */
 
 const path = require('path');
@@ -26,14 +53,21 @@ const MQTT_USER = process.env.MQTT_USER || process.env.REACT_APP_MQTT_USER || ''
 const MQTT_PASS = process.env.MQTT_PASS || process.env.REACT_APP_MQTT_PASS || '';
 
 if (!MQTT_URL) {
-  console.error('❌ Set MQTT_URL or REACT_APP_MQTT_WS_URL in .env');
+  console.error('❌  Set MQTT_URL or REACT_APP_MQTT_WS_URL in .env');
   process.exit(1);
 }
 
-const publishCount = Math.max(1, parseInt(process.argv[2], 10) || 1);
+// ── CLI args ──────────────────────────────────────────────────────────────────
 
-// Match client DEFAULT_THRESHOLDS (alertsData.js) for predictable alert testing
-const THRESHOLDS = {
+const args = process.argv.slice(2);
+const scenarioIdx = args.indexOf('--scenario');
+const repeatIdx   = args.indexOf('--repeat');
+const scenarioArg = scenarioIdx !== -1 ? args[scenarioIdx + 1] : null;
+const repeatCount = repeatIdx   !== -1 ? Math.max(1, parseInt(args[repeatIdx + 1], 10) || 1) : 1;
+
+// ── Thresholds (mirror client DEFAULT_THRESHOLDS) ─────────────────────────────
+
+const T = {
   temperatureMin: 18,
   temperatureMax: 30,
   pHMin: 6.5,
@@ -43,91 +77,308 @@ const THRESHOLDS = {
   nh3Max: 0.5,
 };
 
-/** Random value between min and max, optional decimal places. */
-function rand(min, max, decimals = 1) {
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function rand(min, max, dp = 2) {
   const n = min + Math.random() * (max - min);
-  return decimals === 0 ? Math.round(n) : Math.round(n * Math.pow(10, decimals)) / Math.pow(10, decimals);
+  const f = Math.pow(10, dp);
+  return Math.round(n * f) / f;
 }
 
-/** ~40% chance to include at least one value exceeding thresholds (for alerts testing). */
-const ALERT_BREACH_PROBABILITY = 0.4;
-
-/** Random integer in [min, max] (inclusive). */
 function randInt(min, max) {
   return Math.floor(min + Math.random() * (max - min + 1));
 }
 
-/** Build one test payload. Randomly includes out-of-range values when ALERT_BREACH_PROBABILITY. */
-function buildPayload(overrides = {}) {
-  // Simulate ESP32 millis(): tx when node sent, rx when gateway received (rx >= tx, small delay)
+/** Build a base payload with all parameters safely within limits. */
+function basePayload(overrides = {}) {
+  const now       = Date.now();
   const tx_millis = randInt(10000, 2000000);
   const rx_millis = tx_millis + randInt(20, 400);
-
-  const base = {
-    nodeId: 'node1',
-    seq: Math.floor(Math.random() * 10000),
-    temperature: rand(THRESHOLDS.temperatureMin, THRESHOLDS.temperatureMax),
-    turbidity: rand(1, THRESHOLDS.turbidityMax),
-    ph: rand(THRESHOLDS.pHMin, THRESHOLDS.pHMax),
-    dissolved_oxygen: rand(THRESHOLDS.dissolvedOxygenMin, 12.0),
-    flow_rate: rand(0.5, 5.0),
+  return {
+    nodeId:           'node1',
+    seq:              randInt(1, 9999),
+    temperature:      rand(20, 26),
+    turbidity:        rand(1, 5),
+    ph:               rand(6.8, 8.2),
+    dissolved_oxygen: rand(6.5, 9.0),
+    flow_rate:        rand(0.5, 5.0),
     tx_millis,
     rx_millis,
-    location: 'Test Location',
-    timestamp: new Date().toISOString(),
+    location:         'Test Location',
+    timestamp:        new Date(now).toISOString(),
+    t_node:           now,
+    t_fwd_rx:         now + randInt(50, 300),
+    t_fwd_pub:        now + randInt(310, 600),
+    ...overrides,
   };
+}
 
-  if (Math.random() < ALERT_BREACH_PROBABILITY) {
-    const breach = Math.floor(Math.random() * 4); // 0=temp, 1=pH, 2=turbidity, 3=DO
-    if (breach === 0) {
-      base.temperature = Math.random() < 0.5
-        ? rand(10, THRESHOLDS.temperatureMin - 0.5)
-        : rand(THRESHOLDS.temperatureMax + 0.5, 38);
-    } else if (breach === 1) {
-      base.ph = Math.random() < 0.5
-        ? rand(4.5, THRESHOLDS.pHMin - 0.2)
-        : rand(THRESHOLDS.pHMax + 0.2, 9.5);
-    } else if (breach === 2) {
-      base.turbidity = rand(THRESHOLDS.turbidityMax + 1, 60);
-    } else {
-      base.dissolved_oxygen = rand(0.5, THRESHOLDS.dissolvedOxygenMin - 0.5);
-    }
+// ── Deviation helpers (mirror Layer 1 logic) ──────────────────────────────────
+// LOW:    within 5% of limit (just inside early-warning zone)
+// MEDIUM: 5–10% beyond limit
+// HIGH:   >10% beyond limit
+
+/** Value that is `pct`% below a minimum threshold. */
+function belowMin(threshold, pct) {
+  return +(threshold * (1 - pct / 100)).toFixed(3);
+}
+
+/** Value that is `pct`% above a maximum threshold. */
+function aboveMax(threshold, pct) {
+  return +(threshold * (1 + pct / 100)).toFixed(3);
+}
+
+// ── Scenario definitions ──────────────────────────────────────────────────────
+
+const SCENARIOS = {
+  // ── Normal / clear ──────────────────────────────────────────────────────────
+  normal: {
+    label: 'Normal — all within limits',
+    expectedAlerts: 'none',
+    payloads: () => [basePayload()],
+  },
+
+  'all-clear': {
+    label: 'All-clear — well within limits (resets persistence counters)',
+    expectedAlerts: 'none',
+    payloads: () => [basePayload({
+      temperature:      24,
+      turbidity:        3,
+      ph:               7.2,
+      dissolved_oxygen: 8.0,
+    })],
+  },
+
+  // ── DO scenarios ────────────────────────────────────────────────────────────
+  'low-do': {
+    label: 'DO — LOW (early warning, within 5% of min)',
+    expectedAlerts: 'LOW dissolved oxygen',
+    // Within 5% below min: e.g. min=4, value = 4 * (1 - 0.03) = 3.88
+    payloads: () => [basePayload({ dissolved_oxygen: belowMin(T.dissolvedOxygenMin, 3) })],
+  },
+
+  'medium-do': {
+    label: 'DO — MEDIUM (5–10% below min)',
+    expectedAlerts: 'MEDIUM dissolved oxygen',
+    payloads: () => [basePayload({ dissolved_oxygen: belowMin(T.dissolvedOxygenMin, 7) })],
+  },
+
+  'high-do': {
+    label: 'DO — HIGH (>10% below min)',
+    expectedAlerts: 'HIGH dissolved oxygen',
+    payloads: () => [basePayload({ dissolved_oxygen: belowMin(T.dissolvedOxygenMin, 15) })],
+  },
+
+  // ── pH scenarios ────────────────────────────────────────────────────────────
+  'low-ph': {
+    label: 'pH — LOW (just above max, within 5%)',
+    expectedAlerts: 'LOW pH too high',
+    payloads: () => [basePayload({ ph: aboveMax(T.pHMax, 3) })],
+  },
+
+  'medium-ph': {
+    label: 'pH — MEDIUM (5–10% above max)',
+    expectedAlerts: 'MEDIUM pH too high',
+    payloads: () => [basePayload({ ph: aboveMax(T.pHMax, 7) })],
+  },
+
+  'high-ph': {
+    label: 'pH — HIGH (>10% above max)',
+    expectedAlerts: 'HIGH pH too high',
+    payloads: () => [basePayload({ ph: aboveMax(T.pHMax, 15) })],
+  },
+
+  // ── Turbidity scenarios ─────────────────────────────────────────────────────
+  'low-turbidity': {
+    label: 'Turbidity — LOW (just above max, within 5%)',
+    expectedAlerts: 'LOW high turbidity',
+    payloads: () => [basePayload({ turbidity: aboveMax(T.turbidityMax, 3) })],
+  },
+
+  'medium-turbidity': {
+    label: 'Turbidity — MEDIUM (5–10% above max)',
+    expectedAlerts: 'MEDIUM high turbidity',
+    payloads: () => [basePayload({ turbidity: aboveMax(T.turbidityMax, 7) })],
+  },
+
+  'high-turbidity': {
+    label: 'Turbidity — HIGH (>10% above max)',
+    expectedAlerts: 'HIGH high turbidity',
+    payloads: () => [basePayload({ turbidity: aboveMax(T.turbidityMax, 15) })],
+  },
+
+  // ── Temperature scenarios ───────────────────────────────────────────────────
+  'low-temp': {
+    label: 'Temperature — LOW (just below min, within 5%)',
+    expectedAlerts: 'LOW temperature below minimum',
+    payloads: () => [basePayload({ temperature: belowMin(T.temperatureMin, 3) })],
+  },
+
+  'high-temp': {
+    label: 'Temperature — HIGH (>10% above max)',
+    expectedAlerts: 'HIGH temperature above maximum',
+    payloads: () => [basePayload({ temperature: aboveMax(T.temperatureMax, 15) })],
+  },
+
+  // ── NH3 scenarios ───────────────────────────────────────────────────────────
+  'low-nh3': {
+    label: 'NH3 — LOW (just above max, within 5%)',
+    expectedAlerts: 'LOW NH3 above threshold',
+    // NH3 is derived from TAN via pH+temp. We set nh3 directly here.
+    payloads: () => [basePayload({ nh3: aboveMax(T.nh3Max, 3) })],
+  },
+
+  'high-nh3': {
+    label: 'NH3 — HIGH (>10% above max)',
+    expectedAlerts: 'HIGH NH3 above threshold',
+    payloads: () => [basePayload({ nh3: aboveMax(T.nh3Max, 15) })],
+  },
+
+  'nh3-slope': {
+    label: 'NH3 — Rapid rise (slope alert, always HIGH)',
+    expectedAlerts: 'HIGH NH3 rapid rise',
+    // First reading: NH3 at 0.2 (below max). Second: jumps to 0.45 (delta = 0.25 > slopeLimit 0.15).
+    payloads: () => [
+      basePayload({ nh3: 0.2 }),
+      basePayload({ nh3: 0.45 }),
+    ],
+  },
+
+  // ── Multi-param (WQI Layer 3) ───────────────────────────────────────────────
+  'multi-param': {
+    label: 'Multi-param — 2+ parameters degraded → system-level HIGH (Layer 3)',
+    expectedAlerts: 'HIGH system-level + individual MEDIUM/HIGH alerts',
+    payloads: () => [basePayload({
+      dissolved_oxygen: belowMin(T.dissolvedOxygenMin, 7),   // MEDIUM DO
+      turbidity:        aboveMax(T.turbidityMax, 7),          // MEDIUM turbidity
+      ph:               aboveMax(T.pHMax, 7),                 // MEDIUM pH
+    })],
+  },
+
+  // ── WQI rapid drop (Layer 3) ────────────────────────────────────────────────
+  'wqi-drop': {
+    label: 'WQI rapid drop — first reading good, second very bad (>15 pt WQI drop)',
+    expectedAlerts: 'HIGH WQI rapid drop alert',
+    payloads: () => [
+      // Reading 1: excellent water quality
+      basePayload({
+        dissolved_oxygen: 8.5,
+        turbidity:        2,
+        ph:               7.2,
+        temperature:      23,
+      }),
+      // Reading 2: severe degradation — WQI will drop >15 points
+      basePayload({
+        dissolved_oxygen: belowMin(T.dissolvedOxygenMin, 20),
+        turbidity:        aboveMax(T.turbidityMax, 30),
+        ph:               aboveMax(T.pHMax, 20),
+        temperature:      aboveMax(T.temperatureMax, 15),
+      }),
+    ],
+  },
+
+  // ── Persistence escalation (Layer 2) ────────────────────────────────────────
+  persistence: {
+    label: 'Persistence — 3× LOW-DO readings → escalates to HIGH via Layer 2',
+    expectedAlerts: 'LOW → MEDIUM → HIGH (escalates over 3 readings)',
+    // Sends 3 identical LOW-DO readings; persistence counter increments each time.
+    payloads: () => [
+      basePayload({ dissolved_oxygen: belowMin(T.dissolvedOxygenMin, 3) }),
+      basePayload({ dissolved_oxygen: belowMin(T.dissolvedOxygenMin, 3) }),
+      basePayload({ dissolved_oxygen: belowMin(T.dissolvedOxygenMin, 3) }),
+    ],
+  },
+};
+
+// ── Print scenario list if no args ────────────────────────────────────────────
+
+if (!scenarioArg) {
+  console.log('\nAvailable scenarios (--scenario <name>):\n');
+  const maxLen = Math.max(...Object.keys(SCENARIOS).map((k) => k.length));
+  for (const [name, s] of Object.entries(SCENARIOS)) {
+    console.log(`  ${name.padEnd(maxLen + 2)} ${s.label}`);
   }
+  console.log('\nExamples:');
+  console.log('  node scripts/test.js --scenario high-do');
+  console.log('  node scripts/test.js --scenario low-do --repeat 3');
+  console.log('  node scripts/test.js --scenario persistence');
+  console.log('  node scripts/test.js --scenario wqi-drop\n');
+  process.exit(0);
+}
 
-  return { ...base, ...overrides };
+const scenario = SCENARIOS[scenarioArg];
+if (!scenario) {
+  console.error(`❌  Unknown scenario: "${scenarioArg}". Run without arguments to list all scenarios.`);
+  process.exit(1);
+}
+
+// ── Build publish queue ───────────────────────────────────────────────────────
+
+// Each call to scenario.payloads() re-runs rand() so values differ every time.
+// --repeat builds the queue by calling payloads()[0] freshly for each slot.
+let queue;
+if (repeatCount > 1) {
+  queue = Array.from({ length: repeatCount }, () => scenario.payloads()[0]);
+} else {
+  queue = scenario.payloads();
 }
 
 const topic = 'water-quality/node1';
+
+// ── MQTT connection ───────────────────────────────────────────────────────────
 
 const opts = { clientId: 'wqms-test-pub-' + Date.now(), clean: true };
 if (MQTT_USER) opts.username = MQTT_USER;
 if (MQTT_PASS) opts.password = MQTT_PASS;
 if (MQTT_URL.startsWith('mqtts://')) opts.rejectUnauthorized = true;
 
-console.log('[Test] Connecting to HiveMQ...');
+console.log(`\n[Test] Scenario : ${scenarioArg}`);
+console.log(`[Test] Label    : ${scenario.label}`);
+console.log(`[Test] Expected : ${scenario.expectedAlerts}`);
+console.log(`[Test] Payloads : ${queue.length}\n`);
+console.log('[Test] Connecting to MQTT broker...');
+
 const client = mqtt.connect(MQTT_URL, opts);
 
 let published = 0;
+
 function publishNext() {
-  if (published >= publishCount) {
+  if (published >= queue.length) {
     client.end();
     return;
   }
-  const payloadObj = buildPayload();
-  const payload = JSON.stringify(payloadObj);
+  const payloadObj = queue[published];
+  const payload    = JSON.stringify(payloadObj);
+
   client.publish(topic, payload, { qos: 1 }, (err) => {
     if (err) {
       console.error('[Test] Publish error:', err);
       process.exit(1);
     }
     published++;
-    console.log('[Test] Published', published, '/', publishCount, ':', payload.slice(0, 100) + (payload.length > 100 ? '…' : ''));
-    publishNext();
+
+    // Pretty-print key sensor values for this reading
+    const p = payloadObj;
+    console.log(
+      `[Test] ✓ Published ${published}/${queue.length}` +
+      `  DO=${p.dissolved_oxygen ?? '—'}` +
+      `  pH=${p.ph ?? '—'}` +
+      `  turb=${p.turbidity ?? '—'}` +
+      `  temp=${p.temperature ?? '—'}` +
+      (p.nh3 != null ? `  nh3=${p.nh3}` : '')
+    );
+
+    // Small delay between payloads so the bridge processes them in order
+    if (published < queue.length) {
+      setTimeout(publishNext, 600);
+    } else {
+      publishNext();
+    }
   });
 }
 
 client.on('connect', () => {
-  console.log('[Test] Connected. Publishing', publishCount, 'reading(s) to', topic);
+  console.log('[Test] Connected.\n');
   publishNext();
 });
 
@@ -137,11 +388,14 @@ client.on('error', (err) => {
 });
 
 client.on('close', () => {
-  console.log('[Test] Done. If the bridge is running, you should see the reading in Supabase and on the dashboard.');
+  console.log('\n[Test] Done.');
+  console.log('[Test] If the bridge is running, check the dashboard/alerts page for the expected alert.');
   process.exit(0);
 });
 
+// Allow 8s for connection + 800ms per payload
+const timeoutMs = 8000 + queue.length * 800;
 setTimeout(() => {
-  console.error('[Test] Timeout');
+  console.error('[Test] Timeout — broker did not respond in time.');
   process.exit(1);
-}, 15000);
+}, timeoutMs);

@@ -85,6 +85,7 @@ export default function MapMarkersOverlay({ markers = [] }) {
               onTestSensor={m.onTestSensor}
               isTesting={m.isTesting}
               testStatus={m.testStatus}
+              inactive={m.inactive}
             />
           </div>
         );
