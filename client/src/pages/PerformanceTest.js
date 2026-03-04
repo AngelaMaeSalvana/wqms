@@ -8,33 +8,7 @@ import { computeIoTMetrics } from "../utils/iotMetrics";
 import { useTestRun } from "../contexts/TestRunContext";
 import "./PerformanceTest.css";
 
-// ─── API Benchmark tests ──────────────────────────────────────────────────────
-
-const API_TESTS = [
-  {
-    id: "api_latency",
-    label: "API Latency",
-    description: "Measures round-trip time for a single sensor readings request.",
-  },
-  {
-    id: "bulk_fetch",
-    label: "Bulk Data Fetch",
-    description: "Fetches up to 500 sensor records and measures throughput.",
-  },
-  {
-    id: "concurrent",
-    label: "Concurrent Requests",
-    description: "Fires 5 simultaneous requests and measures total completion time.",
-  },
-];
-
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function formatMs(ms) {
-  if (ms == null) return "—";
-  if (ms < 1000) return `${Math.round(ms)} ms`;
-  return `${(ms / 1000).toFixed(2)} s`;
-}
 
 function fmtPct(v) {
   if (v == null) return "—";
@@ -44,18 +18,6 @@ function fmtPct(v) {
 function fmtLatMs(ms) {
   if (ms == null) return "—";
   return `${Math.round(ms)} ms`;
-}
-
-function statusClass(status) {
-  if (status === "pass") return "perf-test-status--pass";
-  if (status === "fail") return "perf-test-status--fail";
-  if (status === "running") return "perf-test-status--running";
-  return "perf-test-status--idle";
-}
-
-function rateLabel(ms, count) {
-  if (ms == null || !count) return null;
-  return `${(count / (ms / 1000)).toFixed(1)} records/s`;
 }
 
 function todayLocalYMD() {
@@ -239,13 +201,7 @@ export default function PerformanceTest() {
   } = useTestRun();
 
   // UI collapse state (Bootstrap-like collapse)
-  const [apiBenchOpen, setApiBenchOpen] = useState(true);
   const [evalResultsOpen, setEvalResultsOpen] = useState(true);
-
-  // API benchmark state
-  const [apiResults, setApiResults] = useState({});
-  const [apiRunning, setApiRunning] = useState(false);
-  const apiAbortRef = useRef(false);
 
   // IoT evaluation state
   const [nodes, setNodes] = useState([]);
@@ -256,10 +212,10 @@ export default function PerformanceTest() {
     onlyTestRun: false,
     metrics: { e2e: true, pdr: true, availability: true, alerts: true },
     // Test window duration
-    durationValue: 60,
+    durationValue: 9,
     durationUnit: "minutes",
-    // Transmission frequency (how often the node sends a packet)
-    freqValue: 5,
+    // Transmission frequency — TDMA cycle is 8 slots × 6 s = 48 s per node
+    freqValue: 48,
     freqUnit: "seconds",
   });
   const [evalRunning, setEvalRunning] = useState(false);
@@ -275,14 +231,7 @@ export default function PerformanceTest() {
     loadNodes().then(() => setNodes(getNodes()));
   }, []);
 
-  // When context restores an active test run on mount, lock the filter to that run.
-  useEffect(() => {
-    if (testRun?.id) {
-      setEvalConfig((c) => ({ ...c, onlyTestRun: true }));
-    }
-    // Only run once on mount
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // (no auto-lock to test run on mount — user controls onlyTestRun manually)
 
   // Keep the evaluation date locked to today's local date.
   useEffect(() => {
@@ -339,72 +288,6 @@ export default function PerformanceTest() {
   // Top panel always shows config-based expected
   const expectedPackets = expectedFromConfig;
 
-  // ── API Benchmark ────────────────────────────────────────────────────────
-
-  const updateApiResult = useCallback((id, patch) => {
-    setApiResults((prev) => ({ ...prev, [id]: { ...(prev[id] || {}), ...patch } }));
-  }, []);
-
-  const runApiTests = useCallback(async () => {
-    apiAbortRef.current = false;
-    setApiRunning(true);
-    setApiResults({});
-
-    const today = new Date();
-    const startDate = today.getFullYear() + "-" + String(today.getMonth() + 1).padStart(2, "0") + "-01";
-    const endDate = today.getFullYear() + "-" + String(today.getMonth() + 1).padStart(2, "0") + "-" + String(today.getDate()).padStart(2, "0");
-
-    updateApiResult("api_latency", { status: "running" });
-    try {
-      const t0 = performance.now();
-      await api.getSensorReadings({ startDate, endDate, limit: 1 });
-      const elapsed = performance.now() - t0;
-      updateApiResult("api_latency", {
-        status: elapsed < 2000 ? "pass" : "fail",
-        elapsed,
-        detail: elapsed < 2000 ? "Within acceptable range" : "Latency too high (>2s)",
-      });
-    } catch (err) {
-      updateApiResult("api_latency", { status: "fail", elapsed: null, detail: String(err.message || err) });
-    }
-
-    if (apiAbortRef.current) { setApiRunning(false); return; }
-
-    updateApiResult("bulk_fetch", { status: "running" });
-    try {
-      const t0 = performance.now();
-      const rows = await api.getSensorReadings({ startDate, endDate, limit: 500 });
-      const elapsed = performance.now() - t0;
-      const count = Array.isArray(rows) ? rows.length : 0;
-      updateApiResult("bulk_fetch", {
-        status: elapsed < 5000 ? "pass" : "fail",
-        elapsed, count,
-        detail: `Fetched ${count} records`,
-        rate: rateLabel(elapsed, count),
-      });
-    } catch (err) {
-      updateApiResult("bulk_fetch", { status: "fail", elapsed: null, detail: String(err.message || err) });
-    }
-
-    if (apiAbortRef.current) { setApiRunning(false); return; }
-
-    updateApiResult("concurrent", { status: "running" });
-    try {
-      const t0 = performance.now();
-      await Promise.all(Array.from({ length: 5 }, () => api.getSensorReadings({ startDate, endDate, limit: 10 })));
-      const elapsed = performance.now() - t0;
-      updateApiResult("concurrent", {
-        status: elapsed < 6000 ? "pass" : "fail",
-        elapsed,
-        detail: elapsed < 6000 ? "5 concurrent requests completed" : "Concurrent requests too slow (>6s)",
-      });
-    } catch (err) {
-      updateApiResult("concurrent", { status: "fail", elapsed: null, detail: String(err.message || err) });
-    }
-
-    setApiRunning(false);
-  }, [updateApiResult]);
-
   // ── IoT Evaluation ───────────────────────────────────────────────────────
 
   const runEvaluation = useCallback(async () => {
@@ -452,10 +335,19 @@ export default function PerformanceTest() {
         }
       }
 
-      const perfRowsFiltered =
-        (metrics.e2e || metrics.pdr || metrics.availability) && useRun
-          ? await api.getPerformanceReadings({ testRunId: lastTestRunId, nodeId: nodeArg, limit: 5000 })
-          : perfRows;
+      let perfRowsFiltered = perfRows;
+      let usedTestRunFilter = false;
+      if ((metrics.e2e || metrics.pdr || metrics.availability) && useRun) {
+        const runRows = await api.getPerformanceReadings({ testRunId: lastTestRunId, nodeId: nodeArg, limit: 5000 });
+        if (runRows.length > 0) {
+          perfRowsFiltered = runRows;
+          usedTestRunFilter = true;
+        } else {
+          // Bridge may have missed the test_start command — fall back to date-range query
+          perfRowsFiltered = perfRows;
+          usedTestRunFilter = false;
+        }
+      }
 
       if (evalAbortRef.current) { setEvalRunning(false); return; }
 
@@ -477,8 +369,9 @@ export default function PerformanceTest() {
         nodeMetrics,
         alertMetrics,
         rowCount: perfRowsFiltered.length,
-        testRunId: useRun ? lastTestRunId : null,
-        testRunMeta: useRun ? runMeta : null,
+        testRunId: usedTestRunFilter ? lastTestRunId : null,
+        testRunMeta: usedTestRunFilter ? runMeta : null,
+        testRunFallback: useRun && !usedTestRunFilter,
       });
     } catch (err) {
       setEvalError(String(err.message || err));
@@ -569,10 +462,6 @@ export default function PerformanceTest() {
 
   // ── Render helpers ───────────────────────────────────────────────────────
 
-  const apiAllDone = API_TESTS.every((t) => apiResults[t.id]?.status === "pass" || apiResults[t.id]?.status === "fail");
-  const apiPassCount = API_TESTS.filter((t) => apiResults[t.id]?.status === "pass").length;
-  const apiFailCount = API_TESTS.filter((t) => apiResults[t.id]?.status === "fail").length;
-
   const evalNodeIds = evalResult ? Object.keys(evalResult.nodeMetrics) : [];
   const expectedFromEvalRun = evalResult?.testRunMeta ? computeExpectedFromRunMeta(evalResult.testRunMeta) : { expected: null, formula: null };
 
@@ -602,98 +491,13 @@ export default function PerformanceTest() {
           </button>
           <div>
             <h1 className="page-title">Performance Test</h1>
-            <p className="perf-test-subtitle">Benchmark API response times and IoT system performance metrics</p>
+            <p className="page-subtitle">Benchmark IoT system performance metrics</p>
           </div>
         </div>
         <PageDateWithStatus lastUpdated={lastUpdated} className="page-meta" showClassification={false} />
       </header>
 
-      {/* ── Section 1: API Benchmark ── */}
-      <section className="perf-section card">
-        <div className="perf-section-header">
-          <div>
-            <h2 className="perf-section-title">API Benchmark</h2>
-            <p className="perf-section-desc">Tests dashboard API response time and data throughput</p>
-          </div>
-          <div className="perf-section-controls">
-            <button
-              type="button"
-              className="ghost-btn perf-collapse-toggle"
-              onClick={() => setApiBenchOpen((v) => !v)}
-              aria-expanded={apiBenchOpen}
-            >
-              {apiBenchOpen ? "Hide" : "Show"}
-              <span className={`perf-collapse-chevron${apiBenchOpen ? " is-open" : ""}`} aria-hidden="true">▾</span>
-            </button>
-            {!apiRunning ? (
-              <button type="button" className="perf-test-run-btn" onClick={runApiTests}>
-                {apiAllDone ? "Re-run" : "Run Tests"}
-              </button>
-            ) : (
-              <button type="button" className="perf-test-stop-btn" onClick={() => { apiAbortRef.current = true; setApiRunning(false); }}>
-                Stop
-              </button>
-            )}
-            {apiAllDone && (
-              <span className="perf-test-summary">
-                <span className="perf-test-summary-pass">{apiPassCount} passed</span>
-                {apiFailCount > 0 && <span className="perf-test-summary-fail">{apiFailCount} failed</span>}
-              </span>
-            )}
-          </div>
-        </div>
-        <div className={`perf-collapse${apiBenchOpen ? " is-open" : ""}`}>
-          <div className="perf-collapse-inner">
-            <div className="perf-test-cards">
-              {API_TESTS.map((test) => {
-                const r = apiResults[test.id];
-                const status = r?.status || "idle";
-                return (
-                  <div key={test.id} className={`perf-test-card perf-test-card--${status}`}>
-                    <div className="perf-test-card-header">
-                      <div>
-                        <h3 className="perf-test-card-title">{test.label}</h3>
-                        <p className="perf-test-card-desc">{test.description}</p>
-                      </div>
-                      <span className={`perf-test-status ${statusClass(status)}`}>
-                        {status === "idle" && "Idle"}
-                        {status === "running" && <span className="perf-test-spinner" aria-label="Running" />}
-                        {status === "pass" && "Pass"}
-                        {status === "fail" && "Fail"}
-                      </span>
-                    </div>
-                    <div className="perf-test-card-metrics">
-                      <div className="perf-test-metric">
-                        <span className="perf-test-metric-label">Time</span>
-                        <span className="perf-test-metric-value">
-                          {status === "running" ? <span className="perf-test-metric-running">…</span> : formatMs(r?.elapsed)}
-                        </span>
-                      </div>
-                      {r?.count != null && (
-                        <div className="perf-test-metric">
-                          <span className="perf-test-metric-label">Records</span>
-                          <span className="perf-test-metric-value">{r.count}</span>
-                        </div>
-                      )}
-                      {r?.rate && (
-                        <div className="perf-test-metric">
-                          <span className="perf-test-metric-label">Throughput</span>
-                          <span className="perf-test-metric-value">{r.rate}</span>
-                        </div>
-                      )}
-                    </div>
-                    {r?.detail && (
-                      <p className={`perf-test-card-detail perf-test-card-detail--${status}`}>{r.detail}</p>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* ── Section 2: IoT Performance Evaluation ── */}
+      {/* ── IoT Performance Evaluation ── */}
       <section className="perf-section card">
         <div className="perf-section-header">
           <div>
@@ -970,6 +774,11 @@ export default function PerformanceTest() {
                 {evalResult.testRunId
                   ? `(test run ${String(evalResult.testRunId).slice(0, 8)}…)`
                   : `(${evalConfig.dateFrom} → ${evalConfig.dateTo})`}
+                {evalResult.testRunFallback && (
+                  <span className="eval-results-meta-warn" title="No packets were tagged with this test run ID — the bridge may have missed the test_start command. Showing all packets for today instead.">
+                    {" "}⚠ test-run filter returned 0 packets; showing all today's packets
+                  </span>
+                )}
               </p>
               <button
                 type="button"
@@ -986,9 +795,19 @@ export default function PerformanceTest() {
               <div className="perf-collapse-inner">
                 {/* Per-node metric cards */}
                 {evalNodeIds.length === 0 ? (
-                  <p className="eval-no-data">
-                    No packets with sequence IDs found in this date range. Ensure the firmware is transmitting <code>seq</code> and timestamp chain fields.
-                  </p>
+                  <div className="eval-no-data">
+                    <p>No packets found{evalResult.testRunId ? " for this test run" : " in this date range"}.</p>
+                    {evalResult.testRunId ? (
+                      <p style={{marginTop: "6px", fontSize: "0.85em", opacity: 0.8}}>
+                        Packets are tagged with a test run ID only when the bridge receives the <code>test_start</code> command before they arrive.
+                        Uncheck <strong>"Only test-run packets"</strong> and click <strong>Re-analyse</strong> to see all packets for today regardless of test run.
+                      </p>
+                    ) : (
+                      <p style={{marginTop: "6px", fontSize: "0.85em", opacity: 0.8}}>
+                        Ensure the firmware is transmitting <code>seq</code> and timestamp chain fields (<code>t_fwd_rx</code>, <code>t_be_rx</code>).
+                      </p>
+                    )}
+                  </div>
                 ) : (
                   evalNodeIds.map((nid) => {
                     const m = evalResult.nodeMetrics[nid];

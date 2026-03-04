@@ -1,7 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo, memo } from "react";
 import { createPortal } from "react-dom";
-import { jsPDF } from "jspdf";
-import { autoTable } from "jspdf-autotable";
 import "../utils/chartConfig";
 import { Line, Bar, Doughnut } from "react-chartjs-2";
 import PageDateWithStatus from "../components/PageDateWithStatus";
@@ -624,7 +622,6 @@ function AlertsComplianceTab({ reportRangeStart, reportRangeEnd, onSwitchToWater
           {rangeStr && (
             <span className="reports-tab-range">
               {rangeStr}
-              {onSwitchToWater && <button type="button" className="reports-tab-range-link" onClick={onSwitchToWater}>Change date</button>}
             </span>
           )}
         </div>
@@ -874,7 +871,6 @@ function SystemTab({ reportRangeStart, reportRangeEnd, nodes, onSwitchToWater })
           {rangeStr && (
             <span className="reports-tab-range">
               {rangeStr}
-              {onSwitchToWater && <button type="button" className="reports-tab-range-link" onClick={onSwitchToWater}>Change date</button>}
             </span>
           )}
         </div>
@@ -1045,9 +1041,6 @@ export default function Reports() {
   const [selectedDay, setSelectedDay] = useState(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
-  const [exportMenuOpen, setExportMenuOpen] = useState(false);
-  const exportMenuRef = useRef(null);
-
   useEffect(() => {
     loadNodes().then(() => setNodes(getNodes())).finally(() => setNodesLoaded(true));
   }, []);
@@ -1249,60 +1242,12 @@ export default function Reports() {
   );
 
 
-  const buildExportData = () => {
-    const { labels, datasets } = reportChartData;
-    const minData = datasets.find((d) => d.label.startsWith("Min"))?.data ?? [];
-    const avgData = datasets.find((d) => d.label.startsWith("Avg"))?.data ?? [];
-    const maxData = datasets.find((d) => d.label.startsWith("Max"))?.data ?? [];
-    return labels.map((label, i) => ({
-      Period: label,
-      Min: minData[i] != null ? minData[i] : "",
-      Avg: avgData[i] != null ? avgData[i] : "",
-      Max: maxData[i] != null ? maxData[i] : "",
-    }));
-  };
-
-  const handleExportReports = (format = "pdf") => {
-    const param = PARAMETER_OPTIONS.find((p) => p.id === reportParameter);
-    const paramLabel = param?.label ?? reportParameter;
-    const rangeStr = reportPeriod === "week" ? formatDateRange(reportRangeStart, reportRangeEnd) : `${MONTH_NAMES[reportMonth]} ${reportYear}`;
-    const baseName = `wqms-report-${paramLabel.toLowerCase().replace(/\s+/g, "-")}-${rangeStr}`.replace(/[\/\s,]/g, "-");
-    const exportData = buildExportData();
-
-    if (format === "csv") {
-      exportToCSV(exportData, baseName);
-      return;
-    }
-    if (format === "excel") {
-      exportToExcel(exportData, baseName);
-      return;
-    }
-    const doc = new jsPDF({ orientation: "landscape" });
-    doc.setFontSize(12);
-    doc.text("WQMS Report", 14, 12);
-    doc.setFontSize(9);
-    doc.text(`${paramLabel} — ${rangeStr}  |  Exported: ${new Date().toLocaleString()}`, 14, 18);
-    const header = ["Period", "Min", "Avg", "Max"];
-    const body = exportData.map((row) => [row.Period, row.Min !== "" ? String(row.Min) : "—", row.Avg !== "" ? String(row.Avg) : "—", row.Max !== "" ? String(row.Max) : "—"]);
-    autoTable(doc, {
-      head: [header],
-      body: body.length ? body : [["No data", "—", "—", "—"]],
-      startY: 24,
-      styles: { fontSize: 8 },
-      headStyles: { fillColor: [27, 156, 133] },
-    });
-    doc.save(`${baseName}.pdf`);
-  };
-
   useEffect(() => {
     const handleClickOutside = (e) => {
       const inSelectors = dateRangePickerRef.current?.contains(e.target);
       const inOverlay = dateRangeOverlayRef.current?.contains(e.target);
       if (!inSelectors && !inOverlay) {
         setDateRangePickerOpen(false);
-      }
-      if (exportMenuRef.current && !exportMenuRef.current.contains(e.target)) {
-        setExportMenuOpen(false);
       }
     };
     document.addEventListener("click", handleClickOutside);
@@ -1322,6 +1267,7 @@ export default function Reports() {
       <header className="page-header reports-page-header">
         <div>
           <h1 className="page-title">Reports</h1>
+          <p className="page-subtitle">Analytics and historical water quality data</p>
         </div>
         <PageDateWithStatus lastUpdated={lastUpdated} className="page-meta reports-header-meta" showClassification={false} />
       </header>
@@ -1341,29 +1287,6 @@ export default function Reports() {
             </button>
           ))}
         </nav>
-        {activeTab === "water" && (
-          <div className="reports-export-wrap reports-export-wrap--header" ref={exportMenuRef}>
-            <button
-              type="button"
-              className="reports-export-btn"
-              onClick={() => setExportMenuOpen((o) => !o)}
-              aria-expanded={exportMenuOpen}
-              aria-haspopup="true"
-              aria-label="Export report"
-            >
-              <span className="reports-export-btn-icon" aria-hidden>↑</span>
-              Export statistics
-              <span className="reports-export-caret" aria-hidden>▾</span>
-            </button>
-            {exportMenuOpen && (
-              <div className="reports-export-menu" role="menu">
-                <button type="button" role="menuitem" onClick={() => { handleExportReports("pdf"); setExportMenuOpen(false); }}>PDF</button>
-                <button type="button" role="menuitem" onClick={() => { handleExportReports("csv"); setExportMenuOpen(false); }}>CSV</button>
-                <button type="button" role="menuitem" onClick={() => { handleExportReports("excel"); setExportMenuOpen(false); }}>Excel</button>
-              </div>
-            )}
-          </div>
-        )}
       </div>
 
       {/* ── Shared filter bar ── */}

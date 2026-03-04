@@ -256,15 +256,29 @@
   background: rgba(0, 0, 0, 0.06);
 }
 
-.sensor-logs-search {
-  min-width: 200px;
+.sensor-logs-search-wrap {
+  position: relative;
   flex: 1;
+  min-width: 200px;
   max-width: 320px;
+  display: flex;
+  align-items: center;
+}
+
+.sensor-logs-search-icon {
+  position: absolute;
+  left: 12px;
+  color: var(--text-muted);
+  pointer-events: none;
+  flex-shrink: 0;
+}
+
+.sensor-logs-search {
+  width: 100%;
   border: 1px solid var(--border);
   background: var(--panel-dark);
   color: var(--text);
-  padding: 8px 14px;
-  padding-left: 36px;
+  padding: 8px 14px 8px 36px;
   border-radius: 999px;
   font-size: 0.9rem;
   font-family: "Manrope", sans-serif;
@@ -328,7 +342,7 @@
 .sensor-logs-data-table-wrap {
   flex: 1;
   min-height: 0;
-  overflow: hidden;
+  overflow: auto;
   padding-bottom: 0;
 }
 
@@ -477,13 +491,14 @@
   z-index: 1000;
   display: flex;
   align-items: flex-end;
+  padding: 0 12px 12px;
 }
 
 .sl-detail-sheet {
   width: 100%;
   background: var(--panel);
-  border-top-left-radius: 18px;
-  border-top-right-radius: 18px;
+  border-radius: 18px;
+  border: 1px solid var(--border);
   padding: 0 0 env(safe-area-inset-bottom, 16px);
   box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.4);
   animation: sl-sheet-up 0.22s ease;

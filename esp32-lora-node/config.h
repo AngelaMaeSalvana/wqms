@@ -99,6 +99,16 @@
 #define DO_MAX_VALUE 20.0                     // Maximum DO (mg/L)
 
 // ============================================
+// Battery Monitoring (single Li-ion cell)
+// ============================================
+// GPIO pin for battery voltage divider (ADC1). Use -1 to disable.
+// Typical: 100k+100k divider -> 4.2V becomes 2.1V at ADC; set DIVIDER to 2.0
+#define BATTERY_PIN 39                       // ADC1_CH3 (GPIO39) - Heltec LoRa32 V3 VBAT
+#define BATTERY_VOLTAGE_DIVIDER 2.0          // V_battery = adc_voltage * DIVIDER
+#define BATTERY_VOLTAGE_FULL 4.2f            // 100% (single Li-ion)
+#define BATTERY_VOLTAGE_EMPTY 3.3f           // 0%
+
+// ============================================
 // ADC Configuration
 // ============================================
 #define ADC_RESOLUTION 12                     // ESP32 ADC resolution (12-bit = 0-4095)

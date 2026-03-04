@@ -119,6 +119,24 @@
   flex-wrap: wrap;
 }
 
+/* Search with icon */
+.alerts-search-wrap {
+  position: relative;
+  flex: 1;
+  max-width: 320px;
+  min-width: 200px;
+  display: flex;
+  align-items: center;
+}
+
+.alerts-search-icon {
+  position: absolute;
+  left: 12px;
+  color: var(--text-muted);
+  pointer-events: none;
+  flex-shrink: 0;
+}
+
 .alerts-toolbar-actions {
   display: flex;
   align-items: center;
@@ -294,14 +312,11 @@
 }
 
 .alerts-search {
-  min-width: 200px;
-  flex: 1;
-  max-width: 320px;
+  width: 100%;
   border: 1px solid var(--border);
   background: var(--panel-dark);
   color: var(--text);
-  padding: 8px 14px;
-  padding-left: 36px;
+  padding: 8px 14px 8px 36px;
   border-radius: 999px;
   font-size: 0.9rem;
   font-family: "Manrope", sans-serif;
@@ -558,6 +573,58 @@
   color: var(--text-muted);
 }
 
+/* Row: title + severity badge */
+.alerts-notification-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* Meta row: node + date */
+.alerts-notification-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+/* Severity badge */
+.alerts-severity-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  flex-shrink: 0;
+}
+
+.alerts-severity-badge--high {
+  background: rgba(212, 91, 91, 0.15);
+  color: var(--danger, #d45b5b);
+  border: 1px solid rgba(212, 91, 91, 0.3);
+}
+
+.alerts-severity-badge--medium {
+  background: rgba(240, 165, 0, 0.15);
+  color: var(--warning, #f0a500);
+  border: 1px solid rgba(240, 165, 0, 0.3);
+}
+
+.alerts-severity-badge--low {
+  background: rgba(68, 211, 126, 0.12);
+  color: var(--success, #44d37e);
+  border: 1px solid rgba(68, 211, 126, 0.25);
+}
+
+.alerts-severity-badge--info {
+  background: rgba(52, 152, 219, 0.12);
+  color: #3498db;
+  border: 1px solid rgba(52, 152, 219, 0.25);
+}
 
 [data-theme="light"] .alerts-page .alerts-notification-item:hover {
   background: rgba(0, 0, 0, 0.04) !important;
@@ -583,10 +650,13 @@
   .alerts-toolbar {
     flex-wrap: nowrap;
   }
-  .alerts-search {
+  .alerts-search-wrap {
     flex: 1;
     min-width: 0;
     max-width: none;
+  }
+  .alerts-search {
+    width: 100%;
   }
   .alerts-toolbar-actions {
     margin-left: 0;

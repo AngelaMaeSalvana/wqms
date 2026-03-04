@@ -54,6 +54,27 @@ float linearInterpolate(float value, float inMin, float inMax, float outMin, flo
   return outMin + ((value - inMin) * (outMax - outMin) / (inMax - inMin));
 }
 
+/**
+ * Read battery voltage from voltage divider on ADC pin.
+ * Single Li-ion: 4.2V = 100%, 3.3V = 0%.
+ * Returns NAN if BATTERY_PIN is -1 or reading fails.
+ */
+float readBatteryVoltage() {
+#if defined(BATTERY_PIN) && BATTERY_PIN >= 0
+  int raw = readAnalogAverage(BATTERY_PIN);
+  float adcVoltage = adcToVoltage(raw);
+  float vBattery = adcVoltage * BATTERY_VOLTAGE_DIVIDER;
+  if (DEBUG_MODE) {
+    Serial.print("🔋 Battery: ");
+    Serial.print(vBattery);
+    Serial.println(" V");
+  }
+  return vBattery;
+#else
+  return NAN;
+#endif
+}
+
 // ============================================
 // Sensor Reading Functions
 // ============================================

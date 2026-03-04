@@ -4,7 +4,7 @@
  * NODE_LOCATION, WIFI_SSID, and WIFI_PASSWORD before flashing.
  * Ready-to-flash nodes: see node_N1/ and node_N2/.
  *
- * Heltec LoRa32 V3 - Simulates water quality sensors for testing
+ * Heltec LoRa32 V3 - Real DS18B20 temperature; other sensors null until hardware added
  * Sends: dissolvedOxygen, turbidity, pH, flowRate, temperature
  * Field names match wqms dashboard - JSON structure constant; null when sensor disconnected
  * Listens for remote diagnostics commands (overrides send interval)
@@ -35,6 +35,16 @@
 #include "HT_SSD1306Wire.h"
 #include <WiFi.h>
 #include <time.h>
+#include <OneWire.h>
+#include <DallasTemperature.h>
+
+#define DS18B20_PIN 4   // Yellow wire to GPIO4
+
+// -------------------- Battery (single Li-ion: 4.2V=100%, 3.3V=0%) --------------------
+#define BATTERY_PIN 39                       // ADC1 - voltage divider; use -1 to disable
+#define BATTERY_VOLTAGE_DIVIDER 2.0f         // V_battery = adc_voltage * DIVIDER
+#define ADC_MAX_VALUE 4095
+#define ESP32_VOLTAGE_REF 3.3f
 
 // -------------------- Stringify helper (for OLED slot display) --------------------
 #define STRINGIFY_INNER(x) #x
@@ -90,8 +100,58 @@
 #define TDMA_FALLBACK_MS   48000UL     // Fallback interval when NTP unsynced (= 1 full cycle)
 
 // -------------------- Timing --------------------
-#define CMD_LISTEN_INTERVAL_MS  2000  // Listen for commands every 2 sec
-#define CMD_LISTEN_WINDOW_MS     400  // RX window for commands (ms)
+#define CMD_LISTEN_INTERVAL_MS  1000  // Listen for commands every 1 sec
+#define CMD_LISTEN_WINDOW_MS     600  // RX window for commands (ms)
+
+// -------------------- DS18B20 Temperature Sensor --------------------
+OneWire oneWire(DS18B20_PIN);
+DallasTemperature ds18b20(&oneWire);
+
+static bool dsConversionInProgress = false;
+static unsigned long dsRequestTime  = 0;
+static float dsLatestTempC          = NAN;
+
+static void initTempSensor() {
+  pinMode(DS18B20_PIN, INPUT_PULLUP);
+  ds18b20.begin();
+  ds18b20.setWaitForConversion(false);  // Non-blocking mode
+}
+
+// Call every loop(); returns latest valid temperature or NAN if offline/invalid.
+static float updateTempSensor() {
+  unsigned long now = millis();
+
+  if (!dsConversionInProgress) {
+    ds18b20.requestTemperatures();
+    dsRequestTime         = now;
+    dsConversionInProgress = true;
+  }
+
+  if (dsConversionInProgress && (now - dsRequestTime >= 800)) {
+    float t = ds18b20.getTempCByIndex(0);
+    if (t > -100.0f && t < 150.0f) {
+      dsLatestTempC = t;
+    }
+    dsConversionInProgress = false;
+  }
+
+  return dsLatestTempC;
+}
+
+// Read battery voltage from divider. Returns NAN if BATTERY_PIN < 0.
+static float readBatteryVoltage() {
+#if BATTERY_PIN >= 0
+  long sum = 0;
+  for (int i = 0; i < 10; i++) {
+    sum += analogRead(BATTERY_PIN);
+    delay(10);
+  }
+  float adcV = (sum / 10.0f) * ESP32_VOLTAGE_REF / ADC_MAX_VALUE;
+  return adcV * BATTERY_VOLTAGE_DIVIDER;
+#else
+  return NAN;
+#endif
+}
 
 // -------------------- Buffers --------------------
 #define RX_BUF_SIZE 128  // For ACK (may include CMD:test:start...) and CMD:diag:<node_id>
@@ -104,14 +164,15 @@ static int16_t lastRssi = 0;
 static int8_t  lastSnr  = 0;
 static uint16_t rxSize  = 0;
 
-// -------------------- Sensor connectivity (for testing: set false = null in JSON) --------------------
-// Real sensors: set true when connected; read failure -> use null. Structure always constant.
+// -------------------- Sensor connectivity --------------------
+// true = use real reading if valid; false = always null. NaN/invalid readings -> null in JSON (sensor offline).
+// Only temperature has real hardware (DS18B20); others emit null until sensors are added.
 static const bool SENSOR_CONNECTED[] = {
-  true,   // temperature
-  true,   // turbidity
-  true,   // pH
-  true,   // dissolvedOxygen
-  false   // flowRate - disconnected for dashboard testing
+  true,   // temperature (DS18B20)
+  false,  // turbidity  - no hardware yet
+  false,  // pH         - no hardware yet
+  false,  // dissolvedOxygen - no hardware yet
+  false   // flowRate   - no hardware yet
 };
 
 // -------------------- Node ID - must match wqms nodes (e.g. N1, N2, N3) --------------------
@@ -324,25 +385,19 @@ static uint64_t epochMillis() {
   return (uint64_t)secs * 1000ULL + ms_in_sec;
 }
 
-// -------------------- Random sensor generator --------------------
-// Realistic ranges for water quality monitoring
+// -------------------- Sensor reading --------------------
+// Real sensors only. No dummy/test data. Invalid or offline -> NAN -> null in JSON.
 static void readSensors(float &do_val, float &turbidity, float &ph,
                         float &flow, float &temp) {
 
-  // DO (Dissolved Oxygen) - mg/L, typical 0-15, healthy water ~5-12
-  do_val    = random(400, 1200) / 100.0f;   // 4.00 - 12.00
+  // Temperature - DS18B20 real reading; NAN if offline or invalid
+  temp = updateTempSensor();
 
-  // Turbidity - NTU, 0-100+ (clear < 5, cloudy 5-50, very turbid > 50)
-  turbidity = random(0, 800) / 10.0f;       // 0.0 - 80.0
-
-  // pH - 6.0-9.0 typical for surface water
-  ph        = random(600, 900) / 100.0f;    // 6.00 - 9.00
-
-  // Flow - L/min
-  flow      = random(50, 500) / 10.0f;      // 5.0 - 50.0
-
-  // Temperature - degC, typical water 20-35
-  temp      = random(2200, 3600) / 100.0f;  // 22.00 - 36.00
+  // No hardware yet for these - emit null (sensor offline)
+  do_val    = NAN;
+  turbidity = NAN;
+  ph        = NAN;
+  flow      = NAN;
 }
 
 // Helper: format sensor value or "null" when disconnected or invalid (NaN)
@@ -366,11 +421,11 @@ static void fmtOrNull(char *out, size_t outLen, const char *key, float val, bool
 //
 // t_node is captured by the caller immediately before buildPayload() and must not be modified.
 // Use static format buffers to avoid ~140 bytes stack allocation (prevents stack overflow on ESP32)
-static char s_do[28], s_turb[28], s_ph[24], s_flow[28], s_temp[28];
+static char s_do[28], s_turb[28], s_ph[24], s_flow[28], s_temp[28], s_battery[32];
 static void buildPayload(char *buf, size_t bufLen,
                          uint32_t seq_id, uint64_t t_node,
                          float do_val, float turbidity, float ph,
-                         float flow, float temp,
+                         float flow, float temp, float battery_voltage,
                          const char *diagResult,
                          const char *testRunId) {
 
@@ -379,6 +434,7 @@ static void buildPayload(char *buf, size_t bufLen,
   fmtOrNull(s_ph,   sizeof(s_ph),   "pH",              ph,        !SENSOR_CONNECTED[2]);
   fmtOrNull(s_do,   sizeof(s_do),   "dissolvedOxygen", do_val,    !SENSOR_CONNECTED[3]);
   fmtOrNull(s_flow, sizeof(s_flow), "flowRate",        flow,      !SENSOR_CONNECTED[4]);
+  fmtOrNull(s_battery, sizeof(s_battery), "batteryVoltage", battery_voltage, isnan(battery_voltage));
 
   bool hasDiag = diagResult && diagResult[0];
   bool hasTest = testRunId  && testRunId[0];
@@ -386,27 +442,27 @@ static void buildPayload(char *buf, size_t bufLen,
   if (hasDiag && hasTest) {
     snprintf(buf, bufLen,
              "{\"node_id\":\"%s\",\"seq_id\":%lu,\"t_node\":%llu,\"location\":\"%s\","
-             "%s,%s,%s,%s,%s,\"diagResult\":\"%s\",\"test_run_id\":\"%s\"}",
+             "%s,%s,%s,%s,%s,%s,\"diagResult\":\"%s\",\"test_run_id\":\"%s\"}",
              NODE_ID, (unsigned long)seq_id, (unsigned long long)t_node, NODE_LOCATION,
-             s_temp, s_turb, s_ph, s_do, s_flow, diagResult, testRunId);
+             s_temp, s_turb, s_ph, s_do, s_flow, s_battery, diagResult, testRunId);
   } else if (hasDiag) {
     snprintf(buf, bufLen,
              "{\"node_id\":\"%s\",\"seq_id\":%lu,\"t_node\":%llu,\"location\":\"%s\","
-             "%s,%s,%s,%s,%s,\"diagResult\":\"%s\"}",
+             "%s,%s,%s,%s,%s,%s,\"diagResult\":\"%s\"}",
              NODE_ID, (unsigned long)seq_id, (unsigned long long)t_node, NODE_LOCATION,
-             s_temp, s_turb, s_ph, s_do, s_flow, diagResult);
+             s_temp, s_turb, s_ph, s_do, s_flow, s_battery, diagResult);
   } else if (hasTest) {
     snprintf(buf, bufLen,
              "{\"node_id\":\"%s\",\"seq_id\":%lu,\"t_node\":%llu,\"location\":\"%s\","
-             "%s,%s,%s,%s,%s,\"test_run_id\":\"%s\"}",
+             "%s,%s,%s,%s,%s,%s,\"test_run_id\":\"%s\"}",
              NODE_ID, (unsigned long)seq_id, (unsigned long long)t_node, NODE_LOCATION,
-             s_temp, s_turb, s_ph, s_do, s_flow, testRunId);
+             s_temp, s_turb, s_ph, s_do, s_flow, s_battery, testRunId);
   } else {
     snprintf(buf, bufLen,
              "{\"node_id\":\"%s\",\"seq_id\":%lu,\"t_node\":%llu,\"location\":\"%s\","
-             "%s,%s,%s,%s,%s}",
+             "%s,%s,%s,%s,%s,%s}",
              NODE_ID, (unsigned long)seq_id, (unsigned long long)t_node, NODE_LOCATION,
-             s_temp, s_turb, s_ph, s_do, s_flow);
+             s_temp, s_turb, s_ph, s_do, s_flow, s_battery);
   }
 }
 
@@ -758,6 +814,9 @@ void setup() {
   oledShowLines("BOOT", "Init radio 915...");
   configureRadio();
 
+  initTempSensor();
+  Serial.printf("[DS18B20] Devices found: %d\n", ds18b20.getDeviceCount());
+
   oledShowLines("MONITORING MODE", "Sender " NODE_ID,
                 s_timeSynced ? "NTP: synced" : "NTP: unsynced",
                 "TDMA slot " STRINGIFY(NODE_SLOT), "");
@@ -766,6 +825,9 @@ void setup() {
 
 void loop() {
   Radio.IrqProcess();
+
+  // Non-blocking DS18B20 update (must be called every loop)
+  updateTempSensor();
 
   uint32_t now = millis();
 
@@ -804,6 +866,7 @@ void loop() {
 
     float do_val, turbidity, ph, flow, temp;
     readSensors(do_val, turbidity, ph, flow, temp);
+    float battery_voltage = readBatteryVoltage();
 
     seq_id++;
 
@@ -819,7 +882,7 @@ void loop() {
     const char* testRunId = (inTest && s_testRunId[0]) ? s_testRunId : nullptr;
 
     buildPayload(txBuf, TX_BUF_SIZE, seq_id, t_node,
-                 do_val, turbidity, ph, flow, temp, diagResult, testRunId);
+                 do_val, turbidity, ph, flow, temp, battery_voltage, diagResult, testRunId);
 
     if (inTest) {
       uint32_t elapsed  = millis() - s_testStartMs;

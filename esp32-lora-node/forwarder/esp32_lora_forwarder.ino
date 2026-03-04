@@ -93,7 +93,12 @@ static volatile uint64_t t_fwd_rx_captured = 0;
 static char    s_broadcastCmd[CMD_BUF_SIZE] = "";
 static char    s_broadcastDelivered[MAX_NODES][16];
 static uint8_t s_broadcastDeliveredCount = 0;
-static volatile bool s_broadcastCmdTxOnce = false; // one-shot LoRa broadcast for CMD:test:* (no node suffix)
+static volatile bool s_broadcastCmdTxOnce = false; // triggers first proactive LoRa broadcast immediately
+// Retry interval for proactive broadcast: keep re-sending CMD:test:start every N ms
+// until every known node has acknowledged it (via an incoming packet with test_run_id set).
+// This covers the case where the one-shot broadcast lands outside the node's 400ms listen window.
+#define BROADCAST_RETRY_INTERVAL_MS 1500UL
+static uint32_t s_broadcastLastRetryMs = 0;
 
 // Nodes observed from incoming LoRa telemetry (used to target broadcast commands proactively)
 static char    s_knownNodes[MAX_NODES][16];
@@ -117,6 +122,7 @@ static void setBroadcastCmd(const char *cmd) {
   s_broadcastDeliveredCount = 0;
   for (int i = 0; i < MAX_NODES; i++) s_broadcastDelivered[i][0] = '\0';
   s_broadcastCmdTxOnce = true;
+  s_broadcastLastRetryMs = 0;  // fire first retry immediately
   Serial.printf("[CMD] Broadcast queued: %s\n", s_broadcastCmd);
 }
 
@@ -141,6 +147,25 @@ static const char* getBroadcastCmdForNode(const char *nodeId) {
   if (!s_broadcastCmd[0]) return nullptr;
   if (broadcastAlreadyDelivered(nodeId)) return nullptr;
   return s_broadcastCmd;
+}
+
+// Returns true when all known nodes have acknowledged the broadcast command.
+// Used to stop retrying once every node has confirmed receipt.
+static bool broadcastFullyDelivered() {
+  if (!s_broadcastCmd[0]) return true;
+  if (s_knownNodeCount == 0) return false;  // no nodes seen yet, keep retrying
+  for (int i = 0; i < (int)s_knownNodeCount; i++) {
+    if (!broadcastAlreadyDelivered(s_knownNodes[i])) return false;
+  }
+  return true;
+}
+
+// Call when a node confirms it received the broadcast (it sent a packet with test_run_id set).
+static void broadcastConfirmedByNode(const char *nodeId) {
+  broadcastMarkDelivered(nodeId);
+  if (broadcastFullyDelivered()) {
+    Serial.println("[CMD] Broadcast fully confirmed by all known nodes - stopping retries");
+  }
 }
 
 static bool getNextBroadcastTarget(char *nodeIdOut, size_t nodeIdLen) {
@@ -744,13 +769,17 @@ void loop() {
   if (!mqtt.connected()) reconnectMQTT();
   mqtt.loop();
 
-  // One-shot broadcast TX for CMD:test:* so nodes can switch to TEST MODE quickly.
-  // (We still also embed the command in ACKs for reliability.)
-  if (s_broadcastCmdTxOnce && s_broadcastCmd[0]) {
-    if (strncmp(s_broadcastCmd, "test:", 5) == 0) {
+  // Proactive broadcast for CMD:test:* — fires immediately on receipt, then retries every
+  // BROADCAST_RETRY_INTERVAL_MS until every known node has confirmed (sent a packet with
+  // test_run_id set). This ensures nodes that miss the first broadcast still get the command
+  // quickly rather than waiting up to 48s for their next TDMA slot ACK.
+  if (s_broadcastCmd[0] && strncmp(s_broadcastCmd, "test:", 5) == 0 && !broadcastFullyDelivered()) {
+    uint32_t nowMs = millis();
+    if (s_broadcastCmdTxOnce || (nowMs - s_broadcastLastRetryMs >= BROADCAST_RETRY_INTERVAL_MS)) {
       sendProactiveBroadcastCmd(s_broadcastCmd);
+      s_broadcastCmdTxOnce = false;
+      s_broadcastLastRetryMs = nowMs;
     }
-    s_broadcastCmdTxOnce = false;
   }
 
   if (rxDoneFlag) {
@@ -781,6 +810,12 @@ void loop() {
 
     // Remember this node so we can target broadcast commands proactively.
     if (nodeId[0]) rememberKnownNode(nodeId);
+
+    // If this packet carries a test_run_id, the node has confirmed it received the broadcast.
+    // Stop retrying the broadcast for this node.
+    if (nodeId[0] && jsonDoc.containsKey("test_run_id")) {
+      broadcastConfirmedByNode(nodeId);
+    }
 
     // 2) Send ACK immediately (sender is waiting); include queued command if any
     sendAck(seq_id, nodeId);

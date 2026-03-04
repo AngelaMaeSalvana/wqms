@@ -57,9 +57,6 @@ export default function App() {
               </Route>
             </Routes>
             <TestRunToast />
-            <span className="app-dev-notice" aria-hidden="true">
-              This app is still in development phase
-            </span>
           </>
         </TestRunProvider>
       </BrowserRouter>

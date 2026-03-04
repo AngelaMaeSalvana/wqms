@@ -18,26 +18,46 @@ export default function MapMarkersOverlay({ markers = [] }) {
     zoomend: () => setUpdate((n) => n + 1),
   });
 
+  /* Ensure map fills container after layout resolves (fixes mobile half-height) */
+  useEffect(() => {
+    if (!map) return;
+    map.invalidateSize();
+    const t = setTimeout(() => map.invalidateSize(), 100);
+    const onResize = () => map.invalidateSize();
+    window.addEventListener("resize", onResize);
+    return () => {
+      clearTimeout(t);
+      window.removeEventListener("resize", onResize);
+    };
+  }, [map]);
+
   useEffect(() => {
     const container = map?.getContainer?.();
     const overlay = overlayRef.current;
     if (!container || !overlay) return;
 
-    const onMarkerMouseDown = (e) => {
+    const onMarkerPointerDown = (e) => {
       if (overlay.contains(e.target)) {
         map.dragging?.disable();
+        map.tap?.disable?.();
       }
     };
-    const onMouseUp = () => {
+    const onPointerUp = () => {
       map.dragging?.enable();
+      map.tap?.enable?.();
     };
 
-    container.addEventListener("mousedown", onMarkerMouseDown, true);
-    document.addEventListener("mouseup", onMouseUp);
+    container.addEventListener("mousedown", onMarkerPointerDown, true);
+    container.addEventListener("touchstart", onMarkerPointerDown, { capture: true, passive: true });
+    document.addEventListener("mouseup", onPointerUp);
+    document.addEventListener("touchend", onPointerUp);
     return () => {
-      container.removeEventListener("mousedown", onMarkerMouseDown, true);
-      document.removeEventListener("mouseup", onMouseUp);
+      container.removeEventListener("mousedown", onMarkerPointerDown, true);
+      container.removeEventListener("touchstart", onMarkerPointerDown, true);
+      document.removeEventListener("mouseup", onPointerUp);
+      document.removeEventListener("touchend", onPointerUp);
       map.dragging?.enable();
+      map.tap?.enable?.();
     };
   }, [map]);
 
@@ -79,6 +99,8 @@ export default function MapMarkersOverlay({ markers = [] }) {
             onMouseDown={(e) => e.stopPropagation()}
             onMouseUp={(e) => e.stopPropagation()}
             onClick={(e) => e.stopPropagation()}
+            onTouchStart={(e) => e.stopPropagation()}
+            onTouchEnd={(e) => e.stopPropagation()}
           >
             <NodeMarker
               nodeId={m.nodeId}
@@ -86,6 +108,7 @@ export default function MapMarkersOverlay({ markers = [] }) {
               isTesting={m.isTesting}
               testStatus={m.testStatus}
               inactive={m.inactive}
+              batteryVoltage={m.batteryVoltage}
             />
           </div>
         );

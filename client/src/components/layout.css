@@ -66,17 +66,69 @@
   /* Top padding for fixed header; safe-area for notched devices */
   .layout-main {
     padding: calc(56px + env(safe-area-inset-top, 0px) + 14px) 14px 14px 14px;
+    width: 100%;
+    max-width: 100vw;
+    box-sizing: border-box;
   }
   /* Enable page scroll on tablets and phones */
   .layout-container {
     max-height: none;
     min-height: 100vh;
     overflow: visible;
+    overflow-x: hidden;
   }
   .layout-main {
     overflow: visible;
+    overflow-x: hidden;
     min-height: auto;
     flex: 1 1 auto;
+  }
+  .page-enter {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+  }
+}
+
+/* Map page: fixed full-screen below the mobile header */
+@media (max-width: 1024px), (max-height: 768px) {
+  .layout-main--map {
+    padding: 0 !important;
+    overflow: hidden !important;
+    position: fixed !important;
+    top: calc(56px + env(safe-area-inset-top, 0px));
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: 100%;
+    /* Use dvh for correct mobile viewport; 100vh is unreliable on iOS Safari */
+    height: calc(100vh - 56px - env(safe-area-inset-top, 0px));
+    height: calc(100dvh - 56px - env(safe-area-inset-top, 0px));
+    min-height: -webkit-fill-available;
+  }
+
+  .layout-main--map .page-enter {
+    position: absolute !important;
+    inset: 0 !important;
+    width: 100% !important;
+    height: 100% !important;
+    min-height: 0 !important;
+    display: flex;
+    flex-direction: column;
+    animation: none;
+  }
+
+  /* Dashboard page: natural vertical scroll — padding already set by layout-main rule above */
+  .layout-main--dashboard {
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+  }
+}
+
+/* Map page on desktop: reduce padding to maximize map area */
+@media (min-width: 1025px) {
+  .layout-main--map {
+    padding: 12px;
   }
 }
 
@@ -94,19 +146,19 @@
 }
 
 @media (max-width: 600px), (max-height: 520px) {
-  .layout-main {
+  .layout-main:not(.layout-main--map) {
     padding: calc(56px + env(safe-area-inset-top, 0px) + 12px) 12px 12px 12px;
   }
 }
 
 @media (max-width: 480px), (max-height: 480px) {
-  .layout-main {
+  .layout-main:not(.layout-main--map) {
     padding: calc(56px + env(safe-area-inset-top, 0px) + 10px) 10px 10px 10px;
   }
 }
 
 @media (max-width: 360px), (max-height: 420px) {
-  .layout-main {
+  .layout-main:not(.layout-main--map) {
     padding: calc(56px + env(safe-area-inset-top, 0px) + 8px) 8px 8px 8px;
   }
 }

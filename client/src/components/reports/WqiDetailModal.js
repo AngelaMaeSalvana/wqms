@@ -1,6 +1,7 @@
 import React, { useEffect } from "react";
 import { createPortal } from "react-dom";
 import { getWQIClass, getQualityRatings } from "../../utils/wqiCalculator";
+import { formatNH3 } from "../../utils/nh3Calculator";
 import "./WqiDetailModal.css";
 
 const PARAM_LABELS = [
@@ -73,7 +74,7 @@ export default function WqiDetailModal({ date, wqi, params, onClose }) {
   const formatValue = (key, value) => {
     if (value == null || isNaN(value)) return "—";
     if (key === "pH") return value.toFixed(1);
-    if (key === "nh3") return value.toFixed(2);
+    if (key === "nh3") return formatNH3(value);
     return value.toFixed(1);
   };
 

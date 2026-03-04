@@ -72,6 +72,7 @@ export default function InactiveNodes() {
           </button>
           <div>
             <h1 className="page-title">Inactive Nodes</h1>
+            <p className="page-subtitle">Deactivated monitoring nodes</p>
             {isSupabaseEnabled() && (
               <p className="inactive-nodes-supabase-badge">Synced with database</p>
             )}

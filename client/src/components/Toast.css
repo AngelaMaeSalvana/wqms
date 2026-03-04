@@ -85,6 +85,11 @@
   color: var(--text);
 }
 
+[data-theme="dark"] .toast {
+  background: linear-gradient(135deg, var(--panel) 0%, var(--panel-dark) 100%);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+
 [data-theme="light"] .toast {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
 }

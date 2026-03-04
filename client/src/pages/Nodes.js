@@ -1,13 +1,16 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { createPortal } from "react-dom";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import PageDateWithStatus from "../components/PageDateWithStatus";
+import LocationPickerModal from "../components/LocationPickerModal";
 import { isSupabaseEnabled } from "../lib/supabaseClient";
 import { getNodes, loadNodes, saveNodes } from "../utils/nodesStorage";
 import { sendEventNotification } from "../services/emailService";
 import { PageLoader } from "../components/LoadingSkeleton";
 import { NodeStatus } from "../components/dashboard/NodeStatus";
+import BatteryIndicator from "../components/BatteryIndicator";
 import { useNodeStatus } from "../hooks/useNodeStatus";
+import { useLatestReadingsByNode } from "../hooks/useLatestReadingsByNode";
 import "./Nodes.css";
 
 const emptyNode = () => ({
@@ -15,6 +18,8 @@ const emptyNode = () => ({
   name: "",
   location: "",
   coords: "",
+  lat: "",
+  lng: "",
   lastMaintenance: "",
 });
 
@@ -29,6 +34,12 @@ function getNextNodeId(nodes) {
     .filter((num) => !isNaN(num));
   const nextNum = numericParts.length > 0 ? Math.max(...numericParts) + 1 : 1;
   return "N" + String(nextNum);
+}
+
+/** Round to 6 decimal places for readable display (~0.1 m precision). */
+function roundCoord(n) {
+  if (n == null || typeof n !== "number" || isNaN(n)) return null;
+  return Math.round(n * 1e6) / 1e6;
 }
 
 /** Parse "lat, lng" or "lat lng" (comma or space separated) into { lat, lng } or null. */
@@ -53,11 +64,15 @@ export default function Nodes() {
   const [editingId, setEditingId] = useState(null);
   const [editForm, setEditForm] = useState(emptyNode);
   const [showAddModal, setShowAddModal] = useState(false);
+  const [showLocationPicker, setShowLocationPicker] = useState(false);
+  const [locationPickerTarget, setLocationPickerTarget] = useState(null); // 'edit' | 'add'
   const [nodesSearch, setNodesSearch] = useState("");
   const [lastUpdated] = useState(() => new Date());
   const [isLoading, setIsLoading] = useState(true);
+  const [saveFeedback, setSaveFeedback] = useState(null);
 
   const { nodeStatuses } = useNodeStatus(nodes);
+  const { readingsByNode } = useLatestReadingsByNode();
 
   useEffect(() => {
     loadNodes().then(() => setNodes(getNodes())).finally(() => setIsLoading(false));
@@ -110,6 +125,34 @@ export default function Nodes() {
     setNodesPage(1);
   }, [nodesSearch]);
 
+  const openLocationPicker = useCallback((target) => {
+    setLocationPickerTarget(target);
+    setShowLocationPicker(true);
+  }, []);
+
+  const closeLocationPicker = useCallback(() => {
+    setShowLocationPicker(false);
+    setLocationPickerTarget(null);
+  }, []);
+
+  const handleLocationSelect = useCallback(
+    (lat, lng) => {
+      if (locationPickerTarget === "edit") {
+        setEditForm((f) => ({
+          ...f,
+          lat: String(Math.round(lat * 1e6) / 1e6),
+          lng: String(Math.round(lng * 1e6) / 1e6),
+        }));
+      } else if (locationPickerTarget === "add") {
+        setNewNode((n) => ({
+          ...n,
+          coords: `${Math.round(lat * 1e6) / 1e6}, ${Math.round(lng * 1e6) / 1e6}`,
+        }));
+      }
+    },
+    [locationPickerTarget]
+  );
+
   if (isLoading) {
     return (
       <div className="nodes-page">
@@ -144,16 +187,21 @@ export default function Nodes() {
 
   const handleEdit = (node) => {
     setEditingId(node.id);
-    const lat = node.lat != null ? node.lat : "";
-    const lng = node.lng != null ? node.lng : "";
+    const latVal = node.lat != null ? node.lat : "";
+    const lngVal = node.lng != null ? node.lng : "";
     const lastM = node.lastMaintenance ?? node.last_maintenance;
+    const roundedLat = latVal !== "" ? (roundCoord(parseFloat(latVal)) ?? "") : "";
+    const roundedLng = lngVal !== "" ? (roundCoord(parseFloat(lngVal)) ?? "") : "";
     setEditForm({
       id: node.id,
       name: node.name,
       location: node.location,
-      coords: lat !== "" && lng !== "" ? `${lat}, ${lng}` : "",
+      coords: "",
+      lat: roundedLat !== "" ? String(roundedLat) : "",
+      lng: roundedLng !== "" ? String(roundedLng) : "",
       lastMaintenance: lastM ? (typeof lastM === "string" ? lastM.slice(0, 10) : new Date(lastM).toISOString().slice(0, 10)) : "",
     });
+    setSaveFeedback(null);
   };
 
   const handleSaveEdit = (e) => {
@@ -161,8 +209,16 @@ export default function Nodes() {
     const id = editForm.id.trim();
     const name = editForm.name.trim();
     const location = editForm.location.trim();
-    const parsed = parseCoordinates(editForm.coords);
-    if (!id || !name || !location || !parsed) return;
+    const coordsStr = [editForm.lat, editForm.lng].filter(Boolean).join(", ");
+    const parsed = parseCoordinates(coordsStr);
+    if (!id || !name || !location) {
+      setSaveFeedback("error");
+      return;
+    }
+    if (!parsed) {
+      setSaveFeedback("error");
+      return;
+    }
     const node = {
       id,
       name,
@@ -181,6 +237,7 @@ export default function Nodes() {
   const handleCancelEdit = () => {
     setEditingId(null);
     setEditForm(emptyNode());
+    setSaveFeedback(null);
   };
 
   const handleDelete = (nodeId) => {
@@ -206,9 +263,7 @@ export default function Nodes() {
       <header className="page-header nodes-page-header">
         <div>
           <h1 className="page-title">Nodes</h1>
-          {isSupabaseEnabled() && (
-            <p className="nodes-supabase-badge">Synced with database</p>
-          )}
+          <p className="page-subtitle">Manage monitoring nodes and locations</p>
         </div>
         <div className="nodes-header-actions">
           <PageDateWithStatus lastUpdated={lastUpdated} className="page-meta" showClassification={false} />
@@ -231,7 +286,6 @@ export default function Nodes() {
           <div className="card__header nodes-add-card__header">
             <div>
               <h2 className="card__title">Add node</h2>
-              <p className="card__desc">Create a new monitoring node with ID, name, location, and coordinates</p>
             </div>
             <button
               type="submit"
@@ -279,15 +333,36 @@ export default function Nodes() {
                 </label>
                 <label className="nodes-label nodes-label--full">
                   <span>Coordinates</span>
+                  <div className="nodes-coords-input-row">
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      className="nodes-input nodes-input-coords"
+                      placeholder="e.g. 8.58954, 124.76177"
+                      value={newNode.coords}
+                      onChange={(e) => setNewNode((n) => ({ ...n, coords: e.target.value }))}
+                      aria-label="Coordinates"
+                    />
+                    <button
+                      type="button"
+                      className="nodes-btn nodes-btn--secondary nodes-btn--small nodes-pick-map-btn"
+                      onClick={() => openLocationPicker("add")}
+                      aria-label="Pick location on map"
+                    >
+                      Pick on map
+                    </button>
+                  </div>
+                </label>
+                <label className="nodes-label">
+                  <span>Last maintenance</span>
                   <input
-                    type="text"
-                    inputMode="decimal"
-                    className="nodes-input nodes-input-coords"
-                    placeholder="e.g. 8.52, 124.70"
-                    value={newNode.coords}
-                    onChange={(e) => setNewNode((n) => ({ ...n, coords: e.target.value }))}
-                    aria-label="Coordinates"
+                    type="date"
+                    className="nodes-input"
+                    value={newNode.lastMaintenance}
+                    onChange={(e) => setNewNode((n) => ({ ...n, lastMaintenance: e.target.value }))}
+                    aria-label="Last maintenance date"
                   />
+                  <span className="nodes-helper">When was this node last serviced or calibrated?</span>
                 </label>
               </div>
             </form>
@@ -298,10 +373,9 @@ export default function Nodes() {
         <section className="nodes-section card nodes-list-card">
           <div className="card__header">
             <div>
-              <h2 className="card__title">All nodes</h2>
-              <p className="card__desc">
-                Edit or deactivate any node. Changes appear on the Map and Dashboard.
-              </p>
+              <h2 className="card__title">
+                {editingId ? (editForm.name?.trim() ? `Edit: ${editForm.name.trim()}` : "Edit Node") : "All nodes"}
+              </h2>
             </div>
             <div className="nodes-list-header-right">
               <button
@@ -331,16 +405,22 @@ export default function Nodes() {
                 editingId === n.id ? (
                   <li key={n.id} className="nodes-list-item nodes-list-item--editing">
                     <form className="nodes-edit-form" onSubmit={handleSaveEdit}>
+                      {(saveFeedback === "error") && (
+                        <p className="nodes-edit-error" role="alert">
+                          Please fill in all required fields and enter valid coordinates (lat: -90 to 90, lon: -180 to 180).
+                        </p>
+                      )}
                       <div className="nodes-edit-form-grid">
                         <label className="nodes-label">
                           <span>Node ID</span>
                           <input
                             type="text"
-                            className="nodes-input"
+                            className="nodes-input nodes-input--readonly"
                             value={editForm.id}
-                            onChange={(e) => setEditForm((f) => ({ ...f, id: e.target.value }))}
-                            aria-label="Node ID"
+                            readOnly
+                            aria-label="Node ID (cannot be changed)"
                           />
+                          <span className="nodes-helper">Cannot be changed</span>
                         </label>
                         <label className="nodes-label">
                           <span>Name</span>
@@ -349,6 +429,7 @@ export default function Nodes() {
                             className="nodes-input"
                             value={editForm.name}
                             onChange={(e) => setEditForm((f) => ({ ...f, name: e.target.value }))}
+                            placeholder="e.g. River C - Outlet"
                             aria-label="Node name"
                           />
                         </label>
@@ -359,21 +440,49 @@ export default function Nodes() {
                             className="nodes-input"
                             value={editForm.location}
                             onChange={(e) => setEditForm((f) => ({ ...f, location: e.target.value }))}
+                            placeholder="e.g. City or area"
                             aria-label="Location"
                           />
                         </label>
-                        <label className="nodes-label nodes-label--full">
-                          <span>Coordinates</span>
+                        <label className="nodes-label">
+                          <span>Latitude</span>
                           <input
                             type="text"
                             inputMode="decimal"
-                            className="nodes-input nodes-input-coords"
-                            placeholder="e.g. 8.52, 124.70"
-                            value={editForm.coords}
-                            onChange={(e) => setEditForm((f) => ({ ...f, coords: e.target.value }))}
-                            aria-label="Coordinates"
+                            className="nodes-input"
+                            placeholder="e.g. 8.58954"
+                            value={editForm.lat}
+                            onChange={(e) => setEditForm((f) => ({ ...f, lat: e.target.value }))}
+                            aria-label="Latitude (-90 to 90)"
                           />
                         </label>
+                        <label className="nodes-label">
+                          <span>Longitude</span>
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            className="nodes-input"
+                            placeholder="e.g. 124.76177"
+                            value={editForm.lng}
+                            onChange={(e) => setEditForm((f) => ({ ...f, lng: e.target.value }))}
+                            aria-label="Longitude (-180 to 180)"
+                          />
+                        </label>
+                        <div className="nodes-label nodes-label--full nodes-coords-row">
+                          <button
+                            type="button"
+                            className="nodes-btn nodes-btn--secondary nodes-btn--small nodes-pick-map-btn"
+                            onClick={() => openLocationPicker("edit")}
+                            aria-label="Pick location on map"
+                          >
+                            Pick on map
+                          </button>
+                          {parseCoordinates([editForm.lat, editForm.lng].filter(Boolean).join(", ")) && (
+                            <Link to="/map" className="nodes-view-map-link">
+                              View on map
+                            </Link>
+                          )}
+                        </div>
                         <label className="nodes-label">
                           <span>Last maintenance</span>
                           <input
@@ -383,6 +492,7 @@ export default function Nodes() {
                             onChange={(e) => setEditForm((f) => ({ ...f, lastMaintenance: e.target.value }))}
                             aria-label="Last maintenance date"
                           />
+                          <span className="nodes-helper">When was this node last serviced or calibrated?</span>
                         </label>
                       </div>
                       <div className="nodes-edit-form-actions">
@@ -398,17 +508,35 @@ export default function Nodes() {
                 ) : (
                   <li key={n.id} className={`nodes-list-item${n.active === false ? " nodes-list-item--inactive" : ""}`}>
                     <div className="nodes-list-item__info">
-                      <strong>{n.id}</strong> — {n.name} ({n.location})
+                      <div className="nodes-list-item__name-row">
+                        <span className="nodes-list-item__id">{n.id}</span>
+                        <strong className="nodes-list-item__name">{n.name}</strong>
+                        {n.active === false && (
+                          <span className="nodes-list-item__inactive-badge">Inactive</span>
+                        )}
+                      </div>
                       <span className="nodes-list-item__meta">
-                        {n.lat}, {n.lng}
-                        {n.lastMaintenance || n.last_maintenance
-                          ? ` · Last maintenance: ${new Date(n.lastMaintenance || n.last_maintenance).toLocaleDateString()}`
-                          : ""}
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{flexShrink:0}}>
+                          <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/>
+                        </svg>
+                        {n.location}
+                        {(n.lat != null && n.lng != null) && (
+                          <span className="nodes-list-item__coords">({roundCoord(n.lat)}, {roundCoord(n.lng)})</span>
+                        )}
+                        {(n.lastMaintenance || n.last_maintenance) && (
+                          <span className="nodes-list-item__maintenance">
+                            · Maintained {new Date(n.lastMaintenance || n.last_maintenance).toLocaleDateString(undefined, {month:'short', day:'numeric', year:'numeric'})}
+                          </span>
+                        )}
                       </span>
-                      {n.active === false && (
-                        <span className="nodes-list-item__inactive-badge">Inactive</span>
-                      )}
                     </div>
+                    {n.active !== false && (() => {
+                      const r = readingsByNode[n.id];
+                      const v = r?.battery_voltage ?? r?.batteryVoltage ?? null;
+                      return v != null ? (
+                        <BatteryIndicator voltage={v} showPercentage size="small" />
+                      ) : null;
+                    })()}
                     <NodeStatus status={n.active === false ? 'inactive' : (nodeStatuses[n.id] ?? 'offline')} />
                     <div className="nodes-list-item__actions">
                       <button
@@ -531,15 +659,36 @@ export default function Nodes() {
                 </label>
                 <label className="nodes-label nodes-label--full">
                   <span>Coordinates</span>
+                  <div className="nodes-coords-input-row">
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      className="nodes-input nodes-input-coords"
+                      placeholder="e.g. 8.58954, 124.76177"
+                      value={newNode.coords}
+                      onChange={(e) => setNewNode((n) => ({ ...n, coords: e.target.value }))}
+                      aria-label="Coordinates"
+                    />
+                    <button
+                      type="button"
+                      className="nodes-btn nodes-btn--secondary nodes-btn--small nodes-pick-map-btn"
+                      onClick={() => openLocationPicker("add")}
+                      aria-label="Pick location on map"
+                    >
+                      Pick on map
+                    </button>
+                  </div>
+                </label>
+                <label className="nodes-label">
+                  <span>Last maintenance</span>
                   <input
-                    type="text"
-                    inputMode="decimal"
-                    className="nodes-input nodes-input-coords"
-                    placeholder="e.g. 8.52, 124.70"
-                    value={newNode.coords}
-                    onChange={(e) => setNewNode((n) => ({ ...n, coords: e.target.value }))}
-                    aria-label="Coordinates"
+                    type="date"
+                    className="nodes-input"
+                    value={newNode.lastMaintenance}
+                    onChange={(e) => setNewNode((n) => ({ ...n, lastMaintenance: e.target.value }))}
+                    aria-label="Last maintenance date"
                   />
+                  <span className="nodes-helper">When was this node last serviced or calibrated?</span>
                 </label>
               </div>
               <div className="nodes-add-modal__actions">
@@ -555,6 +704,26 @@ export default function Nodes() {
         </div>,
         document.body
       )}
+
+      <LocationPickerModal
+        open={showLocationPicker}
+        initialLat={
+          locationPickerTarget === "edit"
+            ? editForm.lat
+            : locationPickerTarget === "add"
+            ? (parseCoordinates(newNode.coords)?.lat ?? "")
+            : ""
+        }
+        initialLng={
+          locationPickerTarget === "edit"
+            ? editForm.lng
+            : locationPickerTarget === "add"
+            ? (parseCoordinates(newNode.coords)?.lng ?? "")
+            : ""
+        }
+        onSelect={handleLocationSelect}
+        onClose={closeLocationPicker}
+      />
     </div>
   );
 }

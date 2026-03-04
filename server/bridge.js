@@ -161,6 +161,7 @@ function payloadToRow(topic, data, t_be_rx) {
     ph: data.pH ?? data.ph ?? null,
     dissolved_oxygen: data.dissolvedOxygen ?? data.do ?? data.dissolved_oxygen ?? null,
     flow_rate: data.flowRate ?? data.flow_rate ?? null,
+    battery_voltage: data.batteryVoltage ?? data.battery_voltage ?? null,
     seq,
     tx_millis: data.tx_millis != null ? (typeof data.tx_millis === 'number' ? data.tx_millis : parseInt(data.tx_millis, 10)) : null,
     rx_millis: data.rx_millis != null ? (typeof data.rx_millis === 'number' ? data.rx_millis : parseInt(data.rx_millis, 10)) : null,
@@ -178,7 +179,7 @@ function payloadToRow(topic, data, t_be_rx) {
 /** Columns allowed on sensor_readings (no nh3, no tan, no wqi). */
 const SENSOR_READINGS_COLUMNS = [
   'node_id', 'location', 'temperature', 'turbidity', 'ph', 'dissolved_oxygen',
-  'flow_rate', 'seq', 'tx_millis', 'rx_millis', 'timestamp',
+  'flow_rate', 'battery_voltage', 'seq', 'tx_millis', 'rx_millis', 'timestamp',
   't_node', 't_fwd_rx', 't_fwd_pub', 't_be_rx', 'test_run_id',
   'rssi', 'snr',
 ];

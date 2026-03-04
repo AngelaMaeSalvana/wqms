@@ -62,6 +62,7 @@ async function insertReading(row) {
       ph: row.ph,
       dissolved_oxygen: row.dissolved_oxygen,
       flow_rate: row.flow_rate ?? null,
+      battery_voltage: row.battery_voltage ?? null,
       seq: row.seq ?? null,
       tx_millis: row.tx_millis ?? null,
       rx_millis: row.rx_millis ?? null,
@@ -77,12 +78,12 @@ async function insertReading(row) {
     return { lastID: data?.id };
   }
   const sql = `INSERT INTO sensor_readings
-    (node_id, location, temperature, turbidity, ph, dissolved_oxygen, flow_rate,
+    (node_id, location, temperature, turbidity, ph, dissolved_oxygen, flow_rate, battery_voltage,
      seq, tx_millis, rx_millis, timestamp, t_node, t_fwd_rx, t_fwd_pub, t_be_rx, test_run_id)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
   return sqliteRun(sql, [
     row.node_id, row.location, row.temperature, row.turbidity, row.ph,
-    row.dissolved_oxygen, row.flow_rate ?? null,
+    row.dissolved_oxygen, row.flow_rate ?? null, row.battery_voltage ?? null,
     row.seq ?? null, row.tx_millis ?? null, row.rx_millis ?? null, row.timestamp,
     row.t_node ?? null, row.t_fwd_rx ?? null, row.t_fwd_pub ?? null, row.t_be_rx ?? null,
     row.test_run_id ?? null,
@@ -419,6 +420,7 @@ function initializeSqlite() {
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )`),
     run(`ALTER TABLE sensor_readings ADD COLUMN test_run_id TEXT`).catch(() => {}),
+    run(`ALTER TABLE sensor_readings ADD COLUMN battery_voltage REAL`).catch(() => {}),
   ]).then(() => console.log('✅ SQLite tables initialized'));
 }
 

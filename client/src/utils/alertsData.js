@@ -23,7 +23,8 @@
  *   2+ MEDIUM params   → system-level HIGH
  *   WQI drops > 15 pts → HIGH
  */
-import { getNH3FromReading } from './nh3Calculator';
+import { getNH3FromReading, formatNH3 } from './nh3Calculator';
+import { voltageToPercentage, isLowBatteryWarning } from './batteryUtils';
 import { getMaintenanceSettings } from './settingsStorage';
 import { calculateWQI } from './wqiCalculator';
 
@@ -230,10 +231,15 @@ function applyWqiEscalation(paramAlerts, wqi, prevWqi, nodeId, nodeName, now) {
   }
 
   // Rule: 2+ MEDIUM (or higher) params → system-level HIGH
-  const mediumOrHighCount = result.filter(
+  const degradedAlerts = result.filter(
     (a) => a.type === 'threshold' && (a.severity === 'medium' || a.severity === 'high')
-  ).length;
+  );
+  const mediumOrHighCount = degradedAlerts.length;
   if (mediumOrHighCount >= 2) {
+    const affectedParameters = degradedAlerts
+      .map((a) => a.parameter)
+      .filter(Boolean)
+      .filter((p) => p !== 'system');
     result.push({
       id: `wqi-multi-param-${nodeId}`,
       nodeId,
@@ -243,6 +249,7 @@ function applyWqiEscalation(paramAlerts, wqi, prevWqi, nodeId, nodeName, now) {
       detail: `${mediumOrHighCount} parameters are at MEDIUM or HIGH severity at ${nodeName}. System-level water quality risk detected (WQI: ${wqi}).`,
       severity: 'high',
       parameter: 'system',
+      affectedParameters,
       wqiEscalated: true,
       timestamp: now,
       createdAt: new Date(now).toISOString(),
@@ -328,6 +335,27 @@ export function buildAlertsForAllNodes(
     }
 
     if (!readings) continue;
+
+    // ── Low battery warning (<15%) ───────────────────────────────────────────
+    const batteryVoltage = readings.battery_voltage ?? readings.batteryVoltage ?? null;
+    if (batteryVoltage != null) {
+      const batteryPct = voltageToPercentage(batteryVoltage);
+      if (isLowBatteryWarning(batteryPct)) {
+        alerts.push({
+          id: `low-battery-${nodeId}`,
+          nodeId,
+          nodeName,
+          type: 'battery',
+          title: 'Low battery',
+          detail: `${nodeName} battery is at ${batteryPct}%. Consider replacing or recharging soon.`,
+          severity: batteryPct < 10 ? 'high' : 'medium',
+          parameter: 'battery',
+          value: batteryPct,
+          timestamp: now,
+          createdAt: new Date(now).toISOString(),
+        });
+      }
+    }
 
     // ── Compute WQI for this reading ───────────────────────────────────────────
     const nh3ForWqi = getNH3FromReading(readings);
@@ -502,7 +530,7 @@ export function buildAlertsForAllNodes(
           nodeName,
           type: 'threshold',
           title: `NH₃ above threshold [${severityLabel(sev)}]`,
-          detail: `NH₃ at ${nodeName} is ${nh3.toFixed(3)} mg/L (max: ${thresholds.nh3Max} mg/L).${persistenceNote(count)}`,
+          detail: `NH₃ at ${nodeName} is ${formatNH3(nh3)} mg/L (max: ${thresholds.nh3Max} mg/L).${persistenceNote(count)}`,
           severity: sev,
           parameter: 'nh3',
           value: nh3,
@@ -525,7 +553,7 @@ export function buildAlertsForAllNodes(
           nodeName,
           type: 'threshold',
           title: 'NH₃ rapid rise detected [HIGH]',
-          detail: `NH₃ at ${nodeName} rose by ${delta.toFixed(3)} mg/L (${prevNh3.toFixed(3)} → ${nh3.toFixed(3)}) — exceeds slope limit of ${logic.nh3SlopeLimit} mg/L per interval. Possible spill.`,
+          detail: `NH₃ at ${nodeName} rose by ${formatNH3(delta)} mg/L (${formatNH3(prevNh3)} → ${formatNH3(nh3)}) — exceeds slope limit of ${logic.nh3SlopeLimit} mg/L per interval. Possible spill.`,
           severity: 'high',
           parameter: 'nh3',
           value: nh3,

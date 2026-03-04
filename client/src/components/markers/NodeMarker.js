@@ -1,6 +1,7 @@
 import React from "react";
+import BatteryIndicator from "../BatteryIndicator";
 
-export default function NodeMarker({ nodeId, onTestSensor, isTesting, testStatus, inactive }) {
+export default function NodeMarker({ nodeId, onTestSensor, isTesting, testStatus, inactive, batteryVoltage }) {
   const handleClick = () => {
     if (onTestSensor && !isTesting && !inactive) onTestSensor(nodeId);
   };
@@ -77,13 +78,14 @@ export default function NodeMarker({ nodeId, onTestSensor, isTesting, testStatus
 
   return (
     <div
+      className="node-marker-wrapper"
       style={{ position: "absolute", transform: "translate(-50%, -50%)", zIndex: 20 }}
       onMouseDown={stopMapDrag}
       onMouseUp={stopMapDrag}
       onClick={stopMapDrag}
     >
-      <button
-        onClick={handleClick}
+      <div className="node-marker-stack">
+        <button
         disabled={isTesting || inactive}
         title={titleText}
         aria-label={titleText}
@@ -108,8 +110,14 @@ export default function NodeMarker({ nodeId, onTestSensor, isTesting, testStatus
           }
         }}
       >
-        {icon}
-      </button>
+          {icon}
+        </button>
+        {batteryVoltage != null && (
+          <div className="node-marker-battery">
+            <BatteryIndicator voltage={batteryVoltage} size="small" />
+          </div>
+        )}
+      </div>
     </div>
   );
 }

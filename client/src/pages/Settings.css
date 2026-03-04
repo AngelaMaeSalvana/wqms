@@ -23,6 +23,8 @@
   border-bottom: 1px solid var(--border);
   padding-bottom: 0;
   margin-bottom: 2px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .settings-tab {
@@ -37,6 +39,8 @@
   cursor: pointer;
   transition: color 0.2s, border-color 0.2s;
   font-family: inherit;
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .settings-tab:hover {
@@ -132,17 +136,29 @@
 
 .settings-page .settings-section .card__header {
   margin-bottom: 6px;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 12px;
 }
 
 .settings-page .settings-section .card__title {
-  margin: 0 0 2px 0;
+  margin: 0;
   font-size: 1.02rem;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
 }
 
-.settings-page .settings-section .card__desc {
-  font-size: 0.8rem;
-  line-height: 1.3;
-  margin: 0;
+.settings-page .settings-section .card__title .info-tooltip {
+  margin-left: 2px;
+}
+
+.settings-label span {
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 /* Wider columns so form fields use more horizontal space */
@@ -151,6 +167,7 @@
   grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
   gap: 12px 16px;
   min-width: 0;
+  align-items: end;
 }
 
 .settings-label {
@@ -204,9 +221,9 @@
 .settings-threshold-header {
   display: flex;
   flex-wrap: wrap;
-  align-items: flex-start;
+  align-items: baseline;
   justify-content: space-between;
-  gap: 12px;
+  gap: 6px 12px;
 }
 
 .settings-threshold-header .card__title {
@@ -218,8 +235,25 @@
 }
 
 .settings-classification-select-wrap {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
   flex-shrink: 0;
-  min-width: 140px;
+}
+
+.settings-classification-select-wrap > span {
+  font-size: 0.82rem;
+  font-weight: 500;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.settings-classification-select-wrap .settings-select {
+  width: auto;
+  min-width: 80px;
+  padding: 5px 30px 5px 10px;
+  font-size: 0.85rem;
 }
 
 .settings-threshold-helper {

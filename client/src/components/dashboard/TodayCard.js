@@ -1,39 +1,54 @@
 import React, { useState } from "react";
 import { MetricSkeleton } from "../LoadingSkeleton";
 import CurrentClassification from "../CurrentClassification";
+import { formatNH3 } from "../../utils/nh3Calculator";
 import "./dashboard.css";
 
 const PARAMS = [
   { key: "temperature", label: "Temperature", unit: "°C", color: "temp" },
-  { key: "turbidity", label: "Turbidity", unit: "", color: "turb" },
+  { key: "turbidity", label: "Turbidity", unit: " NTU", color: "turb" },
   { key: "ph", label: "Water pH", unit: "", color: "ph" },
-  { key: "nh3", label: "NH₃", unit: " mg/L", color: "nh3" },
-  { key: "flowRate", label: "Flow rate", unit: " L/min", color: "flow" },
+  { key: "nh3", label: "Ammonia (NH₃)", unit: " mg/L", color: "nh3", fmt: formatNH3 },
+  { key: "flowRate", label: "Flow Rate", unit: " L/min", color: "flow" },
   { key: "dissolvedOxygen", label: "Dissolved O₂", unit: " mg/L", color: "do" },
 ];
 
 const TABS = [
-  { id: "low", label: "MIN", key: "low" },
-  { id: "avg", label: "AVG", key: "avg" },
-  { id: "high", label: "MAX", key: "high" },
+  { id: "low", label: "Min", key: "low" },
+  { id: "avg", label: "Avg", key: "avg" },
+  { id: "high", label: "Max", key: "high" },
 ];
 
-function StatBlock({ label, low, avg, high, unit, colorClass }) {
+function ValWithUnit({ value, unit, fmt }) {
+  if (value == null) return "—";
+  const num = fmt ? fmt(value) : value;
+  const u = (unit || "").trim();
+  if (!u) return num;
+  return (
+    <>
+      {num}<span className="today-stat-block__val-unit">{u}</span>
+    </>
+  );
+}
+
+function StatBlock({ label, low, avg, high, unit, colorClass, fmt }) {
   return (
     <div className={`today-stat-block today-stat-block--${colorClass}`}>
-      <div className="today-stat-block__label">{label}</div>
+      <div className="today-stat-block__label">
+        {label}{unit ? <span className="today-stat-block__unit"> ({unit.trim()})</span> : null}
+      </div>
       <div className="today-stat-block__row">
         <span className="today-stat-block__item">
           <span className="today-stat-block__key">Low</span>
-          <span className="today-stat-block__val">{low != null ? `${low}${unit}` : "—"}</span>
+          <span className="today-stat-block__val"><ValWithUnit value={low} unit={unit} fmt={fmt} /></span>
         </span>
         <span className="today-stat-block__item">
           <span className="today-stat-block__key">Avg</span>
-          <span className="today-stat-block__val">{avg != null ? `${avg}${unit}` : "—"}</span>
+          <span className="today-stat-block__val"><ValWithUnit value={avg} unit={unit} fmt={fmt} /></span>
         </span>
         <span className="today-stat-block__item">
           <span className="today-stat-block__key">High</span>
-          <span className="today-stat-block__val">{high != null ? `${high}${unit}` : "—"}</span>
+          <span className="today-stat-block__val"><ValWithUnit value={high} unit={unit} fmt={fmt} /></span>
         </span>
       </div>
     </div>
@@ -64,14 +79,20 @@ export function TodayCard({ todayStats, selectedNode, readingsLoaded = false, va
         ))}
       </div>
       <div className="today-card__params">
-        {PARAMS.map(({ key, label, unit, color }) => {
+        {PARAMS.map(({ key, label, unit, color, fmt }) => {
           const s = todayStats[key];
           const value = s?.[activeTab];
+          const u = (unit || "").trim();
+          const num = value != null ? (fmt ? fmt(value) : value) : null;
           return (
             <div key={key} className={`today-card__param today-card__param--${color}`}>
               <span className="today-card__param-name">{label}</span>
               <span className="today-card__param-value">
-                {value != null ? `${value}${unit}` : "—"}
+                {num == null ? "—" : (
+                  <>
+                    {num}{u ? <span className="today-card__param-unit">{u}</span> : null}
+                  </>
+                )}
               </span>
             </div>
           );
@@ -82,7 +103,7 @@ export function TodayCard({ todayStats, selectedNode, readingsLoaded = false, va
 
   const renderGridView = () => (
     <div className="today-stats-grid">
-      {PARAMS.map(({ key, label, unit, color }) => {
+      {PARAMS.map(({ key, label, unit, color, fmt }) => {
         const s = todayStats[key];
         return (
           <StatBlock
@@ -93,6 +114,7 @@ export function TodayCard({ todayStats, selectedNode, readingsLoaded = false, va
             high={s?.high}
             unit={unit}
             colorClass={color}
+            fmt={fmt}
           />
         );
       })}
@@ -110,8 +132,8 @@ export function TodayCard({ todayStats, selectedNode, readingsLoaded = false, va
       <div className="card__body card__body--fill">
         {!hasStats && readingsLoaded ? (
           <div className="today-card-empty" aria-live="polite">
-            <p>No data from database yet.</p>
-            <p className="today-card-empty-hint">Add nodes or wait for sensor data.</p>
+            <p>No readings available for today.</p>
+            <p className="today-card-empty-hint">Make sure monitoring nodes are set up and sending data.</p>
           </div>
         ) : !hasStats ? (
           <div className="today-stats-skeleton">

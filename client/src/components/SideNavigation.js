@@ -2,14 +2,72 @@ import React, { useState } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import "./side-nav.css";
 
+const IconDashboard = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="3" y="3" width="7" height="7" rx="1"/>
+    <rect x="14" y="3" width="7" height="7" rx="1"/>
+    <rect x="3" y="14" width="7" height="7" rx="1"/>
+    <rect x="14" y="14" width="7" height="7" rx="1"/>
+  </svg>
+);
+
+const IconReports = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+    <polyline points="14 2 14 8 20 8"/>
+    <line x1="16" y1="13" x2="8" y2="13"/>
+    <line x1="16" y1="17" x2="8" y2="17"/>
+    <polyline points="10 9 9 9 8 9"/>
+  </svg>
+);
+
+const IconSensorLogs = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+  </svg>
+);
+
+const IconMap = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <polygon points="3 6 9 3 15 6 21 3 21 18 15 21 9 18 3 21"/>
+    <line x1="9" y1="3" x2="9" y2="18"/>
+    <line x1="15" y1="6" x2="15" y2="21"/>
+  </svg>
+);
+
+const IconNodes = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="12" cy="5" r="2"/>
+    <circle cx="5" cy="19" r="2"/>
+    <circle cx="19" cy="19" r="2"/>
+    <line x1="12" y1="7" x2="5" y2="17"/>
+    <line x1="12" y1="7" x2="19" y2="17"/>
+    <line x1="5" y1="19" x2="19" y2="19"/>
+  </svg>
+);
+
+const IconAlerts = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+    <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+  </svg>
+);
+
+const IconSettings = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="12" cy="12" r="3"/>
+    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+  </svg>
+);
+
 const navItems = [
-  { to: "/dashboard", label: "Dashboard", icon: "📊" },
-  { to: "/reports", label: "Reports", icon: "🗂️" },
-  { to: "/sensor-logs", label: "Sensor Logs", icon: "📋" },
-  { to: "/map", label: "Map & Locations", icon: "📍" },
-  { to: "/nodes", label: "Nodes", icon: "🔌" },
-  { to: "/alerts", label: "Alerts", icon: "🔔" },
-  { to: "/settings", label: "Settings", icon: "⚙️" },
+  { to: "/dashboard", label: "Dashboard", Icon: IconDashboard },
+  { to: "/reports", label: "Reports", Icon: IconReports },
+  { to: "/sensor-logs", label: "Sensor Logs", Icon: IconSensorLogs },
+  { to: "/map", label: "Map & Locations", Icon: IconMap },
+  { to: "/nodes", label: "Nodes", Icon: IconNodes },
+  { to: "/alerts", label: "Alerts", Icon: IconAlerts },
+  { to: "/settings", label: "Settings", Icon: IconSettings },
 ];
 
 const pathToTitle = (pathname) => {
@@ -42,6 +100,9 @@ export default function SideNavigation({ isMobileOpen = false, onToggle, onClose
           <span className="side-nav__hamburger-line" />
         </button>
         <div className="side-nav__mobile-branding">
+          <span className="side-nav__mobile-logo" aria-hidden="true">
+            <img src="/logo.png" alt="" className="side-nav__mobile-logo-img" />
+          </span>
           <span className="side-nav__mobile-title">AQUALENS</span>
           <span className="side-nav__breadcrumb">
             <span className="side-nav__breadcrumb-sep" aria-hidden="true"> / </span>
@@ -74,30 +135,29 @@ export default function SideNavigation({ isMobileOpen = false, onToggle, onClose
       </div>
 
       <nav className="side-nav__menu" aria-label="Main navigation">
-        {navItems.map((item) => (
+        {navItems.map(({ to, label, Icon }) => (
           <NavLink
-            key={item.to}
-            to={item.to}
+            key={to}
+            to={to}
             onClick={handleNavClick}
             className={({ isActive }) =>
               `side-nav__item ${isActive ? "active" : ""}`
             }
-            title={collapsed ? item.label : undefined}
+            title={collapsed ? label : undefined}
           >
             <span className="side-nav__icon" aria-hidden="true">
-              {item.icon}
+              <Icon />
             </span>
-            {!collapsed && <span className="side-nav__label">{item.label}</span>}
+            {!collapsed && <span className="side-nav__label">{label}</span>}
           </NavLink>
         ))}
       </nav>
 
       <div className="side-nav__bottom">
         {!collapsed && (
-          <div className="side-nav__hint">
-            <div className="hint__title">Shortcuts</div>
-            <div className="hint__text">Ctrl/Cmd + R — refresh</div>
-            <div className="hint__text">Esc — close modals</div>
+          <div className="side-nav__version">
+            <span className="side-nav__version-dot" />
+            <span className="side-nav__version-text">Water Quality Monitor</span>
           </div>
         )}
       </div>

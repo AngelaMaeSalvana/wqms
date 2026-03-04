@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useEffect, useRef } from "react";
+import React, { useMemo, useState, useEffect, useRef, useCallback } from "react";
 import { jsPDF } from "jspdf";
 import { autoTable } from "jspdf-autotable";
 import PageDateWithStatus from "../components/PageDateWithStatus";
@@ -8,6 +8,7 @@ import { buildAlertsForAllNodes } from "../utils/alertsData";
 import { useAlertEmailNotifications } from "../hooks/useAlertEmailNotifications";
 import { getNodes, loadNodes } from "../utils/nodesStorage";
 import api from "../services/api";
+import { supabase } from "../lib/supabaseClient";
 import { applyCalibrationToReadings } from "../utils/calibration";
 import { exportToCSV, exportToExcel, formatAlertsForExport } from "../utils/exportData";
 import { PageLoader } from "../components/LoadingSkeleton";
@@ -185,6 +186,37 @@ export default function Alerts() {
 
   useAlertEmailNotifications(alerts, readingsByNode);
 
+  // Realtime: prepend newly inserted alert rows without a full page refresh.
+  const handleNewAlert = useCallback((payload) => {
+    const row = payload.new;
+    if (!row) return;
+    const normalized = normalizeDbAlert(row);
+    setAlerts((prev) => {
+      // Deduplicate by id to guard against duplicate events.
+      if (prev.some((a) => a.id === normalized.id)) return prev;
+      return [normalized, ...prev];
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!supabase) return;
+    const channel = supabase
+      .channel('alerts_live')
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'alerts' },
+        handleNewAlert
+      )
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          console.log('[Realtime] alerts_live channel subscribed');
+        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+          console.warn('[Realtime] alerts_live channel error:', status);
+        }
+      });
+    return () => supabase.removeChannel(channel);
+  }, [handleNewAlert]);
+
   const filteredAlerts = useMemo(() => {
     let list = [...alerts];
     const q = search.trim().toLowerCase();
@@ -298,19 +330,25 @@ export default function Alerts() {
       <header className="page-header">
         <div>
           <h1 className="page-title">Alerts</h1>
+          <p className="page-subtitle">Monitor and manage system alerts</p>
         </div>
         <PageDateWithStatus lastUpdated={lastUpdated} className="page-meta" showClassification={false} />
       </header>
 
       <div className="alerts-toolbar">
-        <input
-          type="search"
-          className="alerts-search"
-          placeholder="Search alerts…"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          aria-label="Search alerts"
-        />
+        <div className="alerts-search-wrap">
+          <svg className="alerts-search-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+          </svg>
+          <input
+            type="search"
+            className="alerts-search"
+            placeholder="Search alerts…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            aria-label="Search alerts"
+          />
+        </div>
 
         <div className="alerts-toolbar-actions">
           {/* Sort & Filter flyout */}
@@ -493,7 +531,12 @@ export default function Alerts() {
         <div className="card__body alerts-notifications-body">
           {filteredAlerts.length === 0 ? (
             <EmptyState
-              icon="🔔"
+              icon={
+                <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+                  <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+                </svg>
+              }
               title="No alerts"
               message={
                 alerts.length === 0
@@ -520,10 +563,17 @@ export default function Alerts() {
                       >
                         {isUnread && <span className="alerts-notification-dot" aria-hidden />}
                         <span className="alerts-notification-content">
-                          <span className="alert-title">{a.title || "Alert"}</span>
+                          <span className="alerts-notification-row">
+                            <span className="alert-title">{a.title || "Alert"}</span>
+                            <span className={`alerts-severity-badge alerts-severity-badge--${(a.severity || "info").toLowerCase()}`}>
+                              {a.severity || "info"}
+                            </span>
+                          </span>
                           {a.detail && <span className="alert-detail">{a.detail}</span>}
-                          {a.nodeName && <span className="alert-node">Node: {a.nodeName}</span>}
-                          <span className="alert-date">{getRelativeTime(a.timestamp || a.createdAt)}</span>
+                          <span className="alerts-notification-meta">
+                            {a.nodeName && <span className="alert-node">{a.nodeName}</span>}
+                            <span className="alert-date">{getRelativeTime(a.timestamp || a.createdAt)}</span>
+                          </span>
                         </span>
                       </button>
                     </li>

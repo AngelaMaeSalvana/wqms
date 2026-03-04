@@ -218,6 +218,7 @@ async function handleMQTTMessage(topic, data, t_be_rx) {
       ph: reading.pH ?? reading.ph,
       dissolved_oxygen: reading.dissolvedOxygen ?? reading.do,
       flow_rate: reading.flowRate ?? reading.flow_rate ?? null,
+      battery_voltage: reading.batteryVoltage ?? reading.battery_voltage ?? null,
       seq,
       tx_millis: reading.tx_millis != null ? (typeof reading.tx_millis === 'number' ? reading.tx_millis : parseInt(reading.tx_millis, 10)) : null,
       rx_millis: reading.rx_millis != null ? (typeof reading.rx_millis === 'number' ? reading.rx_millis : parseInt(reading.rx_millis, 10)) : null,

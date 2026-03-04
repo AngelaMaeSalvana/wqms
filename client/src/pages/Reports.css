@@ -27,8 +27,16 @@
 .reports-tabs {
   display: flex;
   gap: 4px;
-  flex-shrink: 0;
+  flex: 1 1 0;
+  min-width: 0;
   padding: 0 2px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+}
+.reports-tabs::-webkit-scrollbar {
+  height: 6px;
 }
 
 .reports-export-wrap--header {
@@ -37,6 +45,8 @@
 }
 
 .reports-tab {
+  flex-shrink: 0;
+  white-space: nowrap;
   padding: 10px 18px;
   border: 1px solid var(--border);
   background: var(--panel-dark);
@@ -374,6 +384,7 @@
   flex-direction: column;
   padding: 12px 16px;
   background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border);
   border-radius: 8px;
   min-width: 80px;
 }
@@ -399,15 +410,16 @@
 .reports-alerts-charts {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 20px;
+  gap: 12px;
   margin-top: 16px;
 }
 
 .reports-alerts-chart-wrap {
   background: rgba(255, 255, 255, 0.02);
-  border-radius: 8px;
-  padding: 10px;
+  padding: 14px;
   min-height: 150px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
 }
 
 .reports-alerts-chart-wrap--wide {
@@ -444,8 +456,9 @@
 
 .reports-system-chart-wrap {
   background: rgba(255, 255, 255, 0.02);
-  border-radius: 8px;
-  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px;
   min-height: 160px;
 }
 
@@ -539,14 +552,15 @@
 
 .reports-chart-header {
   display: flex;
-  flex-wrap: nowrap;
-  align-items: flex-end;
+  flex-wrap: wrap;
+  align-items: center;
   justify-content: space-between;
-  gap: 16px;
+  gap: 12px 20px;
 }
 
 .reports-chart-header .card__title {
-  margin: 0 0 4px 0;
+  margin: 0;
+  flex-shrink: 0;
 }
 
 .reports-chart-header-chart-type {
@@ -554,27 +568,32 @@
 }
 
 /* Controls group: Parameter label+select + chart type select */
-.reports-chart-header-controls {
-  display: flex;
-  align-items: flex-end;
-  gap: 12px;
-  flex-shrink: 0;
-  flex-wrap: nowrap;
-}
-
-.reports-chart-header-param {
+.reports-chart-header-controls,
+.reports-chart-header .reports-chart-header-param {
   display: flex;
   flex-direction: column;
   gap: 4px;
   flex-shrink: 0;
+  min-width: 0;
+}
+
+.reports-chart-header-controls {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px 16px;
 }
 
 .reports-chart-header-param .reports-chart-selector-label {
   font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
 }
 
 .reports-chart-select--header {
-  min-width: 140px;
+  min-width: 120px;
 }
 
 .reports-chart-header .card__desc {
@@ -1519,8 +1538,21 @@
   }
   .reports-chart-header {
     flex-direction: column;
-    align-items: flex-start;
-    gap: 12px;
+    align-items: stretch;
+    gap: 10px;
+  }
+  .reports-chart-header .card__title {
+    margin-bottom: 2px;
+  }
+  .reports-chart-header-controls,
+  .reports-chart-header > .reports-chart-header-param {
+    width: 100%;
+    min-width: 0;
+  }
+  .reports-chart-header-controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px 14px;
   }
   .reports-filters {
     flex-direction: column;
@@ -1536,6 +1568,31 @@
   .reports-data-table th,
   .reports-data-table td {
     padding: 8px 10px;
+    font-size: 0.85rem;
+  }
+
+  /* Compact shared filter bar on mobile */
+  .reports-shared-filters {
+    padding: 8px 12px;
+    gap: 8px 12px;
+    margin-bottom: 10px;
+  }
+  .reports-shared-filters__group {
+    min-width: 0;
+  }
+  .reports-shared-filters__group--row {
+    flex-wrap: wrap;
+  }
+  .reports-shared-filters__label {
+    font-size: 0.65rem;
+  }
+  .reports-shared-filters .reports-chart-select {
+    min-width: 0;
+    padding: 6px 10px;
+    font-size: 0.85rem;
+  }
+  .reports-shared-filters .reports-chart-date-range-btn {
+    padding: 6px 10px;
     font-size: 0.85rem;
   }
 }
@@ -1565,6 +1622,11 @@
 @media (max-width: 480px), (max-height: 480px) {
   .page-title {
     font-size: 1rem;
+  }
+  .reports-shared-filters {
+    padding: 6px 10px;
+    gap: 6px 10px;
+    margin-bottom: 8px;
   }
   .reports-chart-selectors {
     flex-direction: column;

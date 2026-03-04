@@ -7,7 +7,7 @@ import "./dashboard.css";
 const DEFAULT_CENTER = [8.54, 124.65];
 const DEFAULT_ZOOM = 20;
 
-export function MiniMapCard({ nodes = [], selectedNode, onTestSensor, isTestingSensor, sensorTestResults }) {
+export function MiniMapCard({ nodes = [], selectedNode, onTestSensor, isTestingSensor, sensorTestResults, readingsByNode = {} }) {
   const center = useMemo(() => {
     if (selectedNode && selectedNode.lat != null && selectedNode.lng != null) {
       return [selectedNode.lat, selectedNode.lng];
@@ -20,16 +20,21 @@ export function MiniMapCard({ nodes = [], selectedNode, onTestSensor, isTestingS
     () =>
       nodes
         .filter((n) => n.lat != null && n.lng != null)
-        .map((n) => ({
-          key: n.id,
-          lat: n.lat,
-          lng: n.lng,
-          nodeId: n.id,
-          onTestSensor,
-          isTesting: isTestingSensor,
-          testStatus: sensorTestResults?.[n.id]?.status ?? null,
-        })),
-    [nodes, onTestSensor, isTestingSensor, sensorTestResults]
+        .map((n) => {
+          const r = readingsByNode[n.id];
+          const batteryVoltage = r?.battery_voltage ?? r?.batteryVoltage ?? null;
+          return {
+            key: n.id,
+            lat: n.lat,
+            lng: n.lng,
+            nodeId: n.id,
+            batteryVoltage,
+            onTestSensor,
+            isTesting: isTestingSensor,
+            testStatus: sensorTestResults?.[n.id]?.status ?? null,
+          };
+        }),
+    [nodes, onTestSensor, isTestingSensor, sensorTestResults, readingsByNode]
   );
 
   return (

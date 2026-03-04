@@ -1,0 +1,22 @@
+================================================================================
+PATCH for OneWire_direct_gpio.h - Heltec ESP32 GPIO_IS_VALID_GPIO fix
+================================================================================
+
+FILE TO EDIT: Documents\Arduino\libraries\OneWire\util\OneWire_direct_gpio.h
+
+FIND (around line 157-159):
+
+#elif defined(ARDUINO_ARCH_ESP32)
+#include "Arduino.h"
+#include "esp32-hal-gpio.h"
+
+REPLACE WITH:
+
+#elif defined(ARDUINO_ARCH_ESP32)
+#include "driver/gpio.h"
+#include "Arduino.h"
+#include "esp32-hal-gpio.h"
+
+(Add the line #include "driver/gpio.h" as the first include in the ESP32 block)
+
+================================================================================

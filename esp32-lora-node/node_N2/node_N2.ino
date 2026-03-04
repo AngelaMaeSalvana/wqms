@@ -86,8 +86,14 @@
 #define TDMA_FALLBACK_MS   48000UL     // Fallback interval when NTP unsynced (= 1 full cycle)
 
 // -------------------- Timing --------------------
-#define CMD_LISTEN_INTERVAL_MS  2000  // Listen for commands every 2 sec
-#define CMD_LISTEN_WINDOW_MS     400  // RX window for commands (ms)
+#define CMD_LISTEN_INTERVAL_MS  1000  // Listen for commands every 1 sec
+#define CMD_LISTEN_WINDOW_MS     600  // RX window for commands (ms)
+
+// -------------------- Battery (single Li-ion: 4.2V=100%, 3.3V=0%) --------------------
+#define BATTERY_PIN 39                       // ADC1 - voltage divider; use -1 to disable
+#define BATTERY_VOLTAGE_DIVIDER 2.0f        // V_battery = adc_voltage * DIVIDER
+#define ADC_MAX_VALUE 4095
+#define ESP32_VOLTAGE_REF 3.3f
 
 // -------------------- Buffers --------------------
 #define RX_BUF_SIZE 128  // For ACK (may include CMD:test:start...) and CMD:diag:<node_id>
@@ -340,6 +346,21 @@ static void readSensors(float &do_val, float &turbidity, float &ph,
   temp      = random(2200, 3600) / 100.0f;  // 22.00 - 36.00
 }
 
+// Read battery voltage from divider. Returns NAN if BATTERY_PIN < 0.
+static float readBatteryVoltage() {
+#if BATTERY_PIN >= 0
+  long sum = 0;
+  for (int i = 0; i < 10; i++) {
+    sum += analogRead(BATTERY_PIN);
+    delay(10);
+  }
+  float adcV = (sum / 10.0f) * ESP32_VOLTAGE_REF / ADC_MAX_VALUE;
+  return adcV * BATTERY_VOLTAGE_DIVIDER;
+#else
+  return NAN;
+#endif
+}
+
 // Helper: format sensor value or "null" when disconnected or invalid (NaN)
 static void fmtOrNull(char *out, size_t outLen, const char *key, float val, bool useNull) {
   if (useNull || isnan(val) || isinf(val)) {
@@ -361,11 +382,11 @@ static void fmtOrNull(char *out, size_t outLen, const char *key, float val, bool
 //
 // t_node is captured by the caller immediately before buildPayload() and must not be modified.
 // Use static format buffers to avoid ~140 bytes stack allocation (prevents stack overflow on ESP32)
-static char s_do[28], s_turb[28], s_ph[24], s_flow[28], s_temp[28];
+static char s_do[28], s_turb[28], s_ph[24], s_flow[28], s_temp[28], s_battery[32];
 static void buildPayload(char *buf, size_t bufLen,
                          uint32_t seq_id, uint64_t t_node,
                          float do_val, float turbidity, float ph,
-                         float flow, float temp,
+                         float flow, float temp, float battery_voltage,
                          const char *diagResult,
                          const char *testRunId) {
 
@@ -374,6 +395,7 @@ static void buildPayload(char *buf, size_t bufLen,
   fmtOrNull(s_ph,   sizeof(s_ph),   "pH",              ph,        !SENSOR_CONNECTED[2]);
   fmtOrNull(s_do,   sizeof(s_do),   "dissolvedOxygen", do_val,    !SENSOR_CONNECTED[3]);
   fmtOrNull(s_flow, sizeof(s_flow), "flowRate",        flow,      !SENSOR_CONNECTED[4]);
+  fmtOrNull(s_battery, sizeof(s_battery), "batteryVoltage", battery_voltage, isnan(battery_voltage));
 
   bool hasDiag = diagResult && diagResult[0];
   bool hasTest = testRunId  && testRunId[0];
@@ -381,27 +403,27 @@ static void buildPayload(char *buf, size_t bufLen,
   if (hasDiag && hasTest) {
     snprintf(buf, bufLen,
              "{\"node_id\":\"%s\",\"seq_id\":%lu,\"t_node\":%llu,\"location\":\"%s\","
-             "%s,%s,%s,%s,%s,\"diagResult\":\"%s\",\"test_run_id\":\"%s\"}",
+             "%s,%s,%s,%s,%s,%s,\"diagResult\":\"%s\",\"test_run_id\":\"%s\"}",
              NODE_ID, (unsigned long)seq_id, (unsigned long long)t_node, NODE_LOCATION,
-             s_temp, s_turb, s_ph, s_do, s_flow, diagResult, testRunId);
+             s_temp, s_turb, s_ph, s_do, s_flow, s_battery, diagResult, testRunId);
   } else if (hasDiag) {
     snprintf(buf, bufLen,
              "{\"node_id\":\"%s\",\"seq_id\":%lu,\"t_node\":%llu,\"location\":\"%s\","
-             "%s,%s,%s,%s,%s,\"diagResult\":\"%s\"}",
+             "%s,%s,%s,%s,%s,%s,\"diagResult\":\"%s\"}",
              NODE_ID, (unsigned long)seq_id, (unsigned long long)t_node, NODE_LOCATION,
-             s_temp, s_turb, s_ph, s_do, s_flow, diagResult);
+             s_temp, s_turb, s_ph, s_do, s_flow, s_battery, diagResult);
   } else if (hasTest) {
     snprintf(buf, bufLen,
              "{\"node_id\":\"%s\",\"seq_id\":%lu,\"t_node\":%llu,\"location\":\"%s\","
-             "%s,%s,%s,%s,%s,\"test_run_id\":\"%s\"}",
+             "%s,%s,%s,%s,%s,%s,\"test_run_id\":\"%s\"}",
              NODE_ID, (unsigned long)seq_id, (unsigned long long)t_node, NODE_LOCATION,
-             s_temp, s_turb, s_ph, s_do, s_flow, testRunId);
+             s_temp, s_turb, s_ph, s_do, s_flow, s_battery, testRunId);
   } else {
     snprintf(buf, bufLen,
              "{\"node_id\":\"%s\",\"seq_id\":%lu,\"t_node\":%llu,\"location\":\"%s\","
-             "%s,%s,%s,%s,%s}",
+             "%s,%s,%s,%s,%s,%s}",
              NODE_ID, (unsigned long)seq_id, (unsigned long long)t_node, NODE_LOCATION,
-             s_temp, s_turb, s_ph, s_do, s_flow);
+             s_temp, s_turb, s_ph, s_do, s_flow, s_battery);
   }
 }
 
@@ -799,6 +821,7 @@ void loop() {
 
     float do_val, turbidity, ph, flow, temp;
     readSensors(do_val, turbidity, ph, flow, temp);
+    float battery_voltage = readBatteryVoltage();
 
     seq_id++;
 
@@ -814,7 +837,7 @@ void loop() {
     const char* testRunId = (inTest && s_testRunId[0]) ? s_testRunId : nullptr;
 
     buildPayload(txBuf, TX_BUF_SIZE, seq_id, t_node,
-                 do_val, turbidity, ph, flow, temp, diagResult, testRunId);
+                 do_val, turbidity, ph, flow, temp, battery_voltage, diagResult, testRunId);
 
     if (inTest) {
       uint32_t elapsed  = millis() - s_testStartMs;

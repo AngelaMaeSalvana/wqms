@@ -4,7 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { jsPDF } from "jspdf";
 import { autoTable } from "jspdf-autotable";
 import PageDateWithStatus from "../components/PageDateWithStatus";
-import { getNH3FromReading } from "../utils/nh3Calculator";
+import { getNH3FromReading, formatNH3 } from "../utils/nh3Calculator";
 import { calculateWQI } from "../utils/wqiCalculator";
 import { getNodes, loadNodes } from "../utils/nodesStorage";
 import api from "../services/api";
@@ -87,10 +87,11 @@ function downloadBlob(filename, blob) {
   URL.revokeObjectURL(url);
 }
 
-const ROW_HEIGHT = 41;       // px per data row (padding 8px top+bottom + ~25px content)
+const ROW_HEIGHT = 39;       // px per data row (slightly under ~41 to fill space; overflow-y handles any excess)
 const THEAD_HEIGHT = 41;     // px for the thead row
-const PAGINATION_HEIGHT = 57; // px for pagination bar (padding + border + content)
+const PAGINATION_HEIGHT = 50; // px for pagination bar
 const MIN_ROWS = 5;
+const MAX_ROWS = 50;         // cap rows on very large screens
 
 export default function SensorLogs() {
   const navigate = useNavigate();
@@ -127,36 +128,52 @@ export default function SensorLogs() {
 
   const closeDetail = useCallback(() => setSelectedRow(null), []);
 
-  // Compute page size from viewport height minus all surrounding chrome.
-  // We measure the card body's top offset from the viewport so we account
-  // for the sidebar, header, filters, card header, and padding at every
-  // breakpoint — no hard-coded offsets needed.
+  // Auto-adjust page size from available height so table fills space on large
+  // screens and doesn't overlap pagination on small screens.
   useEffect(() => {
     const computeRows = () => {
       const cardBody = cardBodyRef.current;
       if (!cardBody) return;
       const rect = cardBody.getBoundingClientRect();
-      // rect.top = distance from viewport top to where the card body starts
-      // rect.height = current rendered height (may be 0 on scroll-layout)
-      // We want: viewport height - card body top - bottom padding - pagination
       const vh = window.innerHeight;
-      // On scroll-layout the card body has no fixed height, so we derive
-      // available height from the viewport minus the card body's top position
-      // and a small bottom margin (14–24 px depending on breakpoint).
-      const bottomGap = vh <= 600 ? 12 : vh <= 768 ? 14 : 24;
-      const available = vh - rect.top - bottomGap - PAGINATION_HEIGHT - THEAD_HEIGHT;
-      const rows = Math.max(MIN_ROWS, Math.floor(available / ROW_HEIGHT));
+      const isCompactLayout = window.matchMedia("(max-width: 1024px), (max-height: 768px)").matches;
+
+      let available;
+      if (isCompactLayout) {
+        // On mobile/tablet the card body grows with content; use viewport-based calc.
+        const bottomGap = vh <= 600 ? 12 : vh <= 768 ? 14 : 24;
+        available = vh - rect.top - bottomGap - PAGINATION_HEIGHT - THEAD_HEIGHT;
+      } else {
+        // On desktop the card body has constrained height (flex: 1); use it.
+        if (rect.height > 80) {
+          available = rect.height - PAGINATION_HEIGHT - THEAD_HEIGHT - 2;
+        } else {
+          const bottomGap = 24;
+          available = vh - rect.top - bottomGap - PAGINATION_HEIGHT - THEAD_HEIGHT;
+        }
+      }
+      const rows = Math.max(MIN_ROWS, Math.min(MAX_ROWS, Math.floor(available / ROW_HEIGHT)));
       setPageSize(rows);
     };
 
-    // Run once after mount (layout has painted)
-    const raf = requestAnimationFrame(computeRows);
-
-    // Re-run on resize (handles orientation change, window resize, zoom)
-    window.addEventListener("resize", computeRows);
+    const run = () => {
+      requestAnimationFrame(computeRows);
+    };
+    run();
+    const t1 = setTimeout(run, 150);
+    const t2 = setTimeout(run, 400);
+    window.addEventListener("resize", run);
+    const el = cardBodyRef.current;
+    let ro = null;
+    if (el && typeof ResizeObserver !== "undefined") {
+      ro = new ResizeObserver(run);
+      ro.observe(el);
+    }
     return () => {
-      cancelAnimationFrame(raf);
-      window.removeEventListener("resize", computeRows);
+      clearTimeout(t1);
+      clearTimeout(t2);
+      window.removeEventListener("resize", run);
+      if (ro && el) ro.unobserve(el);
     };
   }, []);
 
@@ -347,6 +364,7 @@ export default function SensorLogs() {
       <header className="page-header sensor-logs-page-header">
         <div>
           <h1 className="page-title">Sensor Logs</h1>
+          <p className="page-subtitle">Raw sensor readings and historical data</p>
         </div>
         <PageDateWithStatus
           lastUpdated={lastUpdated}
@@ -356,14 +374,19 @@ export default function SensorLogs() {
       </header>
 
       <div className="sensor-logs-filters">
-        <input
-          type="search"
-          className="sensor-logs-search"
-          placeholder="Search…"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          aria-label="Search sensor logs"
-        />
+        <div className="sensor-logs-search-wrap">
+          <svg className="sensor-logs-search-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+          </svg>
+          <input
+            type="search"
+            className="sensor-logs-search"
+            placeholder="Search…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            aria-label="Search sensor logs"
+          />
+        </div>
 
         {/* Sort & Filter flyout */}
         <div className="sl-sort-dropdown" ref={sortPanelRef}>
@@ -524,8 +547,7 @@ export default function SensorLogs() {
 
       <section className="sensor-logs-table-card card">
         <div className="card__header">
-          <h2 className="card__title">Sensor data</h2>
-          <p className="card__desc">All nodes and parameters, saved every hour. Use filters above to narrow results.</p>
+          <h2 className="card__title">Sensor Readings</h2>
         </div>
         <div className="card__body" ref={cardBodyRef}>
           <div className="sensor-logs-data-table-wrap" ref={tableWrapRef}>
@@ -554,7 +576,7 @@ export default function SensorLogs() {
                   <th className="sensor-logs-col-desktop">
                     <button type="button" className={`sensor-logs-th-btn ${tableSort.column === "temperature" ? "sensor-logs-th-btn--active" : ""}`}
                       onClick={() => setTableSort((s) => ({ column: "temperature", direction: s.column === "temperature" && s.direction === "desc" ? "asc" : "desc" }))}>
-                      Temp {tableSort.column === "temperature" && (tableSort.direction === "asc" ? "↑" : "↓")}
+                      Temp (°C) {tableSort.column === "temperature" && (tableSort.direction === "asc" ? "↑" : "↓")}
                     </button>
                   </th>
                   <th className="sensor-logs-col-desktop">
@@ -566,31 +588,31 @@ export default function SensorLogs() {
                   <th className="sensor-logs-col-desktop">
                     <button type="button" className={`sensor-logs-th-btn ${tableSort.column === "turbidity" ? "sensor-logs-th-btn--active" : ""}`}
                       onClick={() => setTableSort((s) => ({ column: "turbidity", direction: s.column === "turbidity" && s.direction === "desc" ? "asc" : "desc" }))}>
-                      Turb {tableSort.column === "turbidity" && (tableSort.direction === "asc" ? "↑" : "↓")}
+                      Turbidity (NTU) {tableSort.column === "turbidity" && (tableSort.direction === "asc" ? "↑" : "↓")}
                     </button>
                   </th>
                   <th className="sensor-logs-col-desktop">
                     <button type="button" className={`sensor-logs-th-btn ${tableSort.column === "dissolvedOxygen" ? "sensor-logs-th-btn--active" : ""}`}
                       onClick={() => setTableSort((s) => ({ column: "dissolvedOxygen", direction: s.column === "dissolvedOxygen" && s.direction === "desc" ? "asc" : "desc" }))}>
-                      DO {tableSort.column === "dissolvedOxygen" && (tableSort.direction === "asc" ? "↑" : "↓")}
+                      Dissolved O₂ (mg/L) {tableSort.column === "dissolvedOxygen" && (tableSort.direction === "asc" ? "↑" : "↓")}
                     </button>
                   </th>
                   <th className="sensor-logs-col-desktop">
                     <button type="button" className={`sensor-logs-th-btn ${tableSort.column === "nh3" ? "sensor-logs-th-btn--active" : ""}`}
                       onClick={() => setTableSort((s) => ({ column: "nh3", direction: s.column === "nh3" && s.direction === "desc" ? "asc" : "desc" }))}>
-                      NH₃ {tableSort.column === "nh3" && (tableSort.direction === "asc" ? "↑" : "↓")}
+                      NH₃ (mg/L) {tableSort.column === "nh3" && (tableSort.direction === "asc" ? "↑" : "↓")}
                     </button>
                   </th>
                   <th className="sensor-logs-col-desktop">
                     <button type="button" className={`sensor-logs-th-btn ${tableSort.column === "flowRate" ? "sensor-logs-th-btn--active" : ""}`}
                       onClick={() => setTableSort((s) => ({ column: "flowRate", direction: s.column === "flowRate" && s.direction === "desc" ? "asc" : "desc" }))}>
-                      Flow {tableSort.column === "flowRate" && (tableSort.direction === "asc" ? "↑" : "↓")}
+                      Flow (L/min) {tableSort.column === "flowRate" && (tableSort.direction === "asc" ? "↑" : "↓")}
                     </button>
                   </th>
                   <th>
                     <button type="button" className={`sensor-logs-th-btn ${tableSort.column === "wqi" ? "sensor-logs-th-btn--active" : ""}`}
                       onClick={() => setTableSort((s) => ({ column: "wqi", direction: s.column === "wqi" && s.direction === "desc" ? "asc" : "desc" }))}>
-                      WQI {tableSort.column === "wqi" && (tableSort.direction === "asc" ? "↑" : "↓")}
+                      WQI Score {tableSort.column === "wqi" && (tableSort.direction === "asc" ? "↑" : "↓")}
                     </button>
                   </th>
                   {/* Mobile chevron column */}
@@ -601,7 +623,7 @@ export default function SensorLogs() {
                 {sensorTableRows.length === 0 ? (
                   <tr>
                     <td colSpan={10} className="sensor-logs-data-table-empty">
-                      No data. Select a date range (or use From/To above) and ensure nodes exist.
+                      No readings found. Try selecting a different date range, or check that monitoring nodes are active and sending data.
                     </td>
                   </tr>
                 ) : (
@@ -624,12 +646,12 @@ export default function SensorLogs() {
                         <td>
                           <span className="sensor-logs-data-table-node-id">{highlightMatch(nodeLabel, search)}</span>
                         </td>
-                        <td className="sensor-logs-col-desktop">{highlightMatch(row.temperature, search)}</td>
-                        <td className="sensor-logs-col-desktop">{highlightMatch(row.pH, search)}</td>
-                        <td className="sensor-logs-col-desktop">{highlightMatch(row.turbidity, search)}</td>
-                        <td className="sensor-logs-col-desktop">{highlightMatch(row.dissolvedOxygen, search)}</td>
-                        <td className="sensor-logs-col-desktop">{highlightMatch(row.nh3, search)}</td>
-                        <td className="sensor-logs-col-desktop">{highlightMatch(row.flowRate, search)}</td>
+                        <td className="sensor-logs-col-desktop">{highlightMatch(row.temperature != null ? Number(row.temperature).toFixed(2) : "—", search)}</td>
+                        <td className="sensor-logs-col-desktop">{highlightMatch(row.pH != null ? Number(row.pH).toFixed(2) : "—", search)}</td>
+                        <td className="sensor-logs-col-desktop">{highlightMatch(row.turbidity != null ? Number(row.turbidity).toFixed(1) : "—", search)}</td>
+                        <td className="sensor-logs-col-desktop">{highlightMatch(row.dissolvedOxygen != null ? Number(row.dissolvedOxygen).toFixed(2) : "—", search)}</td>
+                        <td className="sensor-logs-col-desktop">{highlightMatch(row.nh3 != null ? formatNH3(row.nh3) : "—", search)}</td>
+                        <td className="sensor-logs-col-desktop">{highlightMatch(row.flowRate != null ? Number(row.flowRate).toFixed(2) : "—", search)}</td>
                         <td>{highlightMatch(row.wqi != null ? row.wqi : "—", search)}</td>
                         <td className="sensor-logs-col-mobile sensor-logs-row-chevron" aria-hidden="true">›</td>
                       </tr>
@@ -704,7 +726,7 @@ export default function SensorLogs() {
                 { label: "pH", value: selectedRow.pH, unit: "" },
                 { label: "Turbidity", value: selectedRow.turbidity, unit: "NTU" },
                 { label: "Dissolved O₂", value: selectedRow.dissolvedOxygen, unit: "mg/L" },
-                { label: "NH₃", value: selectedRow.nh3, unit: "mg/L" },
+                { label: "NH₃", value: selectedRow.nh3 != null ? formatNH3(selectedRow.nh3) : null, unit: "mg/L", preformatted: true },
                 { label: "Flow Rate", value: selectedRow.flowRate, unit: "L/min" },
                 { label: "WQI", value: selectedRow.wqi, unit: "", highlight: true },
               ].map(({ label, value, unit, highlight }) => (

@@ -23,7 +23,7 @@ const Layout = () => {
       />
 
       {/* This is where Dashboard/Reports/Maps/Alerts/Settings will render */}
-      <main className="layout-main">
+      <main className={`layout-main${location.pathname === "/map" ? " layout-main--map" : ""}${location.pathname === "/dashboard" ? " layout-main--dashboard" : ""}`}>
         <div key={location.pathname} className="page-enter">
           <Outlet />
         </div>

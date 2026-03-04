@@ -9,6 +9,28 @@ const SEVERITY_LABELS = {
   info: "Information",
 };
 
+const TRIGGER_LABELS = {
+  threshold: "Sensor reading exceeded limit",
+  node: "Monitoring node status change",
+  maintenance: "Maintenance overdue",
+  wqi: "Water Quality Index change",
+  system: "System event",
+};
+
+const PARAMETER_LABELS = {
+  temperature: "Temperature",
+  turbidity: "Turbidity",
+  ph: "Water pH",
+  pH: "Water pH",
+  nh3: "Ammonia (NH₃)",
+  dissolvedOxygen: "Dissolved Oxygen",
+  dissolved_oxygen: "Dissolved Oxygen",
+  flowRate: "Flow Rate",
+  flow_rate: "Flow Rate",
+  wqi: "Water Quality Index (WQI)",
+  system: "Multiple parameters",
+};
+
 export function AlertDetailModal({ alert: a, onClose }) {
   useEffect(() => {
     const handleKey = (e) => {
@@ -49,7 +71,7 @@ export function AlertDetailModal({ alert: a, onClose }) {
           <p className="alert-detail-modal__summary">{a.detail || a.message || "No additional details."}</p>
 
           <div className="alert-detail-modal__section">
-            <h3 className="alert-detail-modal__section-title">Where</h3>
+            <h3 className="alert-detail-modal__section-title">Location</h3>
             {a.nodeName || a.nodeId ? (
               <p className="alert-detail-modal__row">
                 {a.nodeName && <span className="alert-detail-modal__value">{a.nodeName}</span>}
@@ -61,7 +83,7 @@ export function AlertDetailModal({ alert: a, onClose }) {
           </div>
 
           <div className="alert-detail-modal__section">
-            <h3 className="alert-detail-modal__section-title">When</h3>
+            <h3 className="alert-detail-modal__section-title">Date &amp; Time</h3>
             <p className="alert-detail-modal__row">{dateStr}</p>
           </div>
 
@@ -71,31 +93,39 @@ export function AlertDetailModal({ alert: a, onClose }) {
               <dl className="alert-detail-modal__details">
                 {a.type && (
                   <>
-                    <dt>Trigger</dt>
-                    <dd>{a.type}</dd>
+                    <dt>Cause</dt>
+                    <dd>{TRIGGER_LABELS[a.type] || a.type}</dd>
                   </>
                 )}
                 {a.parameter != null && (
                   <>
-                    <dt>Parameter</dt>
+                    <dt>Affected Parameter</dt>
                     <dd>
-                      {a.parameter}
-                      {a.value != null && (
-                        <span className="alert-detail-modal__value-inline">
-                          {" "}— Current: <strong>{a.value}</strong>
-                          {hasThreshold && (
-                            <span className="alert-detail-modal__muted"> (limit: {thresholdStr})</span>
+                      {a.parameter === 'system' ? (
+                        a.affectedParameters?.length > 0
+                          ? a.affectedParameters.map((p) => PARAMETER_LABELS[p] || p).join(', ')
+                          : 'Multiple parameters'
+                      ) : (
+                        <>
+                          {PARAMETER_LABELS[a.parameter] || a.parameter}
+                          {a.value != null && (
+                            <span className="alert-detail-modal__value-inline">
+                              {" "}— Measured: <strong>{a.value}</strong>
+                              {hasThreshold && (
+                                <span className="alert-detail-modal__muted"> (safe range: {thresholdStr})</span>
+                              )}
+                            </span>
                           )}
-                        </span>
+                        </>
                       )}
                     </dd>
                   </>
                 )}
                 {a.wqiEscalated && (
                   <>
-                    <dt>Escalation</dt>
+                    <dt>Note</dt>
                     <dd className="alert-detail-modal__escalation-note">
-                      WQI escalated — severity raised due to overall water quality impact
+                      Overall water quality score (WQI) worsened — alert severity was raised accordingly
                     </dd>
                   </>
                 )}

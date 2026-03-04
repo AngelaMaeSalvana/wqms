@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { isSupabaseEnabled } from '../lib/supabaseClient';
+import { supabase, isSupabaseEnabled } from '../lib/supabaseClient';
 
 /**
  * A node is considered Online if it has sent a sensor reading within
@@ -88,6 +88,41 @@ export function useNodeStatus(nodes) {
     timerRef.current = setInterval(fetchStatuses, POLL_INTERVAL_MS);
     return () => clearInterval(timerRef.current);
   }, [fetchStatuses]);
+
+  // Realtime: immediately flip a node to "online" when a new reading arrives,
+  // without waiting for the next 60-second poll.
+  useEffect(() => {
+    if (!supabase || !Array.isArray(nodes) || nodes.length === 0) return;
+
+    const nodeIds = new Set(nodes.map((n) => n.id));
+
+    const channel = supabase
+      .channel('node_status_live')
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'sensor_readings' },
+        (payload) => {
+          const row = payload.new;
+          if (!row || !nodeIds.has(row.node_id)) return;
+          if (!hasAnySensorData(row)) return;
+          // Mark the node online immediately; the 60-second poll will correct it
+          // back to offline if the reading is too old by then.
+          setNodeStatuses((prev) => ({
+            ...prev,
+            [row.node_id]: 'online',
+          }));
+        }
+      )
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          console.log('[Realtime] node_status_live channel subscribed');
+        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+          console.warn('[Realtime] node_status_live channel error:', status);
+        }
+      });
+
+    return () => supabase.removeChannel(channel);
+  }, [nodes]);
 
   return { nodeStatuses, refreshStatuses: fetchStatuses };
 }

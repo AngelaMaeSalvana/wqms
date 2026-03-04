@@ -1,7 +1,7 @@
 import { useState, useCallback } from "react";
 import api from "../services/api";
 import { applyCalibration } from "../utils/calibration";
-import { getNH3FromReading } from "../utils/nh3Calculator";
+import { getNH3FromReading, formatNH3 } from "../utils/nh3Calculator";
 
 /**
  * A reading is considered "live" if it arrived within this window.
@@ -45,7 +45,7 @@ function buildSensorStatusFromReading(nodeId, reading) {
     { name: "Turbidity Sensor",        raw: turb,  fmt: (v) => `${Number(v).toFixed(1)} NTU` },
     { name: "pH Sensor",               raw: ph,    fmt: (v) => `${Number(v).toFixed(1)}` },
     { name: "Dissolved Oxygen Sensor", raw: doVal, fmt: (v) => `${Number(v).toFixed(1)} mg/L` },
-    { name: "NH₃ Sensor",              raw: nh3,   fmt: (v) => `${Number(v).toFixed(4)} mg/L` },
+    { name: "NH₃ Sensor",              raw: nh3,   fmt: (v) => `${formatNH3(v)} mg/L` },
   ];
 
   const sensors = sensorDefs.map(({ name, raw, fmt }) => {

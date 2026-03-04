@@ -1,0 +1,107 @@
+.location-picker-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 16px;
+  box-sizing: border-box;
+}
+
+.location-picker-modal {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  max-width: 540px;
+  width: 100%;
+  max-height: calc(100vh - 32px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 24px 48px rgba(0, 0, 0, 0.4);
+}
+
+.location-picker-modal__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.location-picker-modal__header h2 {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.location-picker-modal__close {
+  width: 36px;
+  height: 36px;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 1.5rem;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+.location-picker-modal__close:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text);
+}
+
+.location-picker-modal__hint {
+  margin: 0;
+  padding: 12px 20px;
+  font-size: 0.9rem;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.location-picker-map-wrap {
+  flex: 1;
+  min-height: 280px;
+  height: 320px;
+  margin: 0 20px;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+
+.location-picker-map {
+  height: 100%;
+  width: 100%;
+}
+
+.location-picker-map-wrap .leaflet-container {
+  height: 100% !important;
+  width: 100% !important;
+  min-height: 320px;
+}
+
+.location-picker-modal__coords {
+  padding: 12px 20px;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  font-family: ui-monospace, monospace;
+  flex-shrink: 0;
+}
+
+.location-picker-modal__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  padding: 16px 20px;
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+}

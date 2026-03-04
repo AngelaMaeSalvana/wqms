@@ -1,13 +1,16 @@
-import React, { useMemo, useState, useEffect, useCallback } from "react";
+import React, { useMemo, useState, useEffect, useCallback, useRef } from "react";
 import { createPortal } from "react-dom";
 import NodeSelector from "../components/dashboard/NodeSelector";
 import NodeStatus from "../components/dashboard/NodeStatus";
+import BatteryIndicator from "../components/BatteryIndicator";
 import TodayCard from "../components/dashboard/TodayCard";
 import LiveChart from "../components/dashboard/LiveChart";
 import WqiCard from "../components/dashboard/WqiCard";
 import MiniMapCard from "../components/dashboard/MiniMapCard";
 import AlertsSummaryCard from "../components/dashboard/AlertsSummaryCard";
 import PageDateWithStatus from "../components/PageDateWithStatus";
+import { ToastContainer } from "../components/Toast";
+import { useToast } from "../hooks/useToast";
 import { calculateWQI, getWQIClass } from "../utils/wqiCalculator";
 import { getNH3FromReading } from "../utils/nh3Calculator";
 import { buildAlertsForAllNodes } from "../utils/alertsData";
@@ -15,6 +18,7 @@ import { getNodes, loadNodes } from "../utils/nodesStorage";
 import api from "../services/api";
 import { useSensorTest } from "../hooks/useSensorTest";
 import { useNodeStatus } from "../hooks/useNodeStatus";
+import { useRealtimeReadings } from "../hooks/useRealtimeReadings";
 import { useAlertEmailNotifications } from "../hooks/useAlertEmailNotifications";
 import { applyCalibrationToReadings } from "../utils/calibration";
 import { PageLoader } from "../components/LoadingSkeleton";
@@ -85,6 +89,30 @@ export default function Dashboard() {
 
   const sensorTest = useSensorTest();
   const { nodeStatuses } = useNodeStatus(nodes);
+
+  // Realtime: merge incoming rows into todayReadings without a full re-fetch.
+  const realtimeDate = toDateStr(new Date());
+  useRealtimeReadings({
+    date: realtimeDate,
+    onNewReading: (enriched) => {
+      setTodayReadings((prev) => {
+        // Deduplicate by timestamp + node_id in case the same row arrives twice.
+        const key = `${enriched.node_id}_${enriched.timestamp}`;
+        if (prev.some((r) => `${r.node_id}_${r.timestamp}` === key)) return prev;
+        return [...prev, enriched];
+      });
+      // Update readingsByNode: push previous latest to prevByNode, set new latest.
+      const nid = enriched.node_id || enriched.nodeId || '1';
+      setReadingsByNode((prev) => {
+        const updated = { ...prev };
+        if (updated[nid]) {
+          setPrevReadingsByNode((p) => ({ ...p, [nid]: updated[nid] }));
+        }
+        updated[nid] = enriched;
+        return updated;
+      });
+    },
+  });
 
   useEffect(() => {
     loadNodes()
@@ -184,6 +212,27 @@ export default function Dashboard() {
 
   useAlertEmailNotifications(alerts, readingsByNode);
 
+  const { toasts, showToast, removeToast } = useToast();
+  const seenAlertIdsRef = useRef(new Set());
+  const isFirstAlertRenderRef = useRef(true);
+
+  useEffect(() => {
+    if (!alerts.length) return;
+    // Skip toasting on the initial load — only fire for genuinely new alerts
+    if (isFirstAlertRenderRef.current) {
+      alerts.forEach((a) => seenAlertIdsRef.current.add(a.id));
+      isFirstAlertRenderRef.current = false;
+      return;
+    }
+    alerts.forEach((a) => {
+      if (seenAlertIdsRef.current.has(a.id)) return;
+      seenAlertIdsRef.current.add(a.id);
+      const sev = (a.severity || "info").toLowerCase();
+      const toastType = sev === "high" ? "error" : sev === "medium" ? "warning" : "info";
+      showToast(a.title || "New alert", toastType, 6000);
+    });
+  }, [alerts, showToast]);
+
   /** Alerts for the selected node on the current date only (for Dashboard Alerts Summary card) */
   const dashboardAlerts = useMemo(() => {
     const nodeId = selectedNodeId || null;
@@ -254,20 +303,27 @@ export default function Dashboard() {
 
   const todayStats = useMemo(() => {
     if (!todayData?.datasets?.length) return null;
-    const getStats = (arr) => {
+    const getStats = (arr, round = true) => {
       if (!Array.isArray(arr) || arr.length === 0) return { low: null, avg: null, high: null };
       const min = Math.min(...arr);
       const max = Math.max(...arr);
       const sum = arr.reduce((a, b) => a + b, 0);
-      const avg = arr.length ? Math.round((sum / arr.length) * 10) / 10 : null;
-      return { low: Math.round(min * 10) / 10, avg, high: Math.round(max * 10) / 10 };
+      const avg = arr.length ? sum / arr.length : null;
+      if (round) {
+        return {
+          low: Math.round(min * 10) / 10,
+          avg: avg != null ? Math.round(avg * 10) / 10 : null,
+          high: Math.round(max * 10) / 10,
+        };
+      }
+      return { low: min, avg, high: max };
     };
     const ds = todayData.datasets;
     return {
       temperature: getStats(ds[0]?.data),
       turbidity: getStats(ds[1]?.data),
       ph: getStats(ds[2]?.data),
-      nh3: getStats(ds[3]?.data),
+      nh3: getStats(ds[3]?.data, false),
       flowRate: getStats(ds[4]?.data),
       dissolvedOxygen: getStats(ds[5]?.data),
     };
@@ -319,14 +375,17 @@ export default function Dashboard() {
 
   return (
     <div className="dash">
+      <ToastContainer toasts={toasts} onClose={removeToast} />
       <header className="dash__top">
         <div>
           <h1 className="dash__title">Dashboard</h1>
+          <p className="dash__subtitle">Real-time water quality monitoring</p>
         </div>
         <PageDateWithStatus lastUpdated={lastUpdated} className="dash__date" showClassification={false} />
       </header>
 
       <div className="dash__controls">
+        <span className="dash__controls-label">Node</span>
         <NodeSelector
           nodes={nodes.filter((n) => n.active !== false)}
           value={selectedNodeId}
@@ -335,6 +394,17 @@ export default function Dashboard() {
             setStoredNodeId(id);
           }}
         />
+        <span className="dash__controls-divider" aria-hidden="true" />
+        {selectedNode && (() => {
+          const r = readingsByNode[selectedNode.id];
+          const v = r?.battery_voltage ?? r?.batteryVoltage ?? null;
+          return v != null ? (
+            <>
+              <BatteryIndicator voltage={v} showPercentage size="medium" />
+              <span className="dash__controls-divider" aria-hidden="true" />
+            </>
+          ) : null;
+        })()}
         <NodeStatus status={selectedNode ? (nodeStatuses[selectedNode.id] ?? 'offline') : 'offline'} />
       </div>
 
@@ -360,6 +430,7 @@ export default function Dashboard() {
             onTestSensor={handleSensorTest}
             isTestingSensor={sensorTest.isTesting}
             sensorTestResults={sensorTest.allResults}
+            readingsByNode={readingsByNode}
           />
         </section>
         <section className="dash__cell dash__cell--alerts">

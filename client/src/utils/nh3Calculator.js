@@ -40,4 +40,14 @@ export function getNH3FromReading(reading) {
   return null;
 }
 
+/**
+ * Format an NH3 value to 5 significant figures for display.
+ * e.g. 0.0008046375... → "0.00080464"
+ *      1.23456789      → "1.2346"
+ */
+export function formatNH3(value) {
+  if (value == null || isNaN(value)) return "—";
+  return Number(value).toPrecision(5);
+}
+
 export default calculateNH3FromTAN;

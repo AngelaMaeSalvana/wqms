@@ -5,7 +5,10 @@
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
+  overflow-x: hidden;
   padding-bottom: 32px;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
 }
 
 .perf-test-page-header {
@@ -101,7 +104,7 @@
 }
 
 .perf-collapse.is-open {
-  grid-template-rows: 1fr;
+  grid-template-rows: auto;
 }
 
 .perf-collapse-inner {
@@ -616,6 +619,11 @@
   font-size: 0.85rem;
   color: var(--text-muted);
   margin: 0;
+}
+
+.eval-results-meta-warn {
+  color: #e6a817;
+  font-size: 0.82rem;
 }
 
 .eval-no-data {

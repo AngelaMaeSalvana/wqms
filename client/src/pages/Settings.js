@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { useTheme } from "../contexts/ThemeContext";
+import InfoTooltip from "../components/InfoTooltip";
 import { DEFAULT_WQI_WEIGHTS, getWQIWeights } from "../utils/wqiCalculator";
 import {
   loadFromStorage,
@@ -306,7 +307,7 @@ export default function Settings() {
       <header className="page-header">
         <div>
           <h1 className="page-title">Settings</h1>
-          <p className="page-subtitle">Calibration, thresholds &amp; theme</p>
+          <p className="page-subtitle">Sensor calibration, alert thresholds &amp; preferences</p>
         </div>
       </header>
 
@@ -347,8 +348,10 @@ export default function Settings() {
           {/* Calibration */}
           <section className="settings-section card">
           <div className="card__header">
-            <h2 className="card__title">Calibration</h2>
-            <p className="card__desc">Sensor calibration offsets. Applied to displayed readings across the app.</p>
+            <h2 className="card__title">
+              Calibration
+              <InfoTooltip text="Fine-tune each sensor by adding a small correction value. Use this if a sensor consistently reads slightly too high or too low." label="Calibration help" />
+            </h2>
           </div>
           <div className="card__body">
             <div className="settings-grid">
@@ -426,8 +429,10 @@ export default function Settings() {
         <section className="settings-section card">
           <div className="card__header settings-threshold-header">
             <div>
-              <h2 className="card__title">Thresholds</h2>
-              <p className="card__desc">Alert thresholds for water quality parameters</p>
+              <h2 className="card__title">
+                Thresholds
+                <InfoTooltip text="Set the safe range for each parameter. An alert is triggered when a reading goes outside these limits." label="Thresholds help" />
+              </h2>
             </div>
             <label className="settings-label settings-classification-select-wrap">
               <span>Classification</span>
@@ -443,14 +448,20 @@ export default function Settings() {
                   </option>
                 ))}
               </select>
+              {!isCustomClassification && (
+                <InfoTooltip
+                  text="This is a DENR standard preset — values are read-only. Switch to Custom to edit."
+                  label="DENR preset info"
+                />
+              )}
             </label>
           </div>
           <div className="card__body">
-            <p className="settings-helper settings-threshold-helper">
-              {isCustomClassification
-                ? "Custom thresholds — edit values below."
-                : "DENR preset — values are fixed for this classification."}
-            </p>
+            {isCustomClassification && (
+              <p className="settings-helper settings-threshold-helper">
+                Custom — you can freely edit the limit values below.
+              </p>
+            )}
             <div className="settings-grid">
               <label className="settings-label">
                 <span>Temperature min (°C)</span>
@@ -544,16 +555,15 @@ export default function Settings() {
         {/* WQI Parameter Weights */}
         <section className="settings-section card">
           <div className="card__header">
-            <h2 className="card__title">Water Quality Index (WQI) Weights</h2>
-            <p className="card__desc">
-              Adjust how much each parameter contributes to the WQI. Weights are normalized (sum = 1.00).
-              Higher weight = greater influence on the final score.
-            </p>
+            <h2 className="card__title">
+              Water Quality Index (WQI) Weights
+              <InfoTooltip text="How much each parameter influences the overall water quality score. Higher weight = more impact on the final score. Values are automatically balanced to add up to 1." label="WQI weights help" />
+            </h2>
           </div>
           <div className="card__body">
             <div className="settings-grid">
               <label className="settings-label">
-                <span>Dissolved O₂ (W_DO)</span>
+                <span>Dissolved Oxygen weight</span>
                 <input
                   type="number"
                   min={0}
@@ -566,7 +576,7 @@ export default function Settings() {
                 />
               </label>
               <label className="settings-label">
-                <span>NH₃ (W_NH3)</span>
+                <span>Ammonia (NH₃) weight</span>
                 <input
                   type="number"
                   min={0}
@@ -579,7 +589,7 @@ export default function Settings() {
                 />
               </label>
               <label className="settings-label">
-                <span>pH (W_pH)</span>
+                <span>pH weight</span>
                 <input
                   type="number"
                   min={0}
@@ -592,7 +602,7 @@ export default function Settings() {
                 />
               </label>
               <label className="settings-label">
-                <span>Turbidity (W_turb)</span>
+                <span>Turbidity weight</span>
                 <input
                   type="number"
                   min={0}
@@ -605,7 +615,7 @@ export default function Settings() {
                 />
               </label>
               <label className="settings-label">
-                <span>Temperature (W_temp)</span>
+                <span>Temperature weight</span>
                 <input
                   type="number"
                   min={0}
@@ -626,14 +636,12 @@ export default function Settings() {
               return (
                 <>
                   <p className="settings-helper" style={{ marginTop: "0.75rem" }}>
-                    Normalized formula in use: WQI = {w.dissolvedOxygen.toFixed(2)}×QDO + {w.nh3.toFixed(2)}×QNH3 + {w.pH.toFixed(2)}×QpH + {w.turbidity.toFixed(2)}×Qturb + {w.temperature.toFixed(2)}×Qtemp
-                  </p>
-                  <p className="settings-helper">
-                    Weights sum to {sum.toFixed(2)}. {sum !== 1 ? "Values are auto-normalized so the total = 1.00." : ""}
+                    Weights sum to {sum.toFixed(2)}
+                    {sum !== 1 && " — auto-normalized to 1.00"}
                   </p>
                   {hasExtreme && (
                     <p className="settings-helper" role="alert" style={{ color: "var(--accent-warning, #f0a500)" }}>
-                      ⚠ Extreme weight distribution may bias the index. Consider using more balanced weights.
+                      ⚠ One parameter has a very high weight. This may cause the score to rely too heavily on a single reading. Consider spreading the weights more evenly.
                     </p>
                   )}
                 </>
@@ -645,13 +653,15 @@ export default function Settings() {
         {/* Alert Logic */}
         <section className="settings-section card">
           <div className="card__header">
-            <h2 className="card__title">Alert Logic</h2>
-            <p className="card__desc">Advanced detection behaviour for each parameter.</p>
+            <h2 className="card__title">
+              Alert Sensitivity
+              <InfoTooltip text="Control how sensitive the system is when triggering alerts." label="Alert sensitivity help" />
+            </h2>
           </div>
           <div className="card__body">
             <div className="settings-grid">
               <label className="settings-label">
-                <span>pH hysteresis offset</span>
+                <span>pH alert buffer <InfoTooltip text="How far pH must recover before the alert clears. Prevents repeated on/off alerts near the threshold. Default: 0.2" label="pH buffer help" /></span>
                 <input
                   type="number"
                   min={0}
@@ -660,14 +670,11 @@ export default function Settings() {
                   className="settings-input"
                   value={alertLogic.pHHysteresisOffset ?? DEFAULT_ALERT_LOGIC.pHHysteresisOffset}
                   onChange={(e) => updateAlertLogic("pHHysteresisOffset", e.target.value)}
-                  aria-label="pH hysteresis offset"
+                  aria-label="pH alert buffer"
                 />
-                <span className="settings-helper">
-                  pH alert clears only once value returns past threshold ± this offset. Default: 0.2
-                </span>
               </label>
               <label className="settings-label">
-                <span>NH₃ slope limit (mg/L per interval)</span>
+                <span>Ammonia (NH₃) rapid-rise limit (mg/L) <InfoTooltip text="Triggers a warning if ammonia rises by more than this amount between two consecutive readings. Default: 0.15 mg/L" label="NH3 rapid-rise help" /></span>
                 <input
                   type="number"
                   min={0}
@@ -676,32 +683,25 @@ export default function Settings() {
                   className="settings-input"
                   value={alertLogic.nh3SlopeLimit ?? DEFAULT_ALERT_LOGIC.nh3SlopeLimit}
                   onChange={(e) => updateAlertLogic("nh3SlopeLimit", e.target.value)}
-                  aria-label="NH3 slope limit"
+                  aria-label="Ammonia rapid-rise limit"
                 />
-                <span className="settings-helper">
-                  Rapid-rise alert fires if NH₃ delta between consecutive readings exceeds this. Default: 0.15
-                </span>
               </label>
             </div>
-            <p className="settings-helper" style={{ marginTop: "0.75rem" }}>
-              <strong>Dissolved O₂:</strong> alert requires 2 consecutive readings below minimum (temporal persistence).<br />
-              <strong>Turbidity:</strong> alert uses a 2-sample moving average instead of the raw instantaneous value.
-            </p>
           </div>
         </section>
 
         {/* Data collection & updates */}
         <section className="settings-section card">
           <div className="card__header">
-            <h2 className="card__title">Data collection &amp; updates</h2>
-            <p className="card__desc">
-              Data collection interval settings.
-            </p>
+            <h2 className="card__title">
+              Data collection &amp; updates
+              <InfoTooltip text="Control how frequently sensor readings are recorded and how much data is loaded at a time." label="Data collection help" />
+            </h2>
           </div>
           <div className="card__body">
             <div className="settings-grid">
               <label className="settings-label">
-                <span>Default interval (minutes)</span>
+                <span>Default interval (minutes) <InfoTooltip text="1–120 min" label="Default interval range" /></span>
                 <input
                   type="number"
                   min={1}
@@ -711,10 +711,9 @@ export default function Settings() {
                   onChange={(e) => updateDataCollection("defaultIntervalMinutes", e.target.value)}
                   aria-label="Default data collection interval in minutes"
                 />
-                <span className="settings-helper">1–120 min</span>
               </label>
               <label className="settings-label">
-                <span>Minimum interval (minutes)</span>
+                <span>Minimum interval (minutes) <InfoTooltip text="Must be ≤ max interval" label="Min interval help" /></span>
                 <input
                   type="number"
                   min={1}
@@ -724,10 +723,9 @@ export default function Settings() {
                   onChange={(e) => updateDataCollection("minIntervalMinutes", e.target.value)}
                   aria-label="Minimum sampling interval in minutes"
                 />
-                <span className="settings-helper">≤ max</span>
               </label>
               <label className="settings-label">
-                <span>Maximum interval (minutes)</span>
+                <span>Maximum interval (minutes) <InfoTooltip text="Must be ≥ min interval" label="Max interval help" /></span>
                 <input
                   type="number"
                   min={1}
@@ -737,10 +735,9 @@ export default function Settings() {
                   onChange={(e) => updateDataCollection("maxIntervalMinutes", e.target.value)}
                   aria-label="Maximum sampling interval in minutes"
                 />
-                <span className="settings-helper">≥ min</span>
               </label>
               <label className="settings-label">
-                <span>Readings limit</span>
+                <span>Max readings to load <InfoTooltip text="How many recent readings to fetch at once (100–2000). Higher values show more history but may load slower." label="Readings limit help" /></span>
                 <input
                   type="number"
                   min={100}
@@ -750,7 +747,6 @@ export default function Settings() {
                   onChange={(e) => updateDataCollection("readingsLimit", e.target.value)}
                   aria-label="Maximum readings to load"
                 />
-                <span className="settings-helper">100–2000</span>
               </label>
             </div>
           </div>
@@ -784,8 +780,10 @@ export default function Settings() {
         {/* Email Notifications */}
         <section className="settings-section card">
           <div className="card__header">
-            <h2 className="card__title">Email Notifications</h2>
-            <p className="card__desc">Receive alerts and notifications by email when enabled. Uses EmailJS—add your keys in .env and set the template To Email field to {"{{to_email}}"}.</p>
+            <h2 className="card__title">
+              Email Notifications
+              <InfoTooltip text="Receive email notifications when alerts are triggered. Requires EmailJS to be configured in the system." label="Email notifications help" />
+            </h2>
           </div>
           <div className="card__body">
             <div className="settings-option-row">
@@ -821,10 +819,10 @@ export default function Settings() {
         {/* Maintenance Schedule */}
         <section className="settings-section card">
           <div className="card__header">
-            <h2 className="card__title">Maintenance Schedule</h2>
-            <p className="card__desc">
-              Set how often nodes should be serviced. An alert is raised when a node exceeds this interval since its last recorded maintenance.
-            </p>
+            <h2 className="card__title">
+              Maintenance Schedule
+              <InfoTooltip text="Get a reminder alert when a monitoring node hasn't been physically serviced or inspected within the chosen time period." label="Maintenance help" />
+            </h2>
           </div>
           <div className="card__body">
             <div className="settings-maintenance-options">
@@ -880,7 +878,6 @@ export default function Settings() {
         <section className="settings-section card">
           <div className="card__header">
             <h2 className="card__title">Theme</h2>
-            <p className="card__desc">Dark, light, or follow your system preference</p>
           </div>
           <div className="card__body">
             <div className="settings-option-row">
