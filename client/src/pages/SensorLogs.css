@@ -537,10 +537,22 @@
   color: var(--text);
 }
 
+.sl-detail-node-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .sl-detail-node {
   font-size: 0.8rem;
   color: var(--text-muted);
   font-family: ui-monospace, monospace;
+}
+
+.sl-detail-battery {
+  display: inline-flex;
+  align-items: center;
 }
 
 .sl-detail-close {

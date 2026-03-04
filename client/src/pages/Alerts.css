@@ -485,21 +485,6 @@
   min-height: 0;
   overflow-y: auto;
   gap: 0;
-  scrollbar-width: thin;
-  scrollbar-color: var(--border) transparent;
-}
-
-.alerts-page .alerts-notifications-list::-webkit-scrollbar {
-  width: 6px;
-}
-
-.alerts-page .alerts-notifications-list::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.alerts-page .alerts-notifications-list::-webkit-scrollbar-thumb {
-  background: var(--border);
-  border-radius: 3px;
 }
 
 .alerts-page .alerts-notifications-item {

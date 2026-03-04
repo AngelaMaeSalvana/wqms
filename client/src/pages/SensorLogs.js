@@ -5,6 +5,7 @@ import { jsPDF } from "jspdf";
 import { autoTable } from "jspdf-autotable";
 import PageDateWithStatus from "../components/PageDateWithStatus";
 import { getNH3FromReading, formatNH3 } from "../utils/nh3Calculator";
+import BatteryIndicator from "../components/BatteryIndicator";
 import { calculateWQI } from "../utils/wqiCalculator";
 import { getNodes, loadNodes } from "../utils/nodesStorage";
 import api from "../services/api";
@@ -236,6 +237,7 @@ export default function SensorLogs() {
         nh3: getNH3FromReading(r),
         flowRate: r.flow_rate ?? r.flowRate ?? null,
         wqi: wqi != null ? Math.round(wqi) : null,
+        batteryVoltage: r.battery_voltage ?? r.batteryVoltage ?? null,
       };
     });
     let filtered = rows;
@@ -712,11 +714,18 @@ export default function SensorLogs() {
                 <span className="sl-detail-date">
                   {selectedRow.date.toLocaleDateString()} · {selectedRow.date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                 </span>
-                <span className="sl-detail-node">
-                  {selectedRow.nodeName !== selectedRow.nodeId
-                    ? `${selectedRow.nodeId} — ${selectedRow.nodeName}`
-                    : selectedRow.nodeId}
-                </span>
+                <div className="sl-detail-node-row">
+                  <span className="sl-detail-node">
+                    {selectedRow.nodeName !== selectedRow.nodeId
+                      ? `${selectedRow.nodeId} — ${selectedRow.nodeName}`
+                      : selectedRow.nodeId}
+                  </span>
+                  {selectedRow.batteryVoltage != null && (
+                    <span className="sl-detail-battery">
+                      <BatteryIndicator voltage={selectedRow.batteryVoltage} showPercentage size="small" />
+                    </span>
+                  )}
+                </div>
               </div>
               <button type="button" className="sl-detail-close" onClick={closeDetail} aria-label="Close">×</button>
             </div>

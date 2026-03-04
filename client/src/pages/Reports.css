@@ -33,10 +33,6 @@
   overflow-x: auto;
   overflow-y: hidden;
   -webkit-overflow-scrolling: touch;
-  scrollbar-width: thin;
-}
-.reports-tabs::-webkit-scrollbar {
-  height: 6px;
 }
 
 .reports-export-wrap--header {

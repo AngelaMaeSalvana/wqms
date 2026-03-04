@@ -313,6 +313,8 @@ export function buildAlertsForAllNodes(
   const now = Date.now();
 
   for (const node of nodes) {
+    if (node.active === false) continue;
+
     const nodeName = node.name || node.id || 'Unknown node';
     const nodeId = node.id;
     const readings = readingsByNode[nodeId] || null;

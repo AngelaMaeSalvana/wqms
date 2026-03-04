@@ -80,44 +80,14 @@
   color: #1d1d1f;
 }
 
-/* Minimal scrollbars (global) */
+/* Invisible scrollbars (scroll still works) */
 * {
-  scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
 }
 
 *::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-
-*::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-*::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.2);
-  border-radius: 3px;
-}
-
-*::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.3);
-}
-
-*::-webkit-scrollbar-corner {
-  background: transparent;
-}
-
-[data-theme="light"] * {
-  scrollbar-color: rgba(0, 0, 0, 0.2) transparent;
-}
-
-[data-theme="light"] *::-webkit-scrollbar-thumb {
-  background: rgba(0, 0, 0, 0.2);
-}
-
-[data-theme="light"] *::-webkit-scrollbar-thumb:hover {
-  background: rgba(0, 0, 0, 0.3);
+  display: none;
 }
 
 [data-theme="dark"] {
@@ -538,39 +508,6 @@ body,
   overflow-y: hidden;
   /* Smooth scrolling */
   scroll-behavior: smooth;
-  /* Custom scrollbar styling */
-  scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.3) transparent;
-}
-
-.area-chart-wrapper::-webkit-scrollbar {
-  height: 8px;
-}
-
-.area-chart-wrapper::-webkit-scrollbar-track {
-  background: transparent;
-  border-radius: 4px;
-}
-
-.area-chart-wrapper::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.3);
-  border-radius: 4px;
-}
-
-.area-chart-wrapper::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.5);
-}
-
-[data-theme="light"] .area-chart-wrapper {
-  scrollbar-color: rgba(0, 0, 0, 0.3) transparent;
-}
-
-[data-theme="light"] .area-chart-wrapper::-webkit-scrollbar-thumb {
-  background: rgba(0, 0, 0, 0.3);
-}
-
-[data-theme="light"] .area-chart-wrapper::-webkit-scrollbar-thumb:hover {
-  background: rgba(0, 0, 0, 0.5);
 }
 
 .area-chart-scrollable {
