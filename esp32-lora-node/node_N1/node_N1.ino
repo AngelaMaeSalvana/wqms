@@ -1,6 +1,6 @@
 /*
  * WQMS Sensor Node (Sender)
- * Heltec LoRa32 V3 - Real DS18B20 temperature; other sensors null until hardware added
+ * Heltec LoRa32 V3 - DS18B20 temperature; SEN0189 turbidity (10k:10k -> GPIO34); others null until hardware added
  * Sends: dissolvedOxygen, turbidity, pH, flowRate, temperature
  * Field names match wqms dashboard - JSON structure constant; null when sensor disconnected
  * Listens for remote diagnostics commands (overrides send interval)
@@ -149,6 +149,59 @@ static float readBatteryVoltage() {
 #endif
 }
 
+// -------------------- Turbidity (SEN0189 style, 10k:10k divider -> GPIO34) --------------------
+//   Module A0 -> 10k -> (MIDPOINT) -> 10k -> GND; MIDPOINT -> GPIO34
+#define TURB_ADC_PIN 34
+static const float TURB_ADC_VREF       = 3.3f;
+static const float TURB_ADC_MAX_COUNTS = 4095.0f;
+static const float TURB_DIVIDER_GAIN   = 2.0f;  // 10k:10k
+static const int   TURB_SAMPLES        = 30;
+static const int   TURB_SAMPLE_DELAYMS = 5;
+static float s_turbV_smooth = 0.0f;
+
+static float readTurbidityRawAvg() {
+  uint32_t sum = 0;
+  for (int i = 0; i < TURB_SAMPLES; i++) {
+    sum += analogRead(TURB_ADC_PIN);
+    delay(TURB_SAMPLE_DELAYMS);
+  }
+  return (float)sum / (float)TURB_SAMPLES;
+}
+
+static float turbidityAdcToVoltage(float rawAvg) {
+  return rawAvg * (TURB_ADC_VREF / TURB_ADC_MAX_COUNTS);
+}
+
+static float turbidityDividerToSensorVoltage(float v_mid) {
+  return v_mid * TURB_DIVIDER_GAIN;
+}
+
+static float turbiditySmoothVoltage(float v_sensor) {
+  if (s_turbV_smooth < 0.1f) s_turbV_smooth = v_sensor;
+  s_turbV_smooth = 0.85f * s_turbV_smooth + 0.15f * v_sensor;
+  return s_turbV_smooth;
+}
+
+// Voltage -> NTU; >2.5V treated as clear water (0 NTU)
+static float turbidityVoltageToNTU(float v_sensor) {
+  if (v_sensor > 2.5f) return 0.0f;
+  float ntu = -1120.4f * v_sensor * v_sensor + 5742.3f * v_sensor - 4352.9f;
+  if (ntu < 0.0f) ntu = 0.0f;
+  return ntu;
+}
+
+static void initTurbiditySensor() {
+  analogSetPinAttenuation(TURB_ADC_PIN, ADC_11db);
+}
+
+static float readTurbidityNTU() {
+  float rawAvg   = readTurbidityRawAvg();
+  float v_mid    = turbidityAdcToVoltage(rawAvg);
+  float v_sensor = turbidityDividerToSensorVoltage(v_mid);
+  float v_filt   = turbiditySmoothVoltage(v_sensor);
+  return turbidityVoltageToNTU(v_filt);
+}
+
 // -------------------- Buffers --------------------
 #define RX_BUF_SIZE 128  // For ACK (may include CMD:test:start...) and CMD:diag:<node_id>
 #define TX_BUF_SIZE 300
@@ -165,7 +218,7 @@ static uint16_t rxSize  = 0;
 // Only temperature has real hardware (DS18B20); others emit null until sensors are added.
 static const bool SENSOR_CONNECTED[] = {
   true,   // temperature (DS18B20)
-  false,  // turbidity  - no hardware yet
+  true,   // turbidity  (SEN0189, 10k:10k divider -> GPIO34)
   false,  // pH         - no hardware yet
   false,  // dissolvedOxygen - no hardware yet
   false   // flowRate   - no hardware yet
@@ -388,11 +441,13 @@ static void readSensors(float &do_val, float &turbidity, float &ph,
   // Temperature - DS18B20 real reading; NAN if offline or invalid
   temp = updateTempSensor();
 
+  // Turbidity - SEN0189 (10k:10k divider -> GPIO34), NTU
+  turbidity = readTurbidityNTU();
+
   // No hardware yet for these - emit null (sensor offline)
-  do_val    = NAN;
-  turbidity = NAN;
-  ph        = NAN;
-  flow      = NAN;
+  do_val = NAN;
+  ph     = NAN;
+  flow   = NAN;
 }
 
 // Helper: format sensor value or "null" when disconnected or invalid (NaN)
@@ -810,7 +865,9 @@ void setup() {
   configureRadio();
 
   initTempSensor();
+  initTurbiditySensor();
   Serial.printf("[DS18B20] Devices found: %d\n", ds18b20.getDeviceCount());
+  Serial.println("[Turbidity] SEN0189 init on GPIO34 (10k:10k divider)");
 
   oledShowLines("MONITORING MODE", "Sender " NODE_ID,
                 s_timeSynced ? "NTP: synced" : "NTP: unsynced",
