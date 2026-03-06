@@ -43,49 +43,150 @@
   text-align: center;
 }
 
-/* Map page card - map fits inside card */
-.map-page .map-card {
+/* One big card solely for the map */
+.map-page__card {
   flex: 1;
   min-height: 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  padding: 0;
 }
 
-.map-page .map-card .map-body {
+.map-page__map {
   flex: 1;
-  min-height: 0;
+  min-height: 320px;
+  position: relative;
+  overflow: hidden;
+}
+
+.map-page__map .leaflet-container {
+  height: 100%;
+  width: 100%;
+}
+
+/* Nodes overlay card on the right */
+.map-nodes-overlay {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 1000;
+  width: 280px;
+  max-height: calc(100% - 24px);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
   padding: 12px;
   overflow: hidden;
   display: flex;
   flex-direction: column;
 }
 
-.map-page .map-wrapper.leaflet-map-wrapper {
-  flex: 1;
-  min-height: 320px;
-  position: relative;
-  overflow: hidden;
-  border-radius: 12px;
+.map-nodes-overlay__header {
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+  flex-shrink: 0;
 }
 
-/* Desktop: map takes ~45%, table fills remaining space */
+.map-nodes-overlay__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+}
+
+.map-nodes-overlay__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.map-nodes-overlay__item:last-child {
+  border-bottom: none;
+}
+
+.map-nodes-overlay__info {
+  min-width: 0;
+}
+
+.map-nodes-overlay__name {
+  display: block;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.map-nodes-overlay__meta {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.map-nodes-overlay__status {
+  flex-shrink: 0;
+  padding: 2px 6px;
+  border-radius: 6px;
+  font-size: 0.7rem;
+  font-weight: 600;
+}
+
+.map-nodes-overlay__status--success {
+  background: rgba(68, 211, 126, 0.15);
+  color: #44d37e;
+}
+
+.map-nodes-overlay__status--warning {
+  background: rgba(240, 165, 0, 0.15);
+  color: #f0a500;
+}
+
+.map-nodes-overlay__status--error {
+  background: rgba(212, 91, 91, 0.15);
+  color: #d45b5b;
+}
+
+.map-nodes-overlay__status--offline {
+  background: rgba(100, 100, 120, 0.15);
+  color: #9090a8;
+}
+
+.map-nodes-overlay__status--none {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-muted);
+}
+
+/* Desktop: card fills entire main content area */
 @media (min-width: 1025px) {
-  .map-page .map-card {
-    flex: 0 0 auto;
-    min-height: 320px;
-    max-height: 50vh;
+  .map-page {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    padding: 12px;
   }
 
-  .map-page .map-wrapper.leaflet-map-wrapper {
-    min-height: 320px;
+  .map-page__card {
+    flex: 1 1 auto;
+    min-height: 0;
   }
-}
 
-.map-page .leaflet-map-wrapper .leaflet-container {
-  height: 100%;
-  width: 100%;
-  border-radius: 12px;
+  .map-page__map {
+    min-height: 0;
+    flex: 1;
+    border-radius: 12px;
+  }
 }
 
 .map-fallback {
@@ -820,7 +921,11 @@
 
 /* Full-screen map on mobile/tablet */
 @media (max-width: 1024px), (max-height: 768px) {
-  /* Fill the fixed layout-main--map container completely */
+  /* Hide header on mobile — breadcrumb in nav shows page name */
+  .map-page .page-header {
+    display: none;
+  }
+
   .map-page {
     position: absolute;
     inset: 0;
@@ -829,15 +934,11 @@
     min-height: 0;
     height: 100%;
     flex: 1;
+    padding: 0;
   }
 
-  /* Hide the page header — breadcrumb in mobile nav shows the page name */
-  .map-page .page-header {
-    display: none;
-  }
-
-  /* Remove card chrome — map becomes a raw full-bleed surface */
-  .map-page .map-card {
+  /* One card fills viewport, minimal chrome on mobile */
+  .map-page__card {
     position: absolute;
     inset: 0;
     border-radius: 0;
@@ -845,18 +946,10 @@
     background: transparent;
     box-shadow: none;
     padding: 0;
-    margin: 0;
     flex: none;
   }
 
-  .map-page .map-card .map-body {
-    position: absolute;
-    inset: 0;
-    padding: 0;
-    flex: none;
-  }
-
-  .map-page .map-wrapper.leaflet-map-wrapper {
+  .map-page__map {
     position: absolute;
     inset: 0;
     border-radius: 0;
@@ -866,15 +959,17 @@
     flex: none;
   }
 
-  .map-page .leaflet-map-wrapper .leaflet-container {
+  .map-page__map .leaflet-container {
     border-radius: 0;
     height: 100% !important;
     width: 100% !important;
   }
 
-  /* Hide the nodes table — node details shown in bottom sheet instead */
-  .map-page .map-nodes-card {
-    display: none;
+  .map-nodes-overlay {
+    top: 12px;
+    right: 12px;
+    width: 260px;
+    max-height: calc(100% - 24px);
   }
 }
 

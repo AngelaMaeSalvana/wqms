@@ -166,8 +166,19 @@ export default function InactiveNodes() {
             aria-modal="true"
             aria-labelledby="confirm-delete-title"
           >
-            <h3 id="confirm-delete-title">Delete node {confirmDelete}?</h3>
-            <p>This will permanently remove the node. This action cannot be undone.</p>
+            <div className="inactive-nodes-confirm-dialog__header">
+              <h3 id="confirm-delete-title">Confirm to delete the selected row</h3>
+              <button
+                type="button"
+                className="inactive-nodes-confirm-dialog__close"
+                onClick={() => setConfirmDelete(null)}
+                aria-label="Close"
+              >
+                ×
+              </button>
+            </div>
+            <p>Are you sure you want to delete the selected row?</p>
+            <p>This action cannot be undone.</p>
             <div className="inactive-nodes-confirm-actions">
               <button
                 type="button"

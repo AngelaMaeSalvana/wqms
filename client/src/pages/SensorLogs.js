@@ -88,11 +88,9 @@ function downloadBlob(filename, blob) {
   URL.revokeObjectURL(url);
 }
 
-const ROW_HEIGHT = 39;       // px per data row (slightly under ~41 to fill space; overflow-y handles any excess)
-const THEAD_HEIGHT = 41;     // px for the thead row
-const PAGINATION_HEIGHT = 50; // px for pagination bar
-const MIN_ROWS = 5;
-const MAX_ROWS = 50;         // cap rows on very large screens
+function getDateKey(d) {
+  return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+}
 
 export default function SensorLogs() {
   const navigate = useNavigate();
@@ -102,13 +100,12 @@ export default function SensorLogs() {
   const [tableDateTo, setTableDateTo] = useState("");
   const [tableSort, setTableSort] = useState({ column: "date", direction: "desc" });
   const [tableNodeFilter, setTableNodeFilter] = useState("all");
-  const [tablePage, setTablePage] = useState(1);
   const [nodes, setNodes] = useState([]);
+  const [collapsedSections, setCollapsedSections] = useState({});
   const [nodesLoaded, setNodesLoaded] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const [sortPanelOpen, setSortPanelOpen] = useState(false);
   const [sensorReadings, setSensorReadings] = useState([]);
-  const [pageSize, setPageSize] = useState(15);
   const [selectedRow, setSelectedRow] = useState(null);
   const exportRef = useRef(null);
   const sortPanelRef = useRef(null);
@@ -129,53 +126,8 @@ export default function SensorLogs() {
 
   const closeDetail = useCallback(() => setSelectedRow(null), []);
 
-  // Auto-adjust page size from available height so table fills space on large
-  // screens and doesn't overlap pagination on small screens.
-  useEffect(() => {
-    const computeRows = () => {
-      const cardBody = cardBodyRef.current;
-      if (!cardBody) return;
-      const rect = cardBody.getBoundingClientRect();
-      const vh = window.innerHeight;
-      const isCompactLayout = window.matchMedia("(max-width: 1024px), (max-height: 768px)").matches;
-
-      let available;
-      if (isCompactLayout) {
-        // On mobile/tablet the card body grows with content; use viewport-based calc.
-        const bottomGap = vh <= 600 ? 12 : vh <= 768 ? 14 : 24;
-        available = vh - rect.top - bottomGap - PAGINATION_HEIGHT - THEAD_HEIGHT;
-      } else {
-        // On desktop the card body has constrained height (flex: 1); use it.
-        if (rect.height > 80) {
-          available = rect.height - PAGINATION_HEIGHT - THEAD_HEIGHT - 2;
-        } else {
-          const bottomGap = 24;
-          available = vh - rect.top - bottomGap - PAGINATION_HEIGHT - THEAD_HEIGHT;
-        }
-      }
-      const rows = Math.max(MIN_ROWS, Math.min(MAX_ROWS, Math.floor(available / ROW_HEIGHT)));
-      setPageSize(rows);
-    };
-
-    const run = () => {
-      requestAnimationFrame(computeRows);
-    };
-    run();
-    const t1 = setTimeout(run, 150);
-    const t2 = setTimeout(run, 400);
-    window.addEventListener("resize", run);
-    const el = cardBodyRef.current;
-    let ro = null;
-    if (el && typeof ResizeObserver !== "undefined") {
-      ro = new ResizeObserver(run);
-      ro.observe(el);
-    }
-    return () => {
-      clearTimeout(t1);
-      clearTimeout(t2);
-      window.removeEventListener("resize", run);
-      if (ro && el) ro.unobserve(el);
-    };
+  const toggleSection = useCallback((key) => {
+    setCollapsedSections((prev) => ({ ...prev, [key]: !prev[key] }));
   }, []);
 
   const tableDateRange = useMemo(() => {
@@ -188,8 +140,7 @@ export default function SensorLogs() {
     }
     const end = new Date();
     end.setHours(23, 59, 59, 999);
-    const start = new Date();
-    start.setDate(start.getDate() - 6);
+    const start = new Date(2020, 0, 1);
     start.setHours(0, 0, 0, 0);
     return { start, end };
   }, [tableDateFrom, tableDateTo]);
@@ -207,7 +158,7 @@ export default function SensorLogs() {
     if (!tableDateRange?.start || !tableDateRange?.end) return;
     const start = tableDateRange.start.getFullYear() + "-" + String(tableDateRange.start.getMonth() + 1).padStart(2, "0") + "-" + String(tableDateRange.start.getDate()).padStart(2, "0");
     const end = tableDateRange.end.getFullYear() + "-" + String(tableDateRange.end.getMonth() + 1).padStart(2, "0") + "-" + String(tableDateRange.end.getDate()).padStart(2, "0");
-    api.getSensorReadings({ startDate: start, endDate: end, limit: 500 })
+    api.getSensorReadings({ startDate: start, endDate: end, limit: 5000 })
       .then((rows) => setSensorReadings(applyCalibrationToReadings(Array.isArray(rows) ? rows : [])))
       .catch(() => setSensorReadings([]));
   }, [tableDateRange?.start?.getTime(), tableDateRange?.end?.getTime(), refreshTrigger]);
@@ -264,20 +215,17 @@ export default function SensorLogs() {
     return sorted;
   }, [sensorReadings, nodes, search, tableNodeFilter, tableSort]);
 
-  const totalRows = sensorTableRows.length;
-  const totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
-  const paginatedRows = useMemo(() => {
-    const start = (tablePage - 1) * pageSize;
-    return sensorTableRows.slice(start, start + pageSize);
-  }, [sensorTableRows, tablePage, pageSize]);
-
-  useEffect(() => {
-    setTablePage(1);
-  }, [search, tableNodeFilter, tableDateFrom, tableDateTo, tableSort.column, tableSort.direction]);
-
-  useEffect(() => {
-    if (tablePage > totalPages) setTablePage(Math.max(1, totalPages));
-  }, [tablePage, totalPages]);
+  const groupedRows = useMemo(() => {
+    const groups = {};
+    sensorTableRows.forEach((row) => {
+      const key = getDateKey(row.date);
+      if (!groups[key]) groups[key] = [];
+      groups[key].push(row);
+    });
+    const todayKey = getDateKey(new Date());
+    const dateKeys = Object.keys(groups).sort((a, b) => (tableSort.column === "date" && tableSort.direction === "asc" ? a.localeCompare(b) : b.localeCompare(a)));
+    return { groups, dateKeys, todayKey };
+  }, [sensorTableRows, tableSort.column, tableSort.direction]);
 
   const handleExport = (format) => {
     setExportOpen(false);
@@ -506,6 +454,23 @@ export default function SensorLogs() {
                   </button>
                 )}
               </div>
+
+              <div className="sl-sort-divider" />
+              <div className="sl-sort-section">
+                <button
+                  type="button"
+                  className="sl-sort-clear-all"
+                  onClick={() => {
+                    setTableSort({ column: "date", direction: "desc" });
+                    setTableNodeFilter("all");
+                    setTableDateFrom("");
+                    setTableDateTo("");
+                  }}
+                  disabled={tableSort.column === "date" && tableSort.direction === "desc" && tableNodeFilter === "all" && !tableDateFrom && !tableDateTo}
+                >
+                  Clear sorting
+                </button>
+              </div>
             </div>
           )}
         </div>
@@ -629,70 +594,79 @@ export default function SensorLogs() {
                     </td>
                   </tr>
                 ) : (
-                  paginatedRows.map((row, i) => {
-                    const key = `${row.nodeId}-${row.date.getTime()}-${(tablePage - 1) * pageSize + i}`;
-                    const dateStr = row.date.toLocaleDateString();
-                    const timeStr = row.date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-                    const nodeLabel = row.nodeName !== row.nodeId ? `${row.nodeId} — ${row.nodeName}` : row.nodeId;
+                  groupedRows.dateKeys.map((dateKey) => {
+                    const rows = groupedRows.groups[dateKey] || [];
+                    if (rows.length === 0) return null;
+                    const [y, m, d] = dateKey.split("-").map(Number);
+                    const label = dateKey === groupedRows.todayKey ? "Today" : new Date(y, m - 1, d).toLocaleDateString();
+                    const collapsed = collapsedSections[dateKey];
                     return (
-                      <tr
-                        key={key}
-                        className={isMobile ? "sensor-logs-row-clickable" : ""}
-                        onClick={isMobile ? () => setSelectedRow(row) : undefined}
-                        tabIndex={isMobile ? 0 : undefined}
-                        onKeyDown={isMobile ? (e) => e.key === "Enter" && setSelectedRow(row) : undefined}
-                        aria-label={isMobile ? `View details for ${dateStr} ${timeStr}` : undefined}
-                      >
-                        <td>{highlightMatch(dateStr, search)}</td>
-                        <td>{highlightMatch(timeStr, search)}</td>
-                        <td>
-                          <span className="sensor-logs-data-table-node-id">{highlightMatch(nodeLabel, search)}</span>
-                        </td>
-                        <td className="sensor-logs-col-desktop">{highlightMatch(row.temperature != null ? Number(row.temperature).toFixed(2) : "—", search)}</td>
-                        <td className="sensor-logs-col-desktop">{highlightMatch(row.pH != null ? Number(row.pH).toFixed(2) : "—", search)}</td>
-                        <td className="sensor-logs-col-desktop">{highlightMatch(row.turbidity != null ? Number(row.turbidity).toFixed(1) : "—", search)}</td>
-                        <td className="sensor-logs-col-desktop">{highlightMatch(row.dissolvedOxygen != null ? Number(row.dissolvedOxygen).toFixed(2) : "—", search)}</td>
-                        <td className="sensor-logs-col-desktop">{highlightMatch(row.nh3 != null ? formatNH3(row.nh3) : "—", search)}</td>
-                        <td className="sensor-logs-col-desktop">{highlightMatch(row.flowRate != null ? Number(row.flowRate).toFixed(2) : "—", search)}</td>
-                        <td>{highlightMatch(row.wqi != null ? row.wqi : "—", search)}</td>
-                        <td className="sensor-logs-col-mobile sensor-logs-row-chevron" aria-hidden="true">›</td>
-                      </tr>
+                      <React.Fragment key={dateKey}>
+                        <tr className="sl-section-header-row">
+                          <td colSpan={10} className="sl-section-header">
+                            <button
+                              type="button"
+                              className="sl-section-toggle"
+                              onClick={() => toggleSection(dateKey)}
+                              aria-expanded={!collapsed}
+                              aria-label={`${collapsed ? "Expand" : "Collapse"} ${label}`}
+                            >
+                              <svg
+                                width="12"
+                                height="12"
+                                viewBox="0 0 12 12"
+                                fill="none"
+                                className={`sl-section-caret${collapsed ? " sl-section-caret--collapsed" : ""}`}
+                                aria-hidden
+                              >
+                                <path d="M3 4.5l3 3 3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                              </svg>
+                              <span className="sl-section-label">{label}</span>
+                              <span className="sl-section-count">{rows.length}</span>
+                            </button>
+                          </td>
+                        </tr>
+                        {!collapsed &&
+                          rows.map((row, i) => {
+                            const key = `${row.nodeId}-${row.date.getTime()}-${i}`;
+                            const dateStr = row.date.toLocaleDateString();
+                            const timeStr = row.date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+                            const nodeLabel = row.nodeName !== row.nodeId ? `${row.nodeId} — ${row.nodeName}` : row.nodeId;
+                            return (
+                              <tr
+                                key={key}
+                                className={isMobile ? "sensor-logs-row-clickable" : ""}
+                                onClick={isMobile ? () => setSelectedRow(row) : undefined}
+                                tabIndex={isMobile ? 0 : undefined}
+                                onKeyDown={isMobile ? (e) => e.key === "Enter" && setSelectedRow(row) : undefined}
+                                aria-label={isMobile ? `View details for ${dateStr} ${timeStr}` : undefined}
+                              >
+                                <td>{highlightMatch(dateStr, search)}</td>
+                                <td>{highlightMatch(timeStr, search)}</td>
+                                <td>
+                                  <span className="sensor-logs-data-table-node-id">{highlightMatch(nodeLabel, search)}</span>
+                                </td>
+                                <td className="sensor-logs-col-desktop">{highlightMatch(row.temperature != null ? Number(row.temperature).toFixed(2) : "—", search)}</td>
+                                <td className="sensor-logs-col-desktop">{highlightMatch(row.pH != null ? Number(row.pH).toFixed(2) : "—", search)}</td>
+                                <td className="sensor-logs-col-desktop">{highlightMatch(row.turbidity != null ? Number(row.turbidity).toFixed(1) : "—", search)}</td>
+                                <td className="sensor-logs-col-desktop">{highlightMatch(row.dissolvedOxygen != null ? Number(row.dissolvedOxygen).toFixed(2) : "—", search)}</td>
+                                <td className="sensor-logs-col-desktop">{highlightMatch(row.nh3 != null ? formatNH3(row.nh3) : "—", search)}</td>
+                                <td className="sensor-logs-col-desktop">{highlightMatch(row.flowRate != null ? Number(row.flowRate).toFixed(2) : "—", search)}</td>
+                                <td>{highlightMatch(row.wqi != null ? row.wqi : "—", search)}</td>
+                                <td className="sensor-logs-col-mobile sensor-logs-row-chevron" aria-hidden="true">›</td>
+                              </tr>
+                            );
+                          })}
+                      </React.Fragment>
                     );
                   })
                 )}
               </tbody>
             </table>
           </div>
-          {totalRows > 0 && (
-            <div className="sensor-logs-table-pagination">
-              <span className="sensor-logs-table-pagination-info">
-                Showing {(tablePage - 1) * pageSize + 1}–{Math.min(tablePage * pageSize, totalRows)} of {totalRows}
-              </span>
-              <div className="sensor-logs-table-pagination-btns">
-                <button
-                  type="button"
-                  className="sensor-logs-table-pagination-btn"
-                  onClick={() => setTablePage((p) => Math.max(1, p - 1))}
-                  disabled={tablePage <= 1}
-                  aria-label="Previous page"
-                >
-                  <span className="sensor-logs-pagination-label">Previous</span>
-                  <span className="sensor-logs-pagination-icon" aria-hidden="true">‹</span>
-                </button>
-                <span className="sensor-logs-table-pagination-page">
-                  Page {tablePage} of {totalPages}
-                </span>
-                <button
-                  type="button"
-                  className="sensor-logs-table-pagination-btn"
-                  onClick={() => setTablePage((p) => Math.min(totalPages, p + 1))}
-                  disabled={tablePage >= totalPages}
-                  aria-label="Next page"
-                >
-                  <span className="sensor-logs-pagination-label">Next</span>
-                  <span className="sensor-logs-pagination-icon" aria-hidden="true">›</span>
-                </button>
-              </div>
+          {sensorTableRows.length > 0 && (
+            <div className="sensor-logs-table-footer">
+              <span className="sensor-logs-table-footer-info">{sensorTableRows.length} readings</span>
             </div>
           )}
         </div>

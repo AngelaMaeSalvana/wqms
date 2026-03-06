@@ -192,6 +192,35 @@
   text-underline-offset: 2px;
 }
 
+.sl-sort-clear-all {
+  width: 100%;
+  padding: 8px 14px;
+  background: none;
+  border: none;
+  color: var(--accent, #1b9c85);
+  font-size: 0.85rem;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  text-align: left;
+  border-radius: 8px;
+  transition: background 0.15s;
+}
+
+.sl-sort-clear-all:hover:not(:disabled) {
+  background: rgba(27, 156, 133, 0.12);
+}
+
+.sl-sort-clear-all:disabled {
+  color: var(--text-muted);
+  cursor: default;
+  opacity: 0.7;
+}
+
+[data-theme="light"] .sl-sort-clear-all:hover:not(:disabled) {
+  background: rgba(27, 156, 133, 0.08);
+}
+
 [data-theme="light"] .sl-sort-item:hover {
   background: rgba(0, 0, 0, 0.05);
 }
@@ -425,59 +454,73 @@
   padding: 0 2px;
 }
 
-.sensor-logs-table-pagination {
-  flex-shrink: 0;
+/* ── Collapsible section headers (Today, Earlier this week, Last week) ── */
+.sl-section-header-row {
+  background: var(--panel-dark);
+}
+
+.sl-section-header {
+  padding: 0 !important;
+  vertical-align: middle !important;
+  border-bottom: 1px solid var(--border) !important;
+}
+
+.sl-section-toggle {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 12px 0;
-  margin-top: 8px;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 12px;
+  background: none;
+  border: none;
+  color: var(--text);
+  font-size: 0.8rem;
+  font-weight: 600;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.sl-section-toggle:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+[data-theme="light"] .sl-section-toggle:hover {
+  background: rgba(0, 0, 0, 0.04);
+}
+
+.sl-section-caret {
+  flex-shrink: 0;
+  color: var(--accent, #1b9c85);
+  transition: transform 0.2s;
+}
+
+.sl-section-caret--collapsed {
+  transform: rotate(-90deg);
+}
+
+.sl-section-label {
+  flex: 1;
+}
+
+.sl-section-count {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+/* ── Scrollable table footer ── */
+.sensor-logs-table-footer {
+  flex-shrink: 0;
+  padding: 10px 0;
   border-top: 1px solid var(--border);
 }
 
-.sensor-logs-table-pagination-info {
+.sensor-logs-table-footer-info {
   font-size: 0.9rem;
   color: var(--text-muted);
 }
-
-.sensor-logs-table-pagination-btns {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.sensor-logs-table-pagination-page {
-  font-size: 0.9rem;
-  color: var(--text-muted);
-}
-
-.sensor-logs-table-pagination-btn {
-  padding: 6px 12px;
-  border: 1px solid var(--border);
-  background: var(--panel-dark);
-  color: var(--text);
-  font-size: 0.9rem;
-  font-family: "Manrope", sans-serif;
-  border-radius: 8px;
-  cursor: pointer;
-  transition: background 0.2s, border-color 0.2s;
-}
-
-.sensor-logs-table-pagination-btn:hover:not(:disabled) {
-  background: var(--panel);
-  border-color: var(--accent, #1b9c85);
-}
-
-.sensor-logs-table-pagination-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-/* ── Pagination: show label on desktop, icon on mobile ── */
-.sensor-logs-pagination-icon { display: none; }
-.sensor-logs-pagination-label { display: inline; }
 
 /* ── Desktop-only / mobile-only column visibility ── */
 .sensor-logs-col-desktop { /* visible by default */ }
@@ -626,17 +669,4 @@
     width: 24px;
   }
 
-  /* Icon-only pagination buttons */
-  .sensor-logs-pagination-label { display: none; }
-  .sensor-logs-pagination-icon  { display: inline; font-size: 1.2rem; }
-
-  .sensor-logs-table-pagination-btn {
-    width: 36px;
-    height: 36px;
-    padding: 0;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    border-radius: 50%;
-  }
 }

@@ -21,6 +21,8 @@ export function getNodes() {
 
 /**
  * When Supabase is enabled: fetches nodes from DB, updates cache and localStorage.
+ * Always uses Supabase as source when enabled; never falls back to localStorage
+ * so that deleted nodes don't reappear from stale cache.
  * Otherwise: resolves with getNodes() (localStorage).
  */
 export async function loadNodes() {
@@ -49,6 +51,16 @@ export async function loadNodes() {
     }
   } catch (e) {
     console.warn("loadNodes from Supabase failed", e);
+    // When Supabase is enabled, never show stale localStorage—deleted nodes must stay hidden.
+    try {
+      const { isSupabaseEnabled } = await import('../lib/supabaseClient');
+      if (isSupabaseEnabled()) {
+        nodesCache = [];
+        return [];
+      }
+    } catch {
+      // ignore import errors
+    }
   }
   nodesCache = null;
   return getNodes();

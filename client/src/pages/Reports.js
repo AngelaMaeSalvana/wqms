@@ -244,7 +244,7 @@ function buildReportChartFromSummaries(parameterId, periodId, rangeStart, rangeE
       const segEnd = weekEnd > end ? end : weekEnd;
       const weekSummaries = list.filter((s) => {
         const d = typeof s.date === "string" ? new Date(s.date + "T12:00:00") : new Date(s.date);
-        return d >= weekStart && d <= segEnd;
+          return d >= weekStart && d <= segEnd;
       });
       const avgs = weekSummaries.map(accessors.avg).filter((v) => v != null);
       const mins = weekSummaries.map(accessors.min).filter((v) => v != null);
@@ -443,14 +443,52 @@ const NodeComparisonChart = memo(function NodeComparisonChart({ summaries, param
 
 const WqiBreakdownChart = memo(function WqiBreakdownChart({ summaries }) {
   const chartData = useMemo(() => buildWqiBreakdownData(summaries), [summaries]);
+  const total = chartData.datasets[0]?.data?.reduce((a, b) => a + b, 0) ?? 0;
   const options = useMemo(() => ({
     responsive: true,
     maintainAspectRatio: false,
-    plugins: { legend: { display: false }, tooltip: { callbacks: { label: (ctx) => `${ctx.label}: ${ctx.raw} days` } } },
-  }), []);
-  const total = chartData.datasets[0]?.data?.reduce((a, b) => a + b, 0) ?? 0;
-  if (total === 0) return <div className="reports-chart-placeholder">No WQI data</div>;
-  return <Doughnut data={chartData} options={options} />;
+    plugins: {
+      legend: {
+        display: true,
+        position: "right",
+        labels: {
+          usePointStyle: true,
+          pointStyle: "circle",
+          padding: 12,
+          generateLabels: (chart) => {
+            const data = chart.data;
+            const ds = data.datasets?.[0];
+            if (!ds) return [];
+            return (data.labels ?? []).map((label, i) => {
+              const value = ds.data[i] ?? 0;
+              const pct = total > 0 ? Math.round((value / total) * 100) : 0;
+              return {
+                text: `${label}: ${value} day${value !== 1 ? "s" : ""} (${pct}%)`,
+                fillStyle: ds.backgroundColor?.[i] ?? "#888",
+                hidden: false,
+                index: i,
+              };
+            });
+          },
+        },
+      },
+      tooltip: {
+        callbacks: {
+          label: (ctx) => {
+            const pct = total > 0 ? Math.round((ctx.raw / total) * 100) : 0;
+            return `${ctx.label}: ${ctx.raw} day${ctx.raw !== 1 ? "s" : ""} (${pct}%)`;
+          },
+        },
+      },
+    },
+  }), [total]);
+  if (total === 0) return <div className="reports-chart-placeholder">No WQI data for selected period</div>;
+  return (
+    <div className="reports-wqi-breakdown-wrap">
+      <p className="reports-wqi-breakdown-desc">Days in each water quality class for the selected period</p>
+      <Doughnut data={chartData} options={options} />
+    </div>
+  );
 });
 
 const SummaryStats = memo(function SummaryStats({ summaries, parameter }) {
@@ -964,8 +1002,10 @@ function aggregateReadingsToDailySummaries(readings) {
     const avgNh3  = safeAvg(nh3s);
     const avgFlow = safeAvg(flowRates);
 
-    // Compute WQI for every reading then derive avg/min/max
+    // Use stored wqi from backend when available; otherwise compute per reading
     const wqis = dayReadings.map((r) => {
+      const stored = r.wqi;
+      if (stored != null && !isNaN(stored)) return Math.round(stored);
       const rPh  = r.ph ?? r.pH;
       const rDO  = r.dissolved_oxygen ?? r.dissolvedOxygen ?? r.do;
       const rTan = r.tan ?? r.TAN;
@@ -1289,128 +1329,80 @@ export default function Reports() {
         </nav>
       </div>
 
-      {/* ── Shared filter bar ── */}
-      <div className="reports-shared-filters" ref={dateRangePickerRef} aria-label="Shared report filters">
-        <div className="reports-shared-filters__group">
-          <span className="reports-shared-filters__label">Period</span>
-          <select
-            className="reports-chart-select"
-            value={reportPeriod}
-            onChange={handleReportPeriodChange}
-            aria-label="Period"
-          >
-            {PERIOD_OPTIONS.map((opt) => (
-              <option key={opt.id} value={opt.id}>{opt.label}</option>
-            ))}
-          </select>
-        </div>
-
-        {reportPeriod === "month" ? (
-          <div className="reports-shared-filters__group reports-shared-filters__group--row">
-            <div className="reports-shared-filters__sub">
-              <span className="reports-shared-filters__label">Month</span>
-              <select
-                className="reports-chart-select"
-                value={reportMonth}
-                onChange={handleReportMonthChange}
-                aria-label="Month"
-              >
-                {Array.from({ length: 12 }, (_, i) => (
-                  <option key={i} value={i}>{String(i + 1).padStart(2, "0")}</option>
-                ))}
-              </select>
-            </div>
-            <div className="reports-shared-filters__sub">
-              <span className="reports-shared-filters__label">Year</span>
-              <select
-                className="reports-chart-select"
-                value={reportYear}
-                onChange={handleReportYearChange}
-                aria-label="Year"
-              >
-                {Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - 2 + i).map((y) => (
-                  <option key={y} value={y}>{y}</option>
-                ))}
-              </select>
-            </div>
+      {activeTab === "water" && (
+        <div ref={dateRangePickerRef} className="reports-water-wrap">
+        <div className="reports-filter-bar" role="group" aria-label="Shared filters">
+          <div className="reports-filter-bar__control">
+            <span className="reports-filter-bar__label">Period</span>
+            <select className="reports-filter-bar__select" value={reportPeriod} onChange={handleReportPeriodChange} aria-label="Period">
+              {PERIOD_OPTIONS.map((opt) => (
+                <option key={opt.id} value={opt.id}>{opt.label}</option>
+              ))}
+            </select>
           </div>
-        ) : (
-          <div className="reports-shared-filters__group">
-            <span className="reports-shared-filters__label">Date range</span>
-            <div className="reports-chart-date-range-wrap">
-              <button
-                ref={dateRangeButtonRef}
-                type="button"
-                className="reports-chart-date-range-btn"
-                onClick={() => {
-                  if (dateRangeButtonRef.current) {
-                    const rect = dateRangeButtonRef.current.getBoundingClientRect();
-                    setOverlayPosition({ top: rect.bottom + window.scrollY + 6, right: window.innerWidth - rect.right });
-                  }
-                  setDateRangePickerView({ year: (reportRangeStart ?? new Date()).getFullYear(), month: (reportRangeStart ?? new Date()).getMonth() });
-                  setDateRangePickerOpen((o) => !o);
-                }}
-                aria-expanded={dateRangePickerOpen}
-                aria-label="Select date range"
-              >
-                <span className="reports-chart-date-range-text">
-                  {formatDateRange(reportRangeStart, reportRangeEnd) || "Select range"}
-                </span>
-                <span className="reports-chart-date-range-icon" aria-hidden>📅</span>
+          {reportPeriod === "month" ? (
+            <>
+              <div className="reports-filter-bar__control">
+                <span className="reports-filter-bar__label">Month</span>
+                <select className="reports-filter-bar__select" value={reportMonth} onChange={handleReportMonthChange} aria-label="Month">
+                  {Array.from({ length: 12 }, (_, i) => (
+                    <option key={i} value={i}>{String(i + 1).padStart(2, "0")}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="reports-filter-bar__control">
+                <span className="reports-filter-bar__label">Year</span>
+                <select className="reports-filter-bar__select" value={reportYear} onChange={handleReportYearChange} aria-label="Year">
+                  {Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - 2 + i).map((y) => (
+                    <option key={y} value={y}>{y}</option>
+                  ))}
+                </select>
+              </div>
+            </>
+          ) : (
+            <div className="reports-filter-bar__control">
+              <span className="reports-filter-bar__label">Date range</span>
+              <button ref={dateRangeButtonRef} type="button" className="reports-filter-bar__date-btn" onClick={() => { if (dateRangeButtonRef.current) { const rect = dateRangeButtonRef.current.getBoundingClientRect(); setOverlayPosition({ top: rect.bottom + window.scrollY + 6, right: window.innerWidth - rect.right }); } setDateRangePickerView({ year: (reportRangeStart ?? new Date()).getFullYear(), month: (reportRangeStart ?? new Date()).getMonth() }); setDateRangePickerOpen((o) => !o); }} aria-expanded={dateRangePickerOpen} aria-label="Select date range">
+                <span className="reports-filter-bar__date-text">{formatDateRange(reportRangeStart, reportRangeEnd) || "Select range"}</span>
+                <span className="reports-filter-bar__date-icon" aria-hidden>📅</span>
               </button>
             </div>
+          )}
+          <div className="reports-filter-bar__control">
+            <span className="reports-filter-bar__label">Node</span>
+            <select className="reports-filter-bar__select" value={reportNodeId} onChange={(e) => setReportNodeId(e.target.value)} aria-label="Node">
+              <option value="all">All nodes</option>
+              {nodes.map((n) => (
+                <option key={n.id} value={n.id}>{n.name || n.id}</option>
+              ))}
+            </select>
           </div>
-        )}
-
-        <div className="reports-shared-filters__group">
-          <span className="reports-shared-filters__label">Node</span>
-          <select
-            className="reports-chart-select"
-            value={reportNodeId}
-            onChange={(e) => setReportNodeId(e.target.value)}
-            aria-label="Node"
-          >
-            <option value="all">All nodes</option>
-            {nodes.map((n) => (
-              <option key={n.id} value={n.id}>{n.name || n.id}</option>
-            ))}
-          </select>
+          <div className="reports-filter-bar__wqi">
+            <RangeWqiStats summaries={reportSummaries} />
+          </div>
         </div>
-      </div>
 
-      <div className={`reports-grid reports-grid--${activeTab}`}>
-        {activeTab === "water" && (
-        <>
+        <div className="reports-grid reports-grid--water">
         <section className="reports-grid__chart card">
-          <div className="card__header reports-chart-header">
-            <h2 className="card__title">Report chart</h2>
+          <div className="card__header reports-chart-header reports-chart-header--per-chart">
+              <h2 className="card__title">Report chart</h2>
             <div className="reports-chart-header-controls">
               <div className="reports-chart-header-param">
                 <span className="reports-chart-selector-label">Parameter</span>
-                <select
-                  className="reports-chart-select reports-chart-select--header"
-                  value={reportParameter}
-                  onChange={(e) => setReportParameter(e.target.value)}
-                  aria-label="Parameter"
-                >
+                <select className="reports-chart-select reports-chart-select--header" value={reportParameter} onChange={(e) => setReportParameter(e.target.value)} aria-label="Parameter">
                   {PARAMETER_OPTIONS.map((opt) => (
                     <option key={opt.id} value={opt.id}>{opt.label}</option>
                   ))}
                 </select>
-              </div>
+            </div>
               <div className="reports-chart-header-param">
                 <span className="reports-chart-selector-label">Chart type</span>
-                <select
-                  className="reports-chart-select reports-chart-select--header"
-                  value={reportChartType}
-                  onChange={(e) => setReportChartType(e.target.value)}
-                  aria-label="Chart type"
-                >
-                  {CHART_TYPE_OPTIONS.map((opt) => (
+                <select className="reports-chart-select reports-chart-select--header" value={reportChartType} onChange={(e) => setReportChartType(e.target.value)} aria-label="Chart type">
+                {CHART_TYPE_OPTIONS.map((opt) => (
                     <option key={opt.id} value={opt.id}>{opt.label}</option>
-                  ))}
-                </select>
-              </div>
+                ))}
+              </select>
+            </div>
             </div>
           </div>
           <div className="reports-chart-content reports-chart-content--full">
@@ -1429,20 +1421,22 @@ export default function Reports() {
         </section>
 
         <section className="reports-grid__placeholder-left card">
-          <div className="card__header reports-chart-header">
+          <div className="card__header reports-chart-header reports-chart-header--per-chart">
             <h2 className="card__title">Node comparison</h2>
-            <div className="reports-chart-header-param">
-              <span className="reports-chart-selector-label">Parameter</span>
-              <select
-                className="reports-chart-select reports-chart-select--header"
-                value={comparisonParameter}
-                onChange={(e) => setComparisonParameter(e.target.value)}
-                aria-label="Comparison parameter"
-              >
-                {PARAMETER_OPTIONS.map((opt) => (
-                  <option key={opt.id} value={opt.id}>{opt.label}</option>
-                ))}
-              </select>
+            <div className="reports-chart-header-controls">
+              <div className="reports-chart-header-param">
+                <span className="reports-chart-selector-label">Parameter</span>
+                <select
+                  className="reports-chart-select reports-chart-select--header"
+                  value={comparisonParameter}
+                  onChange={(e) => setComparisonParameter(e.target.value)}
+                  aria-label="Comparison parameter"
+                >
+                  {PARAMETER_OPTIONS.map((opt) => (
+                    <option key={opt.id} value={opt.id}>{opt.label}</option>
+                  ))}
+                </select>
+              </div>
             </div>
           </div>
           <div className="reports-comparison-content reports-comparison-content--full">
@@ -1451,7 +1445,9 @@ export default function Reports() {
         </section>
 
         <aside className="reports-grid__calendar card" aria-label="Calendar (clickable)">
-          <RangeWqiStats summaries={reportSummaries} />
+          <div className="reports-calendar-wqi reports-calendar-wqi--mobile">
+            <RangeWqiStats summaries={reportSummaries} />
+          </div>
           <div className="reports-calendar-section">
             <CalendarCard
               monthName={MONTH_NAMES[calendarView.month]}
@@ -1466,37 +1462,47 @@ export default function Reports() {
               rangeEnd={reportRangeEnd}
             />
           </div>
-        </aside>
+            </aside>
 
         <section className="reports-grid__placeholder card">
-          <div className="card__header"><h2 className="card__title">WQI quality class breakdown</h2></div>
+          <div className="card__header">
+            <h2 className="card__title">WQI quality class breakdown</h2>
+            <span className="reports-wqi-breakdown-hint" title="WQI 90–100 Excellent, 70–89 Good, 50–69 Fair, 25–49 Poor, &lt;25 Very Poor">ⓘ</span>
+          </div>
           <div className="card__body reports-chart-body--compact">
             <WqiBreakdownChart summaries={reportSummaries} />
           </div>
         </section>
-        </>
+        </div>
+        </div>
         )}
 
         {activeTab === "alerts" && (
+          <div className="reports-grid reports-grid--alerts">
           <AlertsComplianceTab
             reportRangeStart={reportRangeStart}
             reportRangeEnd={reportRangeEnd}
             onSwitchToWater={() => setActiveTab("water")}
           />
+          </div>
         )}
 
         {activeTab === "system" && (
+          <div className="reports-grid reports-grid--system">
           <SystemTab
             reportRangeStart={reportRangeStart}
             reportRangeEnd={reportRangeEnd}
             nodes={nodes}
             onSwitchToWater={() => setActiveTab("water")}
           />
+          </div>
         )}
 
-        {activeTab === "testing" && <TestingTab nodes={nodes} />}
-
-      </div>
+        {activeTab === "testing" && (
+          <div className="reports-grid reports-grid--testing">
+            <TestingTab nodes={nodes} />
+          </div>
+        )}
 
       {modalOpen && (
         <WqiDetailModal
@@ -1507,112 +1513,112 @@ export default function Reports() {
         />
       )}
 
-      {dateRangePickerOpen &&
-        createPortal(
-          <div
-            ref={dateRangeOverlayRef}
-            className="reports-chart-date-range-overlay reports-chart-date-range-overlay--portal"
-            role="dialog"
-            aria-label="Date range picker"
-            style={{
-              position: "fixed",
-              top: overlayPosition.top,
-              right: overlayPosition.right,
-              left: "auto",
-            }}
-          >
-            <div className="reports-range-picker-header">
-              <button
-                type="button"
-                className="reports-range-picker-arrow"
-                onClick={() =>
-                  setDateRangePickerView((v) => {
-                    if (v.month === 0) return { year: v.year - 1, month: 11 };
-                    return { year: v.year, month: v.month - 1 };
-                  })
-                }
-                aria-label="Previous month"
+          {dateRangePickerOpen &&
+            createPortal(
+              <div
+                ref={dateRangeOverlayRef}
+                className="reports-chart-date-range-overlay reports-chart-date-range-overlay--portal"
+                role="dialog"
+                aria-label="Date range picker"
+                style={{
+                  position: "fixed",
+                  top: overlayPosition.top,
+                  right: overlayPosition.right,
+                  left: "auto",
+                }}
               >
-                ‹
-              </button>
-              <select
-                className="reports-range-picker-month"
-                value={dateRangePickerView.month}
-                onChange={(e) =>
-                  setDateRangePickerView((v) => ({ ...v, month: Number(e.target.value) }))
-                }
-                aria-label="Month"
-              >
-                {MONTH_NAMES.map((name, i) => (
-                  <option key={i} value={i}>
-                    {name}
-                  </option>
-                ))}
-              </select>
-              <select
-                className="reports-range-picker-year"
-                value={dateRangePickerView.year}
-                onChange={(e) =>
-                  setDateRangePickerView((v) => ({ ...v, year: Number(e.target.value) }))
-                }
-                aria-label="Year"
-              >
-                {Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - 2 + i).map((y) => (
-                  <option key={y} value={y}>
-                    {y}
-                  </option>
-                ))}
-              </select>
-              <button
-                type="button"
-                className="reports-range-picker-arrow"
-                onClick={() =>
-                  setDateRangePickerView((v) => {
-                    if (v.month === 11) return { year: v.year + 1, month: 0 };
-                    return { year: v.year, month: v.month + 1 };
-                  })
-                }
-                aria-label="Next month"
-              >
-                ›
-              </button>
-            </div>
-            <div className="reports-range-picker-weekdays">
-              {["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"].map((d) => (
-                <span key={d} className="reports-range-picker-weekday">
-                  {d}
-                </span>
-              ))}
-            </div>
-            <div className="reports-range-picker-grid">
-              {rangePickerDays.map((day, i) => (
-                <button
-                  key={i}
-                  type="button"
-                  className={`reports-range-picker-day ${!day.isCurrentMonth ? "other-month" : ""} ${isDateInRange(day.date, reportRangeStart, reportRangeEnd) ? "selected" : ""}`}
-                  onClick={() => day.isCurrentMonth && handleRangePickerDayClick(day.date)}
-                  disabled={!day.isCurrentMonth}
-                  aria-label={day.date.toLocaleDateString()}
-                >
-                  {day.label}
-                </button>
-              ))}
-            </div>
-            <div className="reports-range-picker-actions">
-              <button type="button" className="reports-range-picker-btn" onClick={handleRangePickerToday}>
-                This week
-              </button>
-              <button
-                type="button"
-                className="reports-range-picker-btn"
-                onClick={() => setDateRangePickerOpen(false)}
-              >
-                Close
-              </button>
-            </div>
-          </div>,
-          document.body
-        )}
+                <div className="reports-range-picker-header">
+                  <button
+                    type="button"
+                    className="reports-range-picker-arrow"
+                    onClick={() =>
+                      setDateRangePickerView((v) => {
+                        if (v.month === 0) return { year: v.year - 1, month: 11 };
+                        return { year: v.year, month: v.month - 1 };
+                      })
+                    }
+                    aria-label="Previous month"
+                  >
+                    ‹
+                  </button>
+                  <select
+                    className="reports-range-picker-month"
+                    value={dateRangePickerView.month}
+                    onChange={(e) =>
+                      setDateRangePickerView((v) => ({ ...v, month: Number(e.target.value) }))
+                    }
+                    aria-label="Month"
+                  >
+                    {MONTH_NAMES.map((name, i) => (
+                      <option key={i} value={i}>
+                        {name}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    className="reports-range-picker-year"
+                    value={dateRangePickerView.year}
+                    onChange={(e) =>
+                      setDateRangePickerView((v) => ({ ...v, year: Number(e.target.value) }))
+                    }
+                    aria-label="Year"
+                  >
+                    {Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - 2 + i).map((y) => (
+                      <option key={y} value={y}>
+                        {y}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    className="reports-range-picker-arrow"
+                    onClick={() =>
+                      setDateRangePickerView((v) => {
+                        if (v.month === 11) return { year: v.year + 1, month: 0 };
+                        return { year: v.year, month: v.month + 1 };
+                      })
+                    }
+                    aria-label="Next month"
+                  >
+                    ›
+                  </button>
+                </div>
+                <div className="reports-range-picker-weekdays">
+                  {["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"].map((d) => (
+                    <span key={d} className="reports-range-picker-weekday">
+                      {d}
+                    </span>
+                  ))}
+                </div>
+                <div className="reports-range-picker-grid">
+                  {rangePickerDays.map((day, i) => (
+                    <button
+                      key={i}
+                      type="button"
+                      className={`reports-range-picker-day ${!day.isCurrentMonth ? "other-month" : ""} ${isDateInRange(day.date, reportRangeStart, reportRangeEnd) ? "selected" : ""}`}
+                      onClick={() => day.isCurrentMonth && handleRangePickerDayClick(day.date)}
+                      disabled={!day.isCurrentMonth}
+                      aria-label={day.date.toLocaleDateString()}
+                    >
+                      {day.label}
+                    </button>
+                  ))}
+                </div>
+                <div className="reports-range-picker-actions">
+                  <button type="button" className="reports-range-picker-btn" onClick={handleRangePickerToday}>
+                    This week
+                  </button>
+                  <button
+                    type="button"
+                    className="reports-range-picker-btn"
+                    onClick={() => setDateRangePickerOpen(false)}
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>,
+              document.body
+      )}
     </div>
   );
 }

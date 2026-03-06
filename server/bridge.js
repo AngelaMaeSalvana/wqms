@@ -153,15 +153,29 @@ function payloadToRow(topic, data, t_be_rx) {
     }
   }
 
+  const ph = data.pH ?? data.ph ?? null;
+  const tan = data.tan ?? data.TAN ?? 0.5;
+  const doVal = data.dissolvedOxygen ?? data.do ?? data.dissolved_oxygen ?? null;
+  const temp = data.temperature ?? null;
+  const turb = data.turbidity ?? null;
+  const wqi = calculateWQI({
+    temperature: temp,
+    ph,
+    tan,
+    dissolvedOxygen: doVal,
+    turbidity: turb,
+  });
+
   return {
     node_id: nodeId,
     location: data.location ?? 'Unknown',
-    temperature: data.temperature ?? null,
-    turbidity: data.turbidity ?? null,
-    ph: data.pH ?? data.ph ?? null,
-    dissolved_oxygen: data.dissolvedOxygen ?? data.do ?? data.dissolved_oxygen ?? null,
+    temperature: temp,
+    turbidity: turb,
+    ph,
+    dissolved_oxygen: doVal,
     flow_rate: data.flowRate ?? data.flow_rate ?? null,
     battery_voltage: data.batteryVoltage ?? data.battery_voltage ?? null,
+    wqi: wqi != null ? wqi : null,
     seq,
     tx_millis: data.tx_millis != null ? (typeof data.tx_millis === 'number' ? data.tx_millis : parseInt(data.tx_millis, 10)) : null,
     rx_millis: data.rx_millis != null ? (typeof data.rx_millis === 'number' ? data.rx_millis : parseInt(data.rx_millis, 10)) : null,
@@ -176,10 +190,11 @@ function payloadToRow(topic, data, t_be_rx) {
   };
 }
 
-/** Columns allowed on sensor_readings (no nh3, no tan, no wqi). */
+/** Columns allowed on sensor_readings. wqi = calculated in backend from temp, ph, do, turbidity, etc. */
 const SENSOR_READINGS_COLUMNS = [
   'node_id', 'location', 'temperature', 'turbidity', 'ph', 'dissolved_oxygen',
-  'flow_rate', 'battery_voltage', 'seq', 'tx_millis', 'rx_millis', 'timestamp',
+  'flow_rate', 'battery_voltage', 'wqi',
+  'seq', 'tx_millis', 'rx_millis', 'timestamp',
   't_node', 't_fwd_rx', 't_fwd_pub', 't_be_rx', 'test_run_id',
   'rssi', 'snr',
 ];

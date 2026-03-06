@@ -120,7 +120,7 @@ Web Dashboard ← Backend ← Database
 
 1. **Create Supabase project** at supabase.com; run **`supabase/schema.sql`** in SQL Editor (creates tables + RLS).
 2. **Get keys:** Settings → API → Project URL, anon key, service_role key.
-3. **Vercel (client):** Settings → Environment Variables: `REACT_APP_SUPABASE_URL`, `REACT_APP_SUPABASE_ANON_KEY`; optional MQTT vars; redeploy.
+3. **Vercel (client):** Settings → Environment Variables: `REACT_APP_SUPABASE_URL`, `REACT_APP_SUPABASE_ANON_KEY`; optional MQTT vars; **redeploy after adding**. Without these, prod shows no nodes on new devices and data falls back to backend API (localhost by default).
 4. **End-to-end:** Sensor node → LoRa → Forwarder (Heltec) → HiveMQ Cloud → Node bridge → Supabase; dashboard on Vercel reads from Supabase.
 5. **Server (optional):** Set `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, MQTT vars; server writes MQTT to Supabase (otherwise uses SQLite).
 6. **Local:** client uses `REACT_APP_SUPABASE_URL` and `REACT_APP_SUPABASE_ANON_KEY`; server optional with same Supabase vars.
@@ -371,6 +371,12 @@ Nodes + today’s readings (API, calibrated) → readingsByNode → selected nod
 ### Frontend not getting API data
 
 - Backend on port 5000; correct REACT_APP_API_URL; browser console; frontend falls back to deterministic data if API fails.
+
+### Vercel prod: no nodes, no data from Supabase
+
+- **Cause:** `REACT_APP_SUPABASE_URL` and `REACT_APP_SUPABASE_ANON_KEY` are not set in Vercel. The client builds with Supabase disabled; nodes come from localStorage (empty on new devices), data from backend API (defaults to localhost).
+- **Fix:** Vercel → Project → Settings → Environment Variables → add both vars → redeploy. Check browser console: "WQMS: Supabase enabled" = OK; "WQMS: Supabase disabled" = env vars missing.
+- **Fallback:** When nodes table is empty but sensor_readings has data, the app now derives nodes from readings so new devices see nodes.
 
 ### Database not created
 

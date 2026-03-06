@@ -230,12 +230,65 @@ export async function upsertAlerts(alertsList) {
 
 export async function getNodesFromSupabase() {
   if (!isSupabaseEnabled()) return null;
+  // Select columns that exist in base schema (omit 'active' if migration 011 not run)
   const { data, error } = await supabase
     .from('nodes')
     .select('id, name, location, status, lat, lng, last_maintenance, active')
     .order('id');
-  if (error) throw new Error(error.message);
-  return data;
+  if (error) {
+    // Retry without 'active' if column missing (migration 011)
+    if (/column.*active|does not exist/i.test(error.message)) {
+      const { data: fallback, error: err2 } = await supabase
+        .from('nodes')
+        .select('id, name, location, status, lat, lng, last_maintenance')
+        .order('id');
+      if (err2) throw new Error(err2.message);
+      const withDefault = (fallback || []).map((r) => ({ ...r, active: true }));
+      const filtered = withDefault.filter((r) => r.status !== 'removed');
+      if (filtered.length > 0) return filtered;
+      const derived = await getNodesDerivedFromReadings();
+      return derived.length > 0 ? derived : filtered;
+    }
+    throw new Error(error.message);
+  }
+  const filtered = (data || []).filter((r) => r.status !== 'removed');
+  if (filtered.length === 0) {
+    const derived = await getNodesDerivedFromReadings();
+    if (derived.length > 0) return derived;
+  }
+  return filtered;
+}
+
+/**
+ * Returns synthetic node entries from distinct node_ids in sensor_readings.
+ * Used when nodes table is empty but readings exist (e.g. bridge wrote data, nodes not yet added).
+ */
+export async function getNodesDerivedFromReadings() {
+  if (!isSupabaseEnabled()) return [];
+  const { data, error } = await supabase
+    .from('sensor_readings')
+    .select('node_id, location')
+    .order('timestamp', { ascending: false })
+    .limit(2000);
+  if (error) return [];
+  const seen = new Set();
+  const nodes = [];
+  (data || []).forEach((r) => {
+    const id = r.node_id || r.nodeId;
+    if (!id || seen.has(id)) return;
+    seen.add(id);
+    nodes.push({
+      id,
+      name: id,
+      location: r.location || id,
+      status: 'offline',
+      lat: null,
+      lng: null,
+      last_maintenance: null,
+      active: true,
+    });
+  });
+  return nodes.sort((a, b) => String(a.id).localeCompare(String(b.id)));
 }
 
 /**
@@ -277,16 +330,29 @@ export async function getLatestReadingsPerNode() {
 
 export async function saveNodesToSupabase(nodes) {
   if (!isSupabaseEnabled()) throw new Error('Supabase not configured');
-  const rows = nodes.map((n) => ({
-    id: n.id,
-    name: n.name ?? null,
-    location: n.location ?? null,
-    status: n.status ?? 'offline',
-    lat: n.lat ?? null,
-    lng: n.lng ?? null,
-    last_maintenance: n.lastMaintenance ?? n.last_maintenance ?? null,
-    active: n.active !== false,
-  }));
+  const idsToKeep = new Set(nodes.map((n) => n.id).filter(Boolean));
+
+  // Soft delete: mark as removed instead of deleting from DB.
+  // Nodes no longer in the list (user deleted them) get status = 'removed'.
+  const { data: existing } = await supabase.from('nodes').select('id, status');
+  const toMarkRemoved = (existing || []).filter((r) => !idsToKeep.has(r.id) && r.status !== 'removed');
+  for (const { id } of toMarkRemoved) {
+    await supabase.from('nodes').update({ status: 'removed' }).eq('id', id);
+  }
+
+  const rows = nodes.map((n) => {
+    const isDeactivated = n.active === false;
+    return {
+      id: n.id,
+      name: n.name ?? null,
+      location: n.location ?? null,
+      status: isDeactivated ? 'inactive' : (n.status ?? 'offline'),
+      lat: n.lat ?? null,
+      lng: n.lng ?? null,
+      last_maintenance: n.lastMaintenance ?? n.last_maintenance ?? null,
+      active: !isDeactivated,
+    };
+  });
   const { error } = await supabase.from('nodes').upsert(rows, { onConflict: 'id' });
   if (error) throw new Error(error.message);
   return { success: true };

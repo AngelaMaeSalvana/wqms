@@ -268,6 +268,7 @@ export default function Dashboard() {
     if (list.length === 0) {
       return {
         labels: [],
+        timestamps: [],
         datasets: [
           { label: "Temperature °C", data: [], borderColor: "#1b9c85", backgroundColor: "rgba(27, 156, 133, 0.1)", fill: true },
           { label: "Turbidity", data: [], borderColor: "#d45b5b", backgroundColor: "rgba(212, 91, 91, 0.1)", fill: true },
@@ -282,6 +283,7 @@ export default function Dashboard() {
       const d = new Date(r.timestamp);
       return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
     });
+    const timestamps = list.map((r) => r.timestamp);
     const tempData = list.map((r) => r.temperature ?? null);
     const turbData = list.map((r) => r.turbidity ?? null);
     const phData = list.map((r) => r.ph ?? r.pH ?? null);
@@ -290,6 +292,7 @@ export default function Dashboard() {
     const doData = list.map((r) => r.dissolved_oxygen ?? r.dissolvedOxygen ?? r.do ?? null);
     return {
       labels,
+      timestamps,
       datasets: [
         { label: "Temperature °C", data: tempData, borderColor: "#1b9c85", backgroundColor: "rgba(27, 156, 133, 0.1)", fill: true },
         { label: "Turbidity", data: turbData, borderColor: "#d45b5b", backgroundColor: "rgba(212, 91, 91, 0.1)", fill: true },

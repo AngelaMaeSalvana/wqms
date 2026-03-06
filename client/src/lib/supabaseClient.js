@@ -15,4 +15,12 @@ export const isSupabaseEnabled = () => !!supabase;
 
 if (supabase) {
   console.log('WQMS: Supabase enabled — client will use Supabase for nodes, readings, and summaries.');
+} else if (typeof window !== 'undefined') {
+  const missing = [];
+  if (!supabaseUrl) missing.push('REACT_APP_SUPABASE_URL');
+  if (!supabaseAnonKey) missing.push('REACT_APP_SUPABASE_ANON_KEY');
+  console.warn(
+    'WQMS: Supabase disabled — nodes use localStorage (empty on new devices), data uses backend API. ' +
+    'Set in Vercel: ' + (missing.length ? missing.join(', ') : 'REACT_APP_SUPABASE_URL, REACT_APP_SUPABASE_ANON_KEY')
+  );
 }

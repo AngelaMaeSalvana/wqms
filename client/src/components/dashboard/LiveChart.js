@@ -1,10 +1,8 @@
 import React, { useMemo, useRef, useEffect, useCallback, useState } from "react";
 import "../../utils/chartConfig";
 import { Line } from "react-chartjs-2";
+import { startOfDay, setHours, setMinutes } from "date-fns";
 import "./dashboard.css";
-
-const AM_LABELS = ["12am","1am","2am","3am","4am","5am","6am","7am","8am","9am","10am","11am"];
-const PM_LABELS = ["12pm","1pm","2pm","3pm","4pm","5pm","6pm","7pm","8pm","9pm","10pm","11pm"];
 
 const DATASET_META = [
   { label: "Temperature (°C)",      borderColor: "#1b9c85", bg: "rgba(27,156,133,0.1)" },
@@ -15,56 +13,120 @@ const DATASET_META = [
   { label: "Dissolved O₂ (mg/L)",    borderColor: "#2ecc71", bg: "rgba(46,204,113,0.1)" },
 ];
 
-function buildHalfData(todayData, isAM) {
-  const halfLabels = isAM ? AM_LABELS : PM_LABELS;
+const MINUTE_INTERVAL = 5;
+const MINUTE_MS = 60 * 1000;
+
+function buildHalfTimeData(todayData, isAM) {
+  const timestamps = todayData?.timestamps ?? [];
+  const srcDatasets = todayData?.datasets ?? [];
+  if (timestamps.length === 0 || srcDatasets.length === 0) {
+    const today = startOfDay(new Date());
+    const startHour = isAM ? 0 : 12;
+    const rangeStart = setHours(setMinutes(today, 0), startHour).getTime();
+    const rangeEnd = rangeStart + 12 * 60 * MINUTE_MS - 1;
+    return {
+      min: rangeStart,
+      max: rangeEnd,
+      datasets: DATASET_META.map((meta) => ({
+        label: meta.label,
+        data: [],
+        borderColor: meta.borderColor,
+        backgroundColor: meta.bg,
+        fill: true,
+        tension: 0.3,
+        spanGaps: false,
+        pointRadius: 0,
+        pointHoverRadius: 5,
+      })),
+    };
+  }
+
   const startHour = isAM ? 0 : 12;
+  const today = startOfDay(new Date(timestamps[0]));
+  const rangeStart = setHours(setMinutes(today, 0), startHour).getTime();
+  const rangeEnd = rangeStart + 12 * 60 * MINUTE_MS - 1;
 
   const datasets = DATASET_META.map((meta, di) => {
-    const slotData = Array(12).fill(null);
-    const srcData = todayData?.datasets?.[di]?.data ?? [];
-    const srcLabels = todayData?.labels ?? [];
-
-    srcLabels.forEach((lbl, i) => {
-      const h = parseInt(lbl.split(":")[0], 10);
-      if (h >= startHour && h < startHour + 12) {
-        const slot = h - startHour;
+    const srcData = srcDatasets[di]?.data ?? [];
+    const points = [];
+    timestamps.forEach((ts, i) => {
+      const t = new Date(ts).getTime();
+      if (t >= rangeStart && t <= rangeEnd) {
         const val = srcData[i];
-        if (val != null) {
-          if (slotData[slot] == null) slotData[slot] = val;
-          else slotData[slot] = (slotData[slot] + val) / 2;
+        if (val != null && !Number.isNaN(val)) {
+          points.push({ x: t, y: val });
         }
       }
     });
-
-    const pointRadii = slotData.map((v) => (v == null ? 0 : 3));
-    const pointHoverRadii = slotData.map((v) => (v == null ? 0 : 5));
+    points.sort((a, b) => a.x - b.x);
 
     return {
       label: meta.label,
-      data: slotData,
+      data: points,
       borderColor: meta.borderColor,
       backgroundColor: meta.bg,
       fill: true,
       tension: 0.3,
-      spanGaps: false,
-      pointRadius: pointRadii,
-      pointHoverRadius: pointHoverRadii,
+      spanGaps: true,
+      pointRadius: points.map(() => 2.5),
+      pointHoverRadius: 6,
     };
   });
 
-  return { labels: halfLabels, datasets };
+  return { min: rangeStart, max: rangeEnd, datasets };
 }
 
-// Draws a solid thin blue vertical line at the current hour slot
-function makeNowPlugin(currentSlot) {
+// Draws mini vertical lines at 5-minute intervals (indication of minutes)
+function makeMinuteLinesPlugin() {
+  return {
+    id: "minuteLines",
+    afterDraw(chart) {
+      const xScale = chart.scales.x;
+      const yScale = chart.scales.y;
+      if (!xScale || !yScale || xScale.type !== "time") return;
+
+      const min = xScale.min;
+      const max = xScale.max;
+      const ctx = chart.ctx;
+      ctx.save();
+      ctx.strokeStyle = "rgba(128,128,128,0.2)";
+      ctx.lineWidth = 0.5;
+
+      const step = MINUTE_INTERVAL * MINUTE_MS;
+      let t = Math.ceil(min / step) * step;
+      while (t < max) {
+        const x = xScale.getPixelForValue(t);
+        if (x >= xScale.left && x <= xScale.right) {
+          ctx.beginPath();
+          ctx.moveTo(x, yScale.top);
+          ctx.lineTo(x, yScale.bottom);
+          ctx.stroke();
+        }
+        t += step;
+      }
+      ctx.restore();
+    },
+  };
+}
+
+// Draws a solid thin blue vertical line at the current time
+function makeNowPlugin(isAM) {
   return {
     id: "nowLine",
     afterDraw(chart) {
-      if (currentSlot < 0 || currentSlot > 11) return;
       const xScale = chart.scales.x;
       const yScale = chart.scales.y;
       if (!xScale || !yScale) return;
-      const x = xScale.getPixelForValue(currentSlot);
+
+      const now = new Date();
+      const hour = now.getHours();
+      const inThisHalf = isAM ? hour < 12 : hour >= 12;
+      if (!inThisHalf) return;
+
+      const nowMs = now.getTime();
+      if (nowMs < xScale.min || nowMs > xScale.max) return;
+
+      const x = xScale.getPixelForValue(nowMs);
       const ctx = chart.ctx;
       ctx.save();
       ctx.strokeStyle = "#3b82f6";
@@ -74,7 +136,6 @@ function makeNowPlugin(currentSlot) {
       ctx.moveTo(x, yScale.top);
       ctx.lineTo(x, yScale.bottom);
       ctx.stroke();
-      // Small blue dot at the top of the line
       ctx.fillStyle = "#3b82f6";
       ctx.beginPath();
       ctx.arc(x, yScale.top, 3, 0, Math.PI * 2);
@@ -84,27 +145,65 @@ function makeNowPlugin(currentSlot) {
   };
 }
 
-const CHART_OPTIONS = {
-  responsive: true,
-  maintainAspectRatio: false,
-  animation: false,
-  layout: { padding: { top: 14, right: 8, bottom: 4, left: 2 } },
-  plugins: { legend: { display: false }, tooltip: { enabled: true } },
-  scales: {
-    x: {
-      grid: { display: false },
-      ticks: { maxRotation: 0, font: { size: 9 }, padding: 2, autoSkip: false },
+function getChartOptions(halfData) {
+  const isAM = halfData?.min != null && new Date(halfData.min).getHours() === 0;
+  return {
+    responsive: true,
+    maintainAspectRatio: false,
+    animation: false,
+    layout: { padding: { top: 14, right: 8, bottom: 4, left: 2 } },
+    parsing: false,
+    plugins: { legend: { display: false }, tooltip: { enabled: true } },
+    scales: {
+      x: {
+        type: "time",
+        min: halfData?.min,
+        max: halfData?.max,
+        time: {
+          unit: "hour",
+          minUnit: "minute",
+          displayFormats: {
+            minute: "h:mm a",
+            hour: "ha",
+          },
+          tooltipFormat: "h:mm a",
+        },
+        grid: {
+          display: true,
+          color: (ctx) => {
+            const d = new Date(ctx.tick.value);
+            return d.getMinutes() === 0 ? "rgba(128,128,128,0.4)" : "rgba(128,128,128,0.15)";
+          },
+          lineWidth: (ctx) => (new Date(ctx.tick.value).getMinutes() === 0 ? 1 : 0.5),
+        },
+        ticks: {
+          maxRotation: 0,
+          font: { size: 9 },
+          padding: 2,
+          maxTicksLimit: 13,
+          callback: (value) => {
+            const d = new Date(value);
+            if (d.getMinutes() !== 0) return "";
+            const h = d.getHours();
+            if (h === 0) return "12am";
+            if (h === 12) return "12pm";
+            return h < 12 ? `${h}am` : `${h - 12}pm`;
+          },
+        },
+      },
+      y: {
+        beginAtZero: true,
+        ticks: { font: { size: 8 }, padding: 2, maxTicksLimit: 6 },
+      },
     },
-    y: {
-      beginAtZero: true,
-      ticks: { font: { size: 8 }, padding: 2, maxTicksLimit: 6 },
-    },
-  },
-};
+  };
+}
+
+const minuteLinesPlugin = makeMinuteLinesPlugin();
 
 export function LiveChart({ todayData }) {
-  const amData = useMemo(() => buildHalfData(todayData, true),  [todayData]);
-  const pmData = useMemo(() => buildHalfData(todayData, false), [todayData]);
+  const amData = useMemo(() => buildHalfTimeData(todayData, true), [todayData]);
+  const pmData = useMemo(() => buildHalfTimeData(todayData, false), [todayData]);
 
   const legendItems = useMemo(
     () => DATASET_META.map((m) => ({ label: m.label, color: m.borderColor })),
@@ -113,37 +212,30 @@ export function LiveChart({ todayData }) {
 
   const currentHour = new Date().getHours();
   const [activePage, setActivePage] = useState(currentHour >= 12 ? 1 : 0);
-  const amNowSlot = currentHour < 12 ? currentHour : -1;
-  const pmNowSlot = currentHour >= 12 ? currentHour - 12 : -1;
+  const nowPluginAm = useMemo(() => makeNowPlugin(true), []);
+  const nowPluginPm = useMemo(() => makeNowPlugin(false), []);
 
-  const nowPluginAm = useMemo(() => makeNowPlugin(amNowSlot), [amNowSlot]);
-  const nowPluginPm = useMemo(() => makeNowPlugin(pmNowSlot), [pmNowSlot]);
+  const chartOptionsAm = useMemo(() => getChartOptions(amData), [amData]);
+  const chartOptionsPm = useMemo(() => getChartOptions(pmData), [pmData]);
 
   const scrollRef = useRef(null);
   const isMountedRef = useRef(false);
 
-  // On first mount jump instantly to the correct half; smooth for user navigation
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
-
     const doScroll = (behavior) => {
       const w = el.offsetWidth;
-      if (w > 0) {
-        el.scrollTo({ left: activePage * w, behavior });
-      }
+      if (w > 0) el.scrollTo({ left: activePage * w, behavior });
     };
-
     if (!isMountedRef.current) {
       isMountedRef.current = true;
-      // Use rAF to ensure layout is complete before reading offsetWidth
       requestAnimationFrame(() => doScroll("instant"));
     } else {
       doScroll("smooth");
     }
   }, [activePage]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Sync indicator on manual swipe
   const handleScroll = useCallback(() => {
     const el = scrollRef.current;
     if (!el) return;
@@ -151,6 +243,8 @@ export function LiveChart({ todayData }) {
   }, []);
 
   const goTo = useCallback((page) => setActivePage(page), []);
+
+  const plugins = [minuteLinesPlugin];
 
   return (
     <div className="card card--fill live-chart-card">
@@ -169,7 +263,6 @@ export function LiveChart({ todayData }) {
       </div>
 
       <div className="card__body card__body--fill live-chart-body">
-        {/* AM / PM pager */}
         <div className="live-chart-pager">
           <button
             className="live-chart-pager__btn"
@@ -195,13 +288,20 @@ export function LiveChart({ todayData }) {
           >›</button>
         </div>
 
-        {/* Paged chart area */}
         <div className="live-chart-pages" ref={scrollRef} onScroll={handleScroll}>
           <div className="live-chart-page">
-            <Line data={amData} options={CHART_OPTIONS} plugins={[nowPluginAm]} />
+            <Line
+              data={{ datasets: amData.datasets }}
+              options={chartOptionsAm}
+              plugins={[...plugins, nowPluginAm]}
+            />
           </div>
           <div className="live-chart-page">
-            <Line data={pmData} options={CHART_OPTIONS} plugins={[nowPluginPm]} />
+            <Line
+              data={{ datasets: pmData.datasets }}
+              options={chartOptionsPm}
+              plugins={[...plugins, nowPluginPm]}
+            />
           </div>
         </div>
       </div>

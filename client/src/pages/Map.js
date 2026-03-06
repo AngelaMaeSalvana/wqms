@@ -14,11 +14,8 @@ import "./Map.css";
 const FALLBACK_CENTER = [8.462591, 124.707831];
 const DEFAULT_ZOOM = 11;
 
-const MAP_NODES_PAGE_SIZE = 15;
-
 export default function Map() {
   const [nodes, setNodes] = useState([]);
-  const [mapNodesPage, setMapNodesPage] = useState(1);
   const [nodesLoaded, setNodesLoaded] = useState(false);
   const [lastUpdated] = useState(() => new Date());
   const sensorTest = useSensorTest();
@@ -107,79 +104,6 @@ export default function Map() {
     };
   });
 
-  const [mapTableSort, setMapTableSort] = useState({ column: "node", direction: "asc" });
-  const [mapNodesSearch, setMapNodesSearch] = useState("");
-
-  const nodesTableData = allNodes.filter((n) => n.active !== false).map((n) => {
-    const result = sensorTest.allResults[n.id] ?? null;
-    let repairStatus = "Not checked";
-    if (result?.status === "success") repairStatus = "All sensors OK";
-    else if (result?.status === "warning") repairStatus = "Sensor issue";
-    else if (result?.status === "error") repairStatus = "Sensor failure";
-    else if (result?.status === "offline") repairStatus = "Node offline";
-    const lastTestTs = result?.timestamp ? new Date(result.timestamp).getTime() : 0;
-    return {
-      ...n,
-      lastTest: result ? new Date(result.timestamp).toLocaleString() : "—",
-      lastTestTimestamp: lastTestTs,
-      repairStatus,
-      resultStatus: result?.status ?? null,
-    };
-  });
-
-  const filteredNodesTableData = useMemo(() => {
-    const q = mapNodesSearch.trim().toLowerCase();
-    if (!q) return nodesTableData;
-    return nodesTableData.filter(
-      (row) =>
-        (row.id && row.id.toLowerCase().includes(q)) ||
-        (row.name && row.name.toLowerCase().includes(q)) ||
-        (row.location && row.location.toLowerCase().includes(q))
-    );
-  }, [nodesTableData, mapNodesSearch]);
-
-  const sortedNodesTableData = useMemo(() => {
-    const { column, direction } = mapTableSort;
-    return [...filteredNodesTableData].sort((a, b) => {
-      let cmp = 0;
-      if (column === "node") cmp = String(a.name || a.id).localeCompare(String(b.name || b.id));
-      else if (column === "location") cmp = String(a.location || "").localeCompare(String(b.location || ""));
-      else if (column === "coordinates") {
-        const va = a.lat != null && a.lng != null ? `${a.lat},${a.lng}` : "";
-        const vb = b.lat != null && b.lng != null ? `${b.lat},${b.lng}` : "";
-        cmp = va.localeCompare(vb);
-      } else if (column === "lastTest") cmp = (a.lastTestTimestamp ?? 0) - (b.lastTestTimestamp ?? 0);
-      else if (column === "sensorStatus") {
-        const order = { success: 0, warning: 1, error: 2, offline: 3, null: 4 };
-        const oa = order[a.resultStatus ?? "null"] ?? 3;
-        const ob = order[b.resultStatus ?? "null"] ?? 3;
-        cmp = oa - ob;
-      }
-      return direction === "asc" ? cmp : -cmp;
-    });
-  }, [filteredNodesTableData, mapTableSort]);
-
-  const mapNodesTotal = sortedNodesTableData.length;
-  const mapNodesTotalPages = Math.max(1, Math.ceil(mapNodesTotal / MAP_NODES_PAGE_SIZE));
-  const mapNodesPageClamped = Math.min(mapNodesPage, mapNodesTotalPages);
-
-  useEffect(() => {
-    if (mapNodesPage > mapNodesTotalPages) setMapNodesPage(Math.max(1, mapNodesTotalPages));
-  }, [mapNodesTotalPages, mapNodesPage]);
-
-  useEffect(() => {
-    setMapNodesPage(1);
-  }, [mapNodesSearch]);
-
-  const paginatedNodesTableData = useMemo(
-    () =>
-      sortedNodesTableData.slice(
-        (mapNodesPageClamped - 1) * MAP_NODES_PAGE_SIZE,
-        mapNodesPageClamped * MAP_NODES_PAGE_SIZE
-      ),
-    [sortedNodesTableData, mapNodesPageClamped]
-  );
-
   if (!nodesLoaded) {
     return (
       <div className="map-page">
@@ -187,11 +111,6 @@ export default function Map() {
       </div>
     );
   }
-
-  const goToMapNodesPage = (page) => {
-    const p = Math.max(1, Math.min(page, mapNodesTotalPages));
-    setMapNodesPage(p);
-  };
 
   return (
     <div className="map-page">
@@ -203,9 +122,33 @@ export default function Map() {
         <PageDateWithStatus lastUpdated={lastUpdated} className="page-meta" showClassification={false} />
       </header>
 
-      <section className="card map-card">
-        <div className="map-body">
-          <div className="map-wrapper leaflet-map-wrapper">
+      <section className="card map-page__card">
+        <div className="map-page__map">
+            <div className="map-nodes-overlay" aria-label="Node list">
+              <div className="map-nodes-overlay__header">Nodes</div>
+              <ul className="map-nodes-overlay__list">
+                {allNodes.filter((n) => n.active !== false).map((node) => {
+                  const result = sensorTest.allResults[node.id];
+                  const lastTested = result?.timestamp
+                    ? new Date(result.timestamp).toLocaleString()
+                    : "—";
+                  const status = result?.status ?? null;
+                  const statusLabels = { success: "OK", warning: "Issue", error: "Fail", offline: "Offline" };
+                  const statusLabel = statusLabels[status] ?? "—";
+                  return (
+                    <li key={node.id} className="map-nodes-overlay__item">
+                      <div className="map-nodes-overlay__info">
+                        <span className="map-nodes-overlay__name">{node.name || node.id}</span>
+                        <span className="map-nodes-overlay__meta">{lastTested}</span>
+                      </div>
+                      <span className={`map-nodes-overlay__status map-nodes-overlay__status--${status ?? "none"}`}>
+                        {statusLabel}
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
             <MapContainer
               center={mapCenter}
               zoom={DEFAULT_ZOOM}
@@ -220,7 +163,6 @@ export default function Map() {
               <MapMarkersOverlay markers={mapMarkers} />
               <MapRecenterButton center={mapCenter} className="map-recenter-btn--mobile" />
             </MapContainer>
-          </div>
         </div>
       </section>
 
@@ -329,178 +271,6 @@ export default function Map() {
         </div>,
         document.body
       )}
-
-      <section className="card map-nodes-card">
-        <header className="section-header map-nodes-card__header">
-          <h2 className="card__title">All Nodes — Location &amp; Sensor Status</h2>
-          <input
-            type="search"
-            className="map-nodes-search"
-            placeholder="Search nodes…"
-            value={mapNodesSearch}
-            onChange={(e) => setMapNodesSearch(e.target.value)}
-            aria-label="Search nodes"
-          />
-        </header>
-        <div className="map-nodes-card__body">
-          <div className="map-nodes-table-wrap">
-            <table className="map-nodes-table" role="table">
-              <thead>
-                <tr>
-                  <th>
-                    <button
-                      type="button"
-                      className={`map-th-btn ${mapTableSort.column === "node" ? "map-th-btn--active" : ""}`}
-                      onClick={() =>
-                        setMapTableSort((s) => ({
-                          column: "node",
-                          direction: s.column === "node" && s.direction === "asc" ? "desc" : "asc",
-                        }))
-                      }
-                    >
-                      Node {mapTableSort.column === "node" && (mapTableSort.direction === "asc" ? "↑" : "↓")}
-                    </button>
-                  </th>
-                  <th>
-                    <button
-                      type="button"
-                      className={`map-th-btn ${mapTableSort.column === "location" ? "map-th-btn--active" : ""}`}
-                      onClick={() =>
-                        setMapTableSort((s) => ({
-                          column: "location",
-                          direction: s.column === "location" && s.direction === "asc" ? "desc" : "asc",
-                        }))
-                      }
-                    >
-                      Location {mapTableSort.column === "location" && (mapTableSort.direction === "asc" ? "↑" : "↓")}
-                    </button>
-                  </th>
-                  <th>
-                    <button
-                      type="button"
-                      className={`map-th-btn ${mapTableSort.column === "coordinates" ? "map-th-btn--active" : ""}`}
-                      onClick={() =>
-                        setMapTableSort((s) => ({
-                          column: "coordinates",
-                          direction: s.column === "coordinates" && s.direction === "asc" ? "desc" : "asc",
-                        }))
-                      }
-                    >
-                      Coordinates {mapTableSort.column === "coordinates" && (mapTableSort.direction === "asc" ? "↑" : "↓")}
-                    </button>
-                  </th>
-                  <th>
-                    <button
-                      type="button"
-                      className={`map-th-btn ${mapTableSort.column === "lastTest" ? "map-th-btn--active" : ""}`}
-                      onClick={() =>
-                        setMapTableSort((s) => ({
-                          column: "lastTest",
-                          direction: s.column === "lastTest" && s.direction === "asc" ? "desc" : "asc",
-                        }))
-                      }
-                    >
-                      Last test {mapTableSort.column === "lastTest" && (mapTableSort.direction === "asc" ? "↑" : "↓")}
-                    </button>
-                  </th>
-                  <th>
-                    <button
-                      type="button"
-                      className={`map-th-btn ${mapTableSort.column === "sensorStatus" ? "map-th-btn--active" : ""}`}
-                      onClick={() =>
-                        setMapTableSort((s) => ({
-                          column: "sensorStatus",
-                          direction: s.column === "sensorStatus" && s.direction === "asc" ? "desc" : "asc",
-                        }))
-                      }
-                    >
-                      Sensor status {mapTableSort.column === "sensorStatus" && (mapTableSort.direction === "asc" ? "↑" : "↓")}
-                    </button>
-                  </th>
-                  <th aria-label="Actions" />
-                </tr>
-              </thead>
-              <tbody>
-                {paginatedNodesTableData.map((row) => {
-                  const inactive = row.active === false;
-                  return (
-                    <tr key={row.id} className={inactive ? "map-nodes-table__row--inactive" : ""}>
-                      <td>
-                        <span className="map-nodes-table__node-name">{row.name}</span>
-                        <span className="map-nodes-table__node-id">{row.id}</span>
-                        {inactive && <span className="map-nodes-table__inactive-badge">Inactive</span>}
-                      </td>
-                      <td>{row.location}</td>
-                      <td className="map-nodes-table__coords">
-                        {row.lat != null && row.lng != null
-                          ? `${row.lat.toFixed(4)}, ${row.lng.toFixed(4)}`
-                          : "—"}
-                      </td>
-                      <td>{inactive ? "—" : row.lastTest}</td>
-                      <td>
-                        {inactive ? (
-                          <span className="map-nodes-table__status map-nodes-table__status--none">Inactive</span>
-                        ) : (
-                          <span
-                            className={`map-nodes-table__status map-nodes-table__status--${row.resultStatus ?? "none"}`}
-                            title={row.resultStatus ? row.repairStatus : "No test run today"}
-                          >
-                            {row.repairStatus}
-                          </span>
-                        )}
-                      </td>
-                      <td>
-                        {!inactive && (
-                          <button
-                            type="button"
-                            className="ghost-btn map-nodes-table__test-btn"
-                            onClick={() => handleSensorTest(row.id)}
-                            aria-label={`Test sensor for ${row.name}`}
-                          >
-                            Test sensor
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-          {mapNodesTotalPages > 1 && (
-            <div className="map-nodes-pagination">
-              <span className="map-nodes-pagination__info">
-                Page {mapNodesPageClamped} of {mapNodesTotalPages}
-                {mapNodesTotal > 0 && (
-                  <span className="map-nodes-pagination__count">
-                    {" "}({mapNodesTotal} node{mapNodesTotal !== 1 ? "s" : ""})
-                  </span>
-                )}
-              </span>
-              <div className="map-nodes-pagination__btns">
-                <button
-                  type="button"
-                  className="map-nodes-pagination__btn"
-                  onClick={() => goToMapNodesPage(mapNodesPageClamped - 1)}
-                  disabled={mapNodesPageClamped <= 1}
-                  aria-label="Previous page"
-                >
-                  Previous
-                </button>
-                <button
-                  type="button"
-                  className="map-nodes-pagination__btn"
-                  onClick={() => goToMapNodesPage(mapNodesPageClamped + 1)}
-                  disabled={mapNodesPageClamped >= mapNodesTotalPages}
-                  aria-label="Next page"
-                >
-                  Next
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-      </section>
 
       {sensorTest.isOpen && createPortal(
         <div

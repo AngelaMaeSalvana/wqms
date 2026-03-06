@@ -421,6 +421,7 @@ function initializeSqlite() {
     )`),
     run(`ALTER TABLE sensor_readings ADD COLUMN test_run_id TEXT`).catch(() => {}),
     run(`ALTER TABLE sensor_readings ADD COLUMN battery_voltage REAL`).catch(() => {}),
+    run(`ALTER TABLE sensor_readings ADD COLUMN wqi INTEGER`).catch(() => {}),
   ]).then(() => console.log('✅ SQLite tables initialized'));
 }
 

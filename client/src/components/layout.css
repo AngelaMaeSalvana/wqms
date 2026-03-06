@@ -125,22 +125,36 @@
   }
 }
 
-/* Map page on desktop: reduce padding to maximize map area */
+/* Map page on desktop: fill main content area fully (same approach as mobile) */
 @media (min-width: 1025px) {
   .layout-main--map {
-    padding: 12px;
+    padding: 0;
+    position: relative; /* for absolutely positioned page-enter */
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+
+  .layout-main--map .page-enter {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
   }
 }
 
-/* Responsive layout padding — desktop only (above 1024px) */
+/* Responsive layout padding — desktop only (above 1024px); map keeps padding: 0 */
 @media (min-width: 1025px) and (max-width: 1535px), (min-height: 769px) and (max-height: 900px) {
-  .layout-main {
+  .layout-main:not(.layout-main--map) {
     padding: 20px;
   }
 }
 
 @media (min-width: 1025px) and (max-width: 1280px), (min-height: 769px) and (max-height: 800px) {
-  .layout-main {
+  .layout-main:not(.layout-main--map) {
     padding: 18px;
   }
 }
