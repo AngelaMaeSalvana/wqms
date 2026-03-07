@@ -22,7 +22,12 @@
  *   Activated by CMD:test:start:<interval_ms>:<duration_ms>:<test_run_id>
  *   Overrides TDMA for the specified duration; attaches test_run_id to telemetry.
  *   Reverts automatically when duration expires or CMD:test:stop:<test_run_id> is received.
- *   seq_id and t_node continue normally throughout test mode.
+ *
+ * Adaptive Sampling:
+ *   User-Selected Mode: acquisition at user-defined interval (default 15 min).
+ *   Auto-Adapt Mode: flow-rate thresholds (≤0.10→15m, 0.10-0.40→10m, 0.40-0.80→5m, >0.80→1m).
+ *   Stability: 3 consecutive flow checks in new threshold before changing interval.
+ *   Acquisition runs on its own timer; TDMA transmission uses latest buffered reading.
  */
 #include "Arduino.h"
 #include "LoRaWan_APP.h"
@@ -98,6 +103,28 @@
 // -------------------- Timing --------------------
 #define CMD_LISTEN_INTERVAL_MS  1000  // Listen for commands every 1 sec
 #define CMD_LISTEN_WINDOW_MS     600  // RX window for commands (ms)
+
+// -------------------- Adaptive Data Acquisition --------------------
+// User-Selected Mode: fixed interval (default 15 min).
+// Auto-Adapt Mode: flow-rate thresholds -> acquisition interval; 3 consecutive readings before change.
+#define ACQ_MODE_USER  0
+#define ACQ_MODE_AUTO  1
+#define ACQ_MODE_DEFAULT  ACQ_MODE_AUTO   // ACQ_MODE_USER or ACQ_MODE_AUTO
+
+#define USER_ACQ_INTERVAL_MS  (15UL * 60 * 1000)  // 15 min when User-Selected, no user value
+
+// Flow velocity thresholds (m/s). Flow sensor not yet available -> use hard-coded value for testing.
+// ≤0.10 -> 15 min | 0.10-0.40 -> 10 min | 0.40-0.80 -> 5 min | >0.80 -> 1 min
+#define FLOW_THRESH_15MIN  0.10f
+#define FLOW_THRESH_10MIN  0.40f
+#define FLOW_THRESH_5MIN   0.80f
+#define HARDCODED_FLOW_MPS  0.25f        // For testing (0.25 m/s -> 10 min interval)
+#define STABILITY_CONSECUTIVE  3
+
+#define ACQ_INTERVAL_1MIN_MS   (1UL * 60 * 1000)
+#define ACQ_INTERVAL_5MIN_MS   (5UL * 60 * 1000)
+#define ACQ_INTERVAL_10MIN_MS  (10UL * 60 * 1000)
+#define ACQ_INTERVAL_15MIN_MS  (15UL * 60 * 1000)
 
 // -------------------- DS18B20 Temperature Sensor --------------------
 OneWire oneWire(DS18B20_PIN);
@@ -596,6 +623,91 @@ static void deactivateTestMode() {
   Serial.println("[TEST] Test mode OFF - reverted to default interval");
 }
 
+// -------------------- Adaptive Acquisition State --------------------
+static uint8_t  s_acqMode         = ACQ_MODE_DEFAULT;
+static uint32_t s_acqIntervalMs   = USER_ACQ_INTERVAL_MS;
+static uint32_t s_lastAcqMs       = 0;   // millis() of last acquisition
+static int8_t   s_flowThresholdIdx = -1; // 0=15m 1=10m 2=5m 3=1m (current)
+static int8_t   s_candidateIdx     = -1; // New threshold being considered
+static uint8_t  s_candidateCount   = 0;  // Consecutive checks in candidate threshold
+
+// Flow threshold index from flow rate (m/s): 0->15m, 1->10m, 2->5m, 3->1m
+static int8_t flowRateToThresholdIdx(float flowMps) {
+  if (flowMps <= FLOW_THRESH_15MIN) return 0;
+  if (flowMps <= FLOW_THRESH_10MIN) return 1;
+  if (flowMps <= FLOW_THRESH_5MIN)  return 2;
+  return 3;
+}
+
+static uint32_t thresholdIdxToIntervalMs(int8_t idx) {
+  switch (idx) {
+    case 0: return ACQ_INTERVAL_15MIN_MS;
+    case 1: return ACQ_INTERVAL_10MIN_MS;
+    case 2: return ACQ_INTERVAL_5MIN_MS;
+    case 3: return ACQ_INTERVAL_1MIN_MS;
+    default: return ACQ_INTERVAL_15MIN_MS;
+  }
+}
+
+// Returns acquisition interval in minutes (for OLED display)
+static uint32_t getAcqIntervalMinutes() {
+  if (s_acqIntervalMs >= ACQ_INTERVAL_15MIN_MS) return 15;
+  if (s_acqIntervalMs >= ACQ_INTERVAL_10MIN_MS) return 10;
+  if (s_acqIntervalMs >= ACQ_INTERVAL_5MIN_MS)  return 5;
+  return 1;
+}
+
+// Update acquisition interval (User-Selected: fixed; Auto-Adapt: flow thresholds + stability)
+static void updateAcquisitionInterval() {
+  if (s_acqMode == ACQ_MODE_USER) {
+    s_acqIntervalMs = USER_ACQ_INTERVAL_MS;
+    return;
+  }
+  // Auto-Adapt: use hard-coded flow rate until sensor available
+  float flowMps = HARDCODED_FLOW_MPS;
+  int8_t newIdx = flowRateToThresholdIdx(flowMps);
+
+  if (s_flowThresholdIdx < 0) {
+    s_flowThresholdIdx = newIdx;
+    s_acqIntervalMs    = thresholdIdxToIntervalMs(newIdx);
+    s_candidateIdx     = -1;
+    s_candidateCount   = 0;
+    return;
+  }
+  if (newIdx == s_flowThresholdIdx) {
+    s_candidateIdx   = -1;
+    s_candidateCount = 0;
+    return;
+  }
+  if (newIdx == s_candidateIdx) {
+    s_candidateCount++;
+    if (s_candidateCount >= STABILITY_CONSECUTIVE) {
+      s_flowThresholdIdx = newIdx;
+      s_acqIntervalMs    = thresholdIdxToIntervalMs(newIdx);
+      s_candidateIdx     = -1;
+      s_candidateCount   = 0;
+    }
+  } else {
+    s_candidateIdx   = newIdx;
+    s_candidateCount = 1;
+  }
+}
+
+// Latest-reading buffer (updated on acquisition, used on TDMA transmit)
+typedef struct {
+  float do_val, turbidity, ph, flow, temp;
+  uint64_t t_node;  // Epoch ms at acquisition
+  bool valid;
+} AcqBuffer_t;
+static AcqBuffer_t s_acqBuffer = { NAN, NAN, NAN, NAN, NAN, 0, false };
+
+static void acquireAndBuffer() {
+  readSensors(s_acqBuffer.do_val, s_acqBuffer.turbidity, s_acqBuffer.ph,
+              s_acqBuffer.flow, s_acqBuffer.temp);
+  s_acqBuffer.t_node = epochMillis();
+  s_acqBuffer.valid  = true;
+}
+
 // Handle a test command string (after "CMD:"); returns true if handled.
 static bool handleTestCommand(const char* cmd) {
   uint32_t iv = 0, dur = 0;
@@ -659,13 +771,19 @@ static void refreshIdleOled() {
     uint32_t elapsed   = millis() - s_testStartMs;
     uint32_t remaining = (elapsed < s_testDurationMs) ? (s_testDurationMs - elapsed) : 0;
     uint32_t remSec    = remaining / 1000;
+    const char* baseMode = (s_acqMode == ACQ_MODE_USER) ? "User" : "Auto";
 
     snprintf(oledLineBuf,  sizeof(oledLineBuf),  "ID: %s", s_testRunId);
-    snprintf(oledLineBuf2, sizeof(oledLineBuf2), "Ivl:%lums Rem:%lus",
+    snprintf(oledLineBuf2, sizeof(oledLineBuf2), "Base:%s %lumin Ivl:%lums Rem:%lus",
+             baseMode, (unsigned long)getAcqIntervalMinutes(),
              (unsigned long)s_testIntervalMs, (unsigned long)remSec);
     oledShowLines("** TEST MODE **", oledLineBuf, oledLineBuf2, ntpBuf, "");
 
   } else if (runDiagNext) {
+    char modeFreqBuf[32];
+    const char* modeStr = (s_acqMode == ACQ_MODE_USER) ? "User" : "Auto";
+    snprintf(modeFreqBuf, sizeof(modeFreqBuf), "Mode:%s Acq:%lumin",
+             modeStr, (unsigned long)getAcqIntervalMinutes());
     char lastBuf[32];
     if (s_lastSeq > 0) {
       snprintf(lastBuf, sizeof(lastBuf), "SEQ:%lu %s",
@@ -674,16 +792,20 @@ static void refreshIdleOled() {
       snprintf(lastBuf, sizeof(lastBuf), "No TX yet");
     }
     char slotBuf[32];
-    snprintf(slotBuf, sizeof(slotBuf), "Slot:%d  Cyc:%lus",
-             NODE_SLOT, (unsigned long)((TDMA_SLOT_MS * TDMA_NUM_SLOTS) / 1000));
-    oledShowLines("DIAGNOSTICS MODE", "Diag queued", lastBuf, slotBuf, ntpBuf);
+    snprintf(slotBuf, sizeof(slotBuf), "Slot:%d Cyc:%lus %s",
+             NODE_SLOT, (unsigned long)((TDMA_SLOT_MS * TDMA_NUM_SLOTS) / 1000), ntpBuf);
+    oledShowLines("DIAGNOSTICS MODE", modeFreqBuf, "Diag queued", lastBuf, slotBuf);
 
   } else {
-    // Monitoring idle screen — shows last TX result prominently
+    // Monitoring idle screen — mode, frequency, last TX result
+    char modeFreqBuf[32];
+    const char* modeStr = (s_acqMode == ACQ_MODE_USER) ? "User" : "Auto";
+    snprintf(modeFreqBuf, sizeof(modeFreqBuf), "Mode:%s Acq:%lumin",
+             modeStr, (unsigned long)getAcqIntervalMinutes());
+
     char seqBuf[32];
     char rssiBuf[32];
     char slotBuf[32];
-
     if (s_lastSeq > 0) {
       snprintf(seqBuf,  sizeof(seqBuf),  "SEQ:%-5lu %s",
                (unsigned long)s_lastSeq,
@@ -694,10 +816,10 @@ static void refreshIdleOled() {
       snprintf(seqBuf,  sizeof(seqBuf),  "Waiting for slot...");
       snprintf(rssiBuf, sizeof(rssiBuf), "");
     }
-    snprintf(slotBuf, sizeof(slotBuf), "Slot:%d  Cyc:%lus",
-             NODE_SLOT, (unsigned long)((TDMA_SLOT_MS * TDMA_NUM_SLOTS) / 1000));
+    snprintf(slotBuf, sizeof(slotBuf), "Slot:%d Cyc:%lus %s",
+             NODE_SLOT, (unsigned long)((TDMA_SLOT_MS * TDMA_NUM_SLOTS) / 1000), ntpBuf);
 
-    oledShowLines("MONITORING MODE", seqBuf, rssiBuf, slotBuf, ntpBuf);
+    oledShowLines("MONITORING MODE", modeFreqBuf, seqBuf, rssiBuf, slotBuf);
   }
 }
 
@@ -869,6 +991,11 @@ void setup() {
   Serial.printf("[DS18B20] Devices found: %d\n", ds18b20.getDeviceCount());
   Serial.println("[Turbidity] SEN0189 init on GPIO34 (10k:10k divider)");
 
+  // Initialize adaptive acquisition (mode, interval, initial buffer)
+  updateAcquisitionInterval();
+  acquireAndBuffer();
+  s_lastAcqMs = millis();
+
   oledShowLines("MONITORING MODE", "Sender " NODE_ID,
                 s_timeSynced ? "NTP: synced" : "NTP: unsynced",
                 "TDMA slot " STRINGIFY(NODE_SLOT), "");
@@ -888,19 +1015,24 @@ void loop() {
     syncNTP();
   }
 
-  // Determine if we should transmit this iteration.
-  // Priority: triggerReadingNow (remote command) > test mode interval > TDMA slot.
-  // In test mode the TDMA slot constraint is lifted so the dashboard gets rapid readings.
   bool inTest = testModeActive();
+
+  // Adaptive acquisition: run on timer when NOT in test mode
+  if (!inTest) {
+    if (now - s_lastAcqMs >= s_acqIntervalMs) {
+      updateAcquisitionInterval();
+      acquireAndBuffer();
+      s_lastAcqMs = now;
+    }
+  }
+
   bool shouldTx = false;
 
   if (triggerReadingNow) {
     shouldTx = true;
   } else if (inTest) {
-    // Test mode: use its own interval, ignore TDMA
     shouldTx = (now - lastSendTime >= s_testIntervalMs);
   } else if (s_timeSynced) {
-    // Normal TDMA operation
     shouldTx = tdmaShouldTx();
   } else {
     // NTP not yet synced: fall back to simple interval so node isn't silent forever
@@ -908,22 +1040,40 @@ void loop() {
   }
 
   if (shouldTx) {
+    bool needFreshReading = triggerReadingNow || inTest;
     lastSendTime      = now;
     triggerReadingNow = false;
-    // Record the absolute slot counter so we don't re-transmit this slot occurrence
     if (!inTest && s_timeSynced) s_lastTxSlot = tdmaAbsoluteSlot();
-
-    // Re-check after potential expiry inside testModeActive() above
     inTest = testModeActive();
 
     float do_val, turbidity, ph, flow, temp;
-    readSensors(do_val, turbidity, ph, flow, temp);
+    uint64_t t_node;
+    if (needFreshReading) {
+      readSensors(do_val, turbidity, ph, flow, temp);
+      t_node = epochMillis();
+      s_acqBuffer.do_val = do_val;
+      s_acqBuffer.turbidity = turbidity;
+      s_acqBuffer.ph = ph;
+      s_acqBuffer.flow = flow;
+      s_acqBuffer.temp = temp;
+      s_acqBuffer.t_node = t_node;
+      s_acqBuffer.valid = true;
+    } else {
+      if (!s_acqBuffer.valid) {
+        updateAcquisitionInterval();
+        acquireAndBuffer();
+        s_lastAcqMs = now;
+      }
+      do_val    = s_acqBuffer.do_val;
+      turbidity = s_acqBuffer.turbidity;
+      ph        = s_acqBuffer.ph;
+      flow      = s_acqBuffer.flow;
+      temp      = s_acqBuffer.temp;
+      t_node    = s_acqBuffer.t_node;
+    }
+
     float battery_voltage = readBatteryVoltage();
-
     seq_id++;
-
-    // Capture t_node immediately after reading - this is the ground-truth generation timestamp
-    uint64_t t_node = epochMillis();
 
     const char* diagResult = nullptr;
     if (runDiagNext) {

@@ -86,7 +86,7 @@ export default function Map() {
 
   const mapMarkers = allNodes.filter((n) => n.lat != null && n.lng != null && n.active !== false).map((n) => {
     const inactive = n.active === false;
-    const statusForNode = sensorTest.allResults[n.id]?.status ?? null;
+    const statusForNode = sensorTest.allResults[n.id]?.status ?? n.lastSensorTestStatus ?? null;
     const latest = readingsByNode[n.id];
     const batteryVoltage = latest?.battery_voltage ?? latest?.batteryVoltage ?? null;
     return {
@@ -131,8 +131,8 @@ export default function Map() {
                   const result = sensorTest.allResults[node.id];
                   const lastTested = result?.timestamp
                     ? new Date(result.timestamp).toLocaleString()
-                    : "—";
-                  const status = result?.status ?? null;
+                    : (node.lastSensorTestAt ? new Date(node.lastSensorTestAt).toLocaleString() : "—");
+                  const status = result?.status ?? node.lastSensorTestStatus ?? null;
                   const statusLabels = { success: "OK", warning: "Issue", error: "Fail", offline: "Offline" };
                   const statusLabel = statusLabels[status] ?? "—";
                   return (

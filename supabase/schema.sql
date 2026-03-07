@@ -112,9 +112,21 @@ CREATE TABLE IF NOT EXISTS nodes (
   lat double precision,
   lng double precision,
   last_maintenance timestamptz,
+  last_sensor_test_at timestamptz,
+  last_sensor_test_status text,
   created_at timestamptz DEFAULT now(),
   updated_at timestamptz DEFAULT now()
 );
+
+-- 6. Node last sensor tests (persisted per node_id; works for nodes table and derived nodes)
+CREATE TABLE IF NOT EXISTS node_last_sensor_tests (
+  node_id text PRIMARY KEY,
+  last_sensor_test_at timestamptz NOT NULL,
+  last_sensor_test_status text
+);
+ALTER TABLE node_last_sensor_tests ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Allow all on node_last_sensor_tests" ON node_last_sensor_tests;
+CREATE POLICY "Allow all on node_last_sensor_tests" ON node_last_sensor_tests FOR ALL USING (true) WITH CHECK (true);
 
 -- Seed default nodes (optional; run once)
 INSERT INTO nodes (id, name, location, status, lat, lng)

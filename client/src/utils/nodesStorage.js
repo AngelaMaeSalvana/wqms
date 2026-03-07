@@ -30,17 +30,25 @@ export async function loadNodes() {
     const { isSupabaseEnabled } = await import('../lib/supabaseClient');
     const { getNodesFromSupabase } = await import('../services/supabaseService');
     if (isSupabaseEnabled()) {
-      const fromDb = await getNodesFromSupabase();
-      const list = Array.isArray(fromDb) ? fromDb.map((r) => ({
-        id: r.id,
-        name: r.name,
-        location: r.location,
-        status: r.status ?? 'offline',
-        lat: r.lat,
-        lng: r.lng,
-        lastMaintenance: r.last_maintenance ?? r.lastMaintenance ?? null,
-        active: r.active !== false,
-      })) : [];
+      const [fromDb, lastTestsMap] = await Promise.all([
+        getNodesFromSupabase(),
+        (await import('../services/supabaseService')).getNodeLastSensorTestsMap(),
+      ]);
+      const list = Array.isArray(fromDb) ? fromDb.map((r) => {
+        const lt = lastTestsMap[r.id] || {};
+        return {
+          id: r.id,
+          name: r.name,
+          location: r.location,
+          status: r.status ?? 'offline',
+          lat: r.lat,
+          lng: r.lng,
+          lastMaintenance: r.last_maintenance ?? r.lastMaintenance ?? null,
+          lastSensorTestAt: lt.last_sensor_test_at ?? r.last_sensor_test_at ?? r.lastSensorTestAt ?? null,
+          lastSensorTestStatus: lt.last_sensor_test_status ?? r.last_sensor_test_status ?? r.lastSensorTestStatus ?? null,
+          active: r.active !== false,
+        };
+      }) : [];
       nodesCache = list;
       try {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(list));

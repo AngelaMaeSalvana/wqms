@@ -230,20 +230,20 @@ export async function upsertAlerts(alertsList) {
 
 export async function getNodesFromSupabase() {
   if (!isSupabaseEnabled()) return null;
-  // Select columns that exist in base schema (omit 'active' if migration 011 not run)
+  // Select columns that exist in base schema (omit 'active' if migration 011 not run, last_sensor_test_* if 016 not run)
   const { data, error } = await supabase
     .from('nodes')
-    .select('id, name, location, status, lat, lng, last_maintenance, active')
+    .select('id, name, location, status, lat, lng, last_maintenance, active, last_sensor_test_at, last_sensor_test_status')
     .order('id');
   if (error) {
-    // Retry without 'active' if column missing (migration 011)
-    if (/column.*active|does not exist/i.test(error.message)) {
+    // Retry without optional columns if missing (migrations 011, 016)
+    if (/column.*does not exist/i.test(error.message)) {
       const { data: fallback, error: err2 } = await supabase
         .from('nodes')
         .select('id, name, location, status, lat, lng, last_maintenance')
         .order('id');
       if (err2) throw new Error(err2.message);
-      const withDefault = (fallback || []).map((r) => ({ ...r, active: true }));
+      const withDefault = (fallback || []).map((r) => ({ ...r, active: true, last_sensor_test_at: null, last_sensor_test_status: null }));
       const filtered = withDefault.filter((r) => r.status !== 'removed');
       if (filtered.length > 0) return filtered;
       const derived = await getNodesDerivedFromReadings();
@@ -251,12 +251,58 @@ export async function getNodesFromSupabase() {
     }
     throw new Error(error.message);
   }
-  const filtered = (data || []).filter((r) => r.status !== 'removed');
+  const filtered = (data || []).map((r) => ({
+    ...r,
+    last_sensor_test_at: r.last_sensor_test_at ?? null,
+    last_sensor_test_status: r.last_sensor_test_status ?? null,
+  })).filter((r) => r.status !== 'removed');
   if (filtered.length === 0) {
     const derived = await getNodesDerivedFromReadings();
     if (derived.length > 0) return derived;
   }
   return filtered;
+}
+
+/**
+ * Update the last sensor test timestamp and status for a node.
+ * Uses node_last_sensor_tests table so it works for any node_id (including derived nodes).
+ */
+export async function updateNodeLastSensorTest(nodeId, { timestamp, status }) {
+  if (!isSupabaseEnabled()) return;
+  const row = {
+    node_id: nodeId,
+    last_sensor_test_at: timestamp || new Date().toISOString(),
+    last_sensor_test_status: status ?? null,
+  };
+  const { error } = await supabase
+    .from('node_last_sensor_tests')
+    .upsert(row, { onConflict: 'node_id' });
+  if (error) {
+    if (/relation.*does not exist|column.*does not exist/i.test(error.message)) return;
+    throw new Error(error.message);
+  }
+}
+
+/**
+ * Fetch last sensor test for all nodes. Returns { [nodeId]: { last_sensor_test_at, last_sensor_test_status } }
+ */
+export async function getNodeLastSensorTestsMap() {
+  if (!isSupabaseEnabled()) return {};
+  const { data, error } = await supabase
+    .from('node_last_sensor_tests')
+    .select('node_id, last_sensor_test_at, last_sensor_test_status');
+  if (error) {
+    if (/relation.*does not exist/i.test(error.message)) return {};
+    throw new Error(error.message);
+  }
+  const map = {};
+  (data || []).forEach((r) => {
+    map[r.node_id] = {
+      last_sensor_test_at: r.last_sensor_test_at ?? null,
+      last_sensor_test_status: r.last_sensor_test_status ?? null,
+    };
+  });
+  return map;
 }
 
 /**

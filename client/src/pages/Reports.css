@@ -269,6 +269,29 @@
     display: block;
     margin-bottom: 8px;
   }
+  /* Minimize filter bar on small screens */
+  .reports-filter-bar {
+    padding: 8px 12px;
+    gap: 8px 14px;
+    margin-bottom: 8px;
+  }
+  .reports-filter-bar__control {
+    gap: 3px;
+  }
+  .reports-filter-bar__label {
+    font-size: 0.6rem;
+  }
+  .reports-filter-bar__select,
+  .reports-filter-bar__date-btn {
+    padding: 5px 8px;
+    font-size: 0.85rem;
+  }
+  .reports-filter-bar__select {
+    min-width: 100px;
+  }
+  .reports-filter-bar__date-btn {
+    min-width: 140px;
+  }
 }
 
 @media (min-width: 1025px) and (min-height: 769px) {
@@ -1904,9 +1927,26 @@
   /* Compact shared filter bar on mobile */
   .reports-filter-bar,
   .reports-shared-filters {
-    padding: 10px 14px;
-    gap: 10px 16px;
-    margin-bottom: 10px;
+    padding: 6px 10px;
+    gap: 6px 12px;
+    margin-bottom: 8px;
+  }
+  .reports-filter-bar__control {
+    gap: 2px;
+  }
+  .reports-filter-bar__label {
+    font-size: 0.58rem;
+  }
+  .reports-filter-bar__select,
+  .reports-filter-bar__date-btn {
+    padding: 4px 8px;
+    font-size: 0.8rem;
+  }
+  .reports-filter-bar__select {
+    min-width: 90px;
+  }
+  .reports-filter-bar__date-btn {
+    min-width: 120px;
   }
   .reports-shared-filters__group {
     min-width: 0;
@@ -1932,6 +1972,22 @@
   .reports-wqi-breakdown-wrap > div:last-child {
     min-height: 50px;
     max-height: 55px;
+  }
+  .reports-filter-bar {
+    padding: 5px 8px;
+    gap: 5px 10px;
+    margin-bottom: 6px;
+  }
+  .reports-filter-bar__select,
+  .reports-filter-bar__date-btn {
+    padding: 4px 6px;
+    font-size: 0.78rem;
+  }
+  .reports-filter-bar__select {
+    min-width: 80px;
+  }
+  .reports-filter-bar__date-btn {
+    min-width: 110px;
   }
 
   .page-title {

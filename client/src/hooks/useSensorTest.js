@@ -1,5 +1,6 @@
 import { useState, useCallback } from "react";
 import api from "../services/api";
+import { updateNodeLastSensorTest, isSupabaseEnabled } from "../services/supabaseService";
 import { applyCalibration } from "../utils/calibration";
 import { getNH3FromReading, formatNH3 } from "../utils/nh3Calculator";
 
@@ -131,6 +132,9 @@ export function useSensorTest() {
       const result = buildSensorStatusFromReading(nodeId, calibrated);
       setResults(result);
       setAllResults((prev) => ({ ...prev, [nodeId]: result }));
+      if (isSupabaseEnabled()) {
+        updateNodeLastSensorTest(nodeId, { timestamp: result.timestamp, status: result.status }).catch(() => {});
+      }
     } catch (err) {
       const result = {
         nodeId,
@@ -149,6 +153,9 @@ export function useSensorTest() {
       };
       setResults(result);
       setAllResults((prev) => ({ ...prev, [nodeId]: result }));
+      if (isSupabaseEnabled()) {
+        updateNodeLastSensorTest(nodeId, { timestamp: result.timestamp, status: result.status }).catch(() => {});
+      }
     } finally {
       setIsTesting(false);
     }
