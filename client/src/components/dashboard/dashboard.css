@@ -392,21 +392,14 @@
 .today-card__param--do { border-left-color: #2ecc71; }
 
 .today-card__param-name {
-  font-size: 0.9rem;
+  font-size: 0.78rem;
   color: var(--text-muted);
 }
 
 .today-card__param-value {
-  font-size: 1rem;
+  font-size: 0.82rem;
   font-weight: 600;
   color: var(--text);
-}
-
-.today-card__param-unit {
-  font-size: 0.65rem;
-  font-weight: 500;
-  color: var(--text-muted);
-  margin-left: 2px;
 }
 
 /* Today card: low / avg / high stat blocks — horizontal so they fit without scroll */
@@ -449,23 +442,23 @@
 }
 
 .today-stat-block {
-  padding: 14px 16px;
+  padding: 10px 12px;
   border-radius: 12px;
   background: var(--panel-dark);
   border: 1px solid var(--border);
 }
 
 .today-stat-block__label {
-  font-size: 0.8rem;
+  font-size: 0.72rem;
   font-weight: 600;
   color: var(--text-muted);
-  margin-bottom: 8px;
+  margin-bottom: 6px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
 
 .today-stat-block__unit {
-  font-size: 0.72rem;
+  font-size: 0.65rem;
   font-weight: 500;
   text-transform: none;
   letter-spacing: 0;
@@ -481,25 +474,25 @@
 
 .today-stat-block__row {
   display: flex;
-  gap: 16px;
+  gap: 10px;
   flex-wrap: wrap;
 }
 
 .today-stat-block__item {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 1px;
 }
 
 .today-stat-block__key {
-  font-size: 0.7rem;
+  font-size: 0.6rem;
   color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
 
 .today-stat-block__val {
-  font-size: 0.9rem;
+  font-size: 0.78rem;
   font-weight: 700;
   color: var(--text);
 }
@@ -509,6 +502,85 @@
   font-weight: 500;
   color: var(--text-muted);
   margin-left: 1px;
+}
+
+.today-stat-block__row--single {
+  gap: 0;
+}
+
+.today-stat-block__val--last {
+  font-size: 0.85rem;
+}
+
+/* Today card pager — dot line indicator below content */
+.today-card--paged .card__body {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.today-card-dots {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 10px 0 6px;
+  flex-shrink: 0;
+}
+
+.today-card-dot {
+  width: 8px;
+  height: 8px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: var(--border, #444);
+  cursor: pointer;
+  transition: background 0.2s, transform 0.2s;
+}
+
+.today-card-dot:hover {
+  background: var(--text-muted, #888);
+}
+
+.today-card-dot--active {
+  background: var(--primary, #1b9c85);
+  transform: scale(1.2);
+}
+
+.today-card-dot--active:hover {
+  background: var(--primary, #1b9c85);
+}
+
+.today-card-pages {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  width: 100%;
+  display: flex;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-snap-type: x mandatory;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.today-card-pages::-webkit-scrollbar {
+  display: none;
+}
+
+.today-card-page {
+  flex: 0 0 100%;
+  min-width: 0;
+  width: 100%;
+  min-height: 120px;
+  scroll-snap-align: start;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.today-card-page .today-stats-grid {
+  padding-bottom: 4px;
 }
 
 /* Mini map — map fills card */
@@ -1343,14 +1415,28 @@
   margin-bottom: 0;
 }
 
-/* ── Live chart pager (AM/PM indicator) ─────────────────────── */
+/* ── Live chart pager (Full / Current Hour left, AM/PM right when Full) ─ */
 .live-chart-pager {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  justify-content: center;
-  gap: 10px;
+  justify-content: space-between;
+  gap: 8px 12px;
   padding: 4px 0 6px;
   flex-shrink: 0;
+}
+
+.live-chart-pager__main {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.live-chart-pager__sub {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-left: auto;
 }
 
 .live-chart-pager__btn {
@@ -1375,8 +1461,10 @@
 
 .live-chart-pager__dots {
   display: flex;
-  gap: 8px;
+  flex-wrap: wrap;
+  gap: 6px 8px;
   align-items: center;
+  justify-content: center;
 }
 
 .live-chart-pager__dot {
@@ -1403,6 +1491,11 @@
 
 .live-chart-pager__dot-label {
   pointer-events: none;
+}
+
+.live-chart-pager__dot--sub {
+  font-size: 0.65rem;
+  padding: 2px 8px;
 }
 
 /* ── Paged chart area ────────────────────────────────────────── */

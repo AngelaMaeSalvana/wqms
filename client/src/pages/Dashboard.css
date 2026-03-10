@@ -79,6 +79,16 @@
   color: var(--text-muted);
 }
 
+.dash__test-banner {
+  font-size: 0.7rem;
+  padding: 4px 8px;
+  margin-bottom: 6px;
+  background: var(--warn-bg, #fff8e6);
+  color: var(--warn-text, #b38600);
+  border-radius: 6px;
+  border: 1px dashed var(--warn-border, #e6c84a);
+}
+
 /* Grid fills remaining height; cells can scroll internally */
 .dash__grid {
   display: grid;

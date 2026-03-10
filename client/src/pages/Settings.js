@@ -867,9 +867,6 @@ export default function Settings() {
                   aria-label="Maintenance interval in days"
                 />
               </label>
-              <p className="settings-helper">
-                Current: alert fires after <strong>{maintenance.intervalDays} day{maintenance.intervalDays !== 1 ? "s" : ""}</strong> without maintenance.
-              </p>
             </div>
           </div>
         </section>
@@ -881,7 +878,6 @@ export default function Settings() {
           </div>
           <div className="card__body">
             <div className="settings-option-row">
-              <span className="settings-option-label">Appearance</span>
               <div className="settings-theme-buttons">
                 <button
                   type="button"

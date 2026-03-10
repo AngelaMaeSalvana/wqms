@@ -33,6 +33,66 @@ function getSeverityOrder(severity) {
   return 2;
 }
 
+/** Test alerts for verifying severity display. Enable via ?testAlerts=1 or localStorage wqms_test_alerts=1 */
+function getTestAlerts(selectedNodeId) {
+  const enabled =
+    typeof window !== "undefined" &&
+    (new URLSearchParams(window.location.search).get("testAlerts") === "1" ||
+      localStorage.getItem("wqms_test_alerts") === "1");
+  if (!enabled || !selectedNodeId) return [];
+  const now = Date.now();
+  return [
+    {
+      id: "test-alert-high",
+      nodeId: selectedNodeId,
+      nodeName: "Test Node",
+      type: "threshold",
+      title: "[TEST] High severity alert",
+      detail: "Simulated HIGH severity for visual verification.",
+      severity: "high",
+      parameter: "test",
+      timestamp: now,
+      createdAt: new Date(now).toISOString(),
+    },
+    {
+      id: "test-alert-medium",
+      nodeId: selectedNodeId,
+      nodeName: "Test Node",
+      type: "threshold",
+      title: "[TEST] Medium severity alert",
+      detail: "Simulated MEDIUM severity for visual verification.",
+      severity: "medium",
+      parameter: "test",
+      timestamp: now - 60000,
+      createdAt: new Date(now - 60000).toISOString(),
+    },
+    {
+      id: "test-alert-low",
+      nodeId: selectedNodeId,
+      nodeName: "Test Node",
+      type: "threshold",
+      title: "[TEST] Low severity alert",
+      detail: "Simulated LOW severity for visual verification.",
+      severity: "low",
+      parameter: "test",
+      timestamp: now - 120000,
+      createdAt: new Date(now - 120000).toISOString(),
+    },
+    {
+      id: "test-alert-info",
+      nodeId: selectedNodeId,
+      nodeName: "Test Node",
+      type: "threshold",
+      title: "[TEST] Info severity alert",
+      detail: "Simulated INFO severity for visual verification.",
+      severity: "info",
+      parameter: "test",
+      timestamp: now - 180000,
+      createdAt: new Date(now - 180000).toISOString(),
+    },
+  ];
+}
+
 function formatDateShort(d) {
   if (!d) return "—";
   return new Date(d).toLocaleDateString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
@@ -237,13 +297,19 @@ export default function Dashboard() {
   const dashboardAlerts = useMemo(() => {
     const nodeId = selectedNodeId || null;
     const today = new Date().toDateString();
-    return alerts.filter((a) => {
+    const filtered = alerts.filter((a) => {
       const matchesNode = (a.nodeId || a.node_id) === nodeId;
       const ts = a.timestamp ?? a.createdAt;
       const alertDate = ts != null ? new Date(ts).toDateString() : today;
       const matchesToday = alertDate === today;
       return matchesNode && matchesToday;
     });
+    const testAlerts = getTestAlerts(nodeId);
+    if (testAlerts.length === 0) return filtered;
+    const combined = [...filtered, ...testAlerts];
+    return combined.sort(
+      (a, b) => getSeverityOrder(a.severity) - getSeverityOrder(b.severity) || (b.timestamp || 0) - (a.timestamp || 0)
+    );
   }, [alerts, selectedNodeId]);
 
   const selectedNode = useMemo(
@@ -415,6 +481,7 @@ export default function Dashboard() {
         <section className="dash__cell dash__cell--today">
           <TodayCard
             todayStats={todayStats}
+            latestReading={readingsByNode[selectedNode?.id]}
             selectedNode={selectedNode}
             readingsLoaded={readingsLoaded}
             variant={isMobile ? "tabs" : "grid"}
@@ -437,6 +504,11 @@ export default function Dashboard() {
           />
         </section>
         <section className="dash__cell dash__cell--alerts">
+          {getTestAlerts(selectedNodeId).length > 0 && (
+            <div className="dash__test-banner" role="status">
+              Test alerts enabled — disable with ?testAlerts=0 or clear wqms_test_alerts
+            </div>
+          )}
           <AlertsSummaryCard
             alerts={dashboardAlerts}
             isLoadingAlerts={isLoadingAlerts}

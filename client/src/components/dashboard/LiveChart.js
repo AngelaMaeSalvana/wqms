@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useEffect, useCallback, useState } from "react";
+import React, { useMemo, useState } from "react";
 import "../../utils/chartConfig";
 import { Line } from "react-chartjs-2";
 import { startOfDay, setHours, setMinutes } from "date-fns";
@@ -16,35 +16,9 @@ const DATASET_META = [
 const MINUTE_INTERVAL = 5;
 const MINUTE_MS = 60 * 1000;
 
-function buildHalfTimeData(todayData, isAM) {
+function buildTimeDataForRange(todayData, rangeStart, rangeEnd) {
   const timestamps = todayData?.timestamps ?? [];
   const srcDatasets = todayData?.datasets ?? [];
-  if (timestamps.length === 0 || srcDatasets.length === 0) {
-    const today = startOfDay(new Date());
-    const startHour = isAM ? 0 : 12;
-    const rangeStart = setHours(setMinutes(today, 0), startHour).getTime();
-    const rangeEnd = rangeStart + 12 * 60 * MINUTE_MS - 1;
-    return {
-      min: rangeStart,
-      max: rangeEnd,
-      datasets: DATASET_META.map((meta) => ({
-        label: meta.label,
-        data: [],
-        borderColor: meta.borderColor,
-        backgroundColor: meta.bg,
-        fill: true,
-        tension: 0.3,
-        spanGaps: false,
-        pointRadius: 0,
-        pointHoverRadius: 5,
-      })),
-    };
-  }
-
-  const startHour = isAM ? 0 : 12;
-  const today = startOfDay(new Date(timestamps[0]));
-  const rangeStart = setHours(setMinutes(today, 0), startHour).getTime();
-  const rangeEnd = rangeStart + 12 * 60 * MINUTE_MS - 1;
 
   const datasets = DATASET_META.map((meta, di) => {
     const srcData = srcDatasets[di]?.data ?? [];
@@ -59,7 +33,6 @@ function buildHalfTimeData(todayData, isAM) {
       }
     });
     points.sort((a, b) => a.x - b.x);
-
     return {
       label: meta.label,
       data: points,
@@ -74,6 +47,21 @@ function buildHalfTimeData(todayData, isAM) {
   });
 
   return { min: rangeStart, max: rangeEnd, datasets };
+}
+
+function buildHalfTimeData(todayData, isAM) {
+  const today = startOfDay(new Date());
+  const startHour = isAM ? 0 : 12;
+  const rangeStart = setHours(setMinutes(today, 0), startHour).getTime();
+  const rangeEnd = rangeStart + 12 * 60 * MINUTE_MS - 1;
+  return buildTimeDataForRange(todayData, rangeStart, rangeEnd);
+}
+
+function buildCurrentHourData(todayData) {
+  const now = new Date();
+  const rangeStart = setMinutes(setHours(startOfDay(now), now.getHours()), 0).getTime();
+  const rangeEnd = rangeStart + 60 * MINUTE_MS - 1;
+  return buildTimeDataForRange(todayData, rangeStart, rangeEnd);
 }
 
 // Draws mini vertical lines at 5-minute intervals (indication of minutes)
@@ -110,7 +98,7 @@ function makeMinuteLinesPlugin() {
 }
 
 // Draws a solid thin blue vertical line at the current time
-function makeNowPlugin(isAM) {
+function makeNowPlugin(viewMode) {
   return {
     id: "nowLine",
     afterDraw(chart) {
@@ -120,8 +108,11 @@ function makeNowPlugin(isAM) {
 
       const now = new Date();
       const hour = now.getHours();
-      const inThisHalf = isAM ? hour < 12 : hour >= 12;
-      if (!inThisHalf) return;
+      const inRange =
+        viewMode === "hour" ? true :
+        viewMode === "am" ? hour < 12 :
+        viewMode === "pm" ? hour >= 12 : false;
+      if (!inRange) return;
 
       const nowMs = now.getTime();
       if (nowMs < xScale.min || nowMs > xScale.max) return;
@@ -145,22 +136,49 @@ function makeNowPlugin(isAM) {
   };
 }
 
-function getChartOptions(halfData) {
-  const isAM = halfData?.min != null && new Date(halfData.min).getHours() === 0;
+function getChartOptions(chartData) {
+  const rangeHours = chartData?.min != null && chartData?.max != null
+    ? (chartData.max - chartData.min) / (60 * MINUTE_MS) : 12;
+  const isShortRange = rangeHours <= 1.1;
+
   return {
     responsive: true,
     maintainAspectRatio: false,
-    animation: false,
     layout: { padding: { top: 14, right: 8, bottom: 4, left: 2 } },
     parsing: false,
     plugins: { legend: { display: false }, tooltip: { enabled: true } },
+    animation: {
+      duration: 600,
+    },
+    animations: {
+      tension: {
+        duration: 500,
+        easing: "easeOutQuart",
+      },
+      y: {
+        type: "number",
+        easing: "easeOutQuart",
+        duration: 500,
+      },
+      x: {
+        type: "number",
+        easing: "easeOutQuart",
+        duration: 500,
+      },
+      pointRadius: {
+        type: "number",
+        easing: "easeOutBack",
+        duration: 400,
+        from: 0,
+      },
+    },
     scales: {
       x: {
         type: "time",
-        min: halfData?.min,
-        max: halfData?.max,
+        min: chartData?.min,
+        max: chartData?.max,
         time: {
-          unit: "hour",
+          unit: isShortRange ? "minute" : "hour",
           minUnit: "minute",
           displayFormats: {
             minute: "h:mm a",
@@ -180,15 +198,7 @@ function getChartOptions(halfData) {
           maxRotation: 0,
           font: { size: 9 },
           padding: 2,
-          maxTicksLimit: 13,
-          callback: (value) => {
-            const d = new Date(value);
-            if (d.getMinutes() !== 0) return "";
-            const h = d.getHours();
-            if (h === 0) return "12am";
-            if (h === 12) return "12pm";
-            return h < 12 ? `${h}am` : `${h - 12}pm`;
-          },
+          maxTicksLimit: isShortRange ? 25 : 13,
         },
       },
       y: {
@@ -204,45 +214,23 @@ const minuteLinesPlugin = makeMinuteLinesPlugin();
 export function LiveChart({ todayData }) {
   const amData = useMemo(() => buildHalfTimeData(todayData, true), [todayData]);
   const pmData = useMemo(() => buildHalfTimeData(todayData, false), [todayData]);
+  const hourData = useMemo(() => buildCurrentHourData(todayData), [todayData]);
 
   const legendItems = useMemo(
     () => DATASET_META.map((m) => ({ label: m.label, color: m.borderColor })),
     []
   );
 
-  const currentHour = new Date().getHours();
-  const [activePage, setActivePage] = useState(currentHour >= 12 ? 1 : 0);
-  const nowPluginAm = useMemo(() => makeNowPlugin(true), []);
-  const nowPluginPm = useMemo(() => makeNowPlugin(false), []);
+  const [viewMode, setViewMode] = useState("full");
+  const [fullHalf, setFullHalf] = useState(new Date().getHours() >= 12 ? 1 : 0);
 
-  const chartOptionsAm = useMemo(() => getChartOptions(amData), [amData]);
-  const chartOptionsPm = useMemo(() => getChartOptions(pmData), [pmData]);
+  const chartData = viewMode === "full" ? (fullHalf === 0 ? amData : pmData) : hourData;
+  const nowPlugin = useMemo(
+    () => makeNowPlugin(viewMode === "full" ? (fullHalf === 0 ? "am" : "pm") : "hour"),
+    [viewMode, fullHalf]
+  );
 
-  const scrollRef = useRef(null);
-  const isMountedRef = useRef(false);
-
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    const doScroll = (behavior) => {
-      const w = el.offsetWidth;
-      if (w > 0) el.scrollTo({ left: activePage * w, behavior });
-    };
-    if (!isMountedRef.current) {
-      isMountedRef.current = true;
-      requestAnimationFrame(() => doScroll("instant"));
-    } else {
-      doScroll("smooth");
-    }
-  }, [activePage]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const handleScroll = useCallback(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    setActivePage(Math.round(el.scrollLeft / el.offsetWidth));
-  }, []);
-
-  const goTo = useCallback((page) => setActivePage(page), []);
+  const chartOptions = useMemo(() => getChartOptions(chartData), [chartData]);
 
   const plugins = [minuteLinesPlugin];
 
@@ -264,43 +252,36 @@ export function LiveChart({ todayData }) {
 
       <div className="card__body card__body--fill live-chart-body">
         <div className="live-chart-pager">
-          <button
-            className="live-chart-pager__btn"
-            onClick={() => goTo(0)}
-            aria-label="Show AM"
-            disabled={activePage === 0}
-          >‹</button>
-          <div className="live-chart-pager__dots">
+          <div className="live-chart-pager__main">
             <button
-              className={`live-chart-pager__dot${activePage === 0 ? " live-chart-pager__dot--active" : ""}`}
-              onClick={() => goTo(0)}
-            ><span className="live-chart-pager__dot-label">AM</span></button>
+              className={`live-chart-pager__dot${viewMode === "full" ? " live-chart-pager__dot--active" : ""}`}
+              onClick={() => setViewMode("full")}
+            ><span className="live-chart-pager__dot-label">Full</span></button>
             <button
-              className={`live-chart-pager__dot${activePage === 1 ? " live-chart-pager__dot--active" : ""}`}
-              onClick={() => goTo(1)}
-            ><span className="live-chart-pager__dot-label">PM</span></button>
+              className={`live-chart-pager__dot${viewMode === "hour" ? " live-chart-pager__dot--active" : ""}`}
+              onClick={() => setViewMode("hour")}
+            ><span className="live-chart-pager__dot-label">Current Hour</span></button>
           </div>
-          <button
-            className="live-chart-pager__btn"
-            onClick={() => goTo(1)}
-            aria-label="Show PM"
-            disabled={activePage === 1}
-          >›</button>
+          {viewMode === "full" && (
+            <div className="live-chart-pager__sub">
+              <button
+                className={`live-chart-pager__dot live-chart-pager__dot--sub${fullHalf === 0 ? " live-chart-pager__dot--active" : ""}`}
+                onClick={() => setFullHalf(0)}
+              ><span className="live-chart-pager__dot-label">AM</span></button>
+              <button
+                className={`live-chart-pager__dot live-chart-pager__dot--sub${fullHalf === 1 ? " live-chart-pager__dot--active" : ""}`}
+                onClick={() => setFullHalf(1)}
+              ><span className="live-chart-pager__dot-label">PM</span></button>
+            </div>
+          )}
         </div>
 
-        <div className="live-chart-pages" ref={scrollRef} onScroll={handleScroll}>
+        <div className="live-chart-pages">
           <div className="live-chart-page">
             <Line
-              data={{ datasets: amData.datasets }}
-              options={chartOptionsAm}
-              plugins={[...plugins, nowPluginAm]}
-            />
-          </div>
-          <div className="live-chart-page">
-            <Line
-              data={{ datasets: pmData.datasets }}
-              options={chartOptionsPm}
-              plugins={[...plugins, nowPluginPm]}
+              data={{ datasets: chartData.datasets }}
+              options={chartOptions}
+              plugins={[...plugins, nowPlugin]}
             />
           </div>
         </div>
