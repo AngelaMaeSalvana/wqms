@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo, memo } from "react";
+import { useTheme } from "../contexts/ThemeContext";
 import { createPortal } from "react-dom";
 import "../utils/chartConfig";
 import { Line, Bar, Doughnut } from "react-chartjs-2";
@@ -441,9 +442,16 @@ const NodeComparisonChart = memo(function NodeComparisonChart({ summaries, param
   return <Line data={{ labels, datasets }} options={options} />;
 });
 
+function getChartLegendColor(theme) {
+  const isLight = theme === "light" || (theme === "system" && typeof window !== "undefined" && !window.matchMedia("(prefers-color-scheme: dark)").matches);
+  return isLight ? "#1d1d1f" : "rgba(255,255,255,0.9)";
+}
+
 const WqiBreakdownChart = memo(function WqiBreakdownChart({ summaries }) {
+  const { theme } = useTheme();
   const chartData = useMemo(() => buildWqiBreakdownData(summaries), [summaries]);
   const total = chartData.datasets[0]?.data?.reduce((a, b) => a + b, 0) ?? 0;
+  const legendColor = useMemo(() => getChartLegendColor(theme), [theme]);
   const options = useMemo(() => ({
     responsive: true,
     maintainAspectRatio: false,
@@ -452,6 +460,7 @@ const WqiBreakdownChart = memo(function WqiBreakdownChart({ summaries }) {
         display: true,
         position: "right",
         labels: {
+          color: legendColor,
           usePointStyle: true,
           pointStyle: "circle",
           padding: 12,
@@ -459,16 +468,13 @@ const WqiBreakdownChart = memo(function WqiBreakdownChart({ summaries }) {
             const data = chart.data;
             const ds = data.datasets?.[0];
             if (!ds) return [];
-            return (data.labels ?? []).map((label, i) => {
-              const value = ds.data[i] ?? 0;
-              const pct = total > 0 ? Math.round((value / total) * 100) : 0;
-              return {
-                text: `${label}: ${value} day${value !== 1 ? "s" : ""} (${pct}%)`,
-                fillStyle: ds.backgroundColor?.[i] ?? "#888",
-                hidden: false,
-                index: i,
-              };
-            });
+            return (data.labels ?? []).map((label, i) => ({
+              text: label,
+              fillStyle: ds.backgroundColor?.[i] ?? "#888",
+              color: legendColor,
+              hidden: false,
+              index: i,
+            }));
           },
         },
       },
@@ -481,12 +487,13 @@ const WqiBreakdownChart = memo(function WqiBreakdownChart({ summaries }) {
         },
       },
     },
-  }), [total]);
+  }), [total, legendColor]);
   if (total === 0) return <div className="reports-chart-placeholder">No WQI data for selected period</div>;
   return (
     <div className="reports-wqi-breakdown-wrap">
-      <p className="reports-wqi-breakdown-desc">Days in each water quality class for the selected period</p>
-      <Doughnut data={chartData} options={options} />
+      <div className="reports-wqi-breakdown-chart">
+        <Doughnut data={chartData} options={options} />
+      </div>
     </div>
   );
 });

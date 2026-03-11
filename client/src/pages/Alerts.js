@@ -550,11 +550,15 @@ export default function Alerts() {
                 {filteredAlerts.map((a) => {
                   const alertId = a.id || a.timestamp;
                   const isUnread = !readIds.has(alertId);
+                  // Maintenance due → blue "Due"; Node offline → magenta "URGENT"; params use severity
+                  const alertType = a.type || "";
+                  const alertClass = alertType === "maintenance" ? "maintenance" : alertType === "node" ? "urgent" : (a.severity || "info").toLowerCase();
+                  const badgeLabel = alertType === "maintenance" ? "Due" : alertType === "node" ? "URGENT" : (a.severity || "info");
                   return (
                     <li key={a.id} className="alerts-tab-list__item alerts-notifications-item">
                       <button
                         type="button"
-                        className={`alert alert--${(a.severity || "info").toLowerCase()} alert--clickable alerts-tab-alert alerts-notification-item`}
+                        className={`alert alert--${alertClass} alert--clickable alerts-tab-alert alerts-notification-item`}
                         onClick={() => {
                           markAsRead(alertId);
                           setSelectedAlert(a);
@@ -565,8 +569,8 @@ export default function Alerts() {
                         <span className="alerts-notification-content">
                           <span className="alerts-notification-row">
                             <span className="alert-title">{a.title || "Alert"}</span>
-                            <span className={`alerts-severity-badge alerts-severity-badge--${(a.severity || "info").toLowerCase()}`}>
-                              {a.severity || "info"}
+                            <span className={`alerts-severity-badge alerts-severity-badge--${alertClass}`}>
+                              {badgeLabel}
                             </span>
                           </span>
                           {a.detail && <span className="alert-detail">{a.detail}</span>}

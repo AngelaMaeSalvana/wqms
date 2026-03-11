@@ -20,9 +20,23 @@ function getRelativeTime(date) {
   return d.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
 }
 
-/** Map stored severity (high/medium/low/info) to display tier: critical, warning, info. */
-function getDisplaySeverity(severity) {
-  const s = (severity || "info").toLowerCase();
+/** Filter tier for pills: critical, warning, info. Node→critical, maintenance→info. */
+function getFilterTier(alert) {
+  const t = alert?.type;
+  if (t === "node") return "critical";
+  if (t === "maintenance") return "info";
+  const s = (alert?.severity || "info").toLowerCase();
+  if (s === "high") return "critical";
+  if (s === "medium") return "warning";
+  return "info";
+}
+
+/** Display class for styling: maintenance (blue), urgent (magenta), or severity-based for params. */
+function getDisplayClass(alert) {
+  const t = alert?.type;
+  if (t === "maintenance") return "maintenance";
+  if (t === "node") return "urgent";
+  const s = (alert?.severity || "info").toLowerCase();
   if (s === "high") return "critical";
   if (s === "medium") return "warning";
   return "info";
@@ -47,7 +61,7 @@ export function AlertsSummaryCard({
   const severityCounts = useMemo(() => {
     const counts = { critical: 0, warning: 0, info: 0 };
     alerts.forEach((a) => {
-      const tier = getDisplaySeverity(a.severity);
+      const tier = getFilterTier(a);
       counts[tier]++;
     });
     return counts;
@@ -55,7 +69,7 @@ export function AlertsSummaryCard({
 
   const filteredAlerts = useMemo(() => {
     if (severityFilter === "all") return alerts;
-    return alerts.filter((a) => getDisplaySeverity(a.severity) === severityFilter);
+    return alerts.filter((a) => getFilterTier(a) === severityFilter);
   }, [alerts, severityFilter]);
 
   const list = filteredAlerts.slice(0, 5);
@@ -129,9 +143,9 @@ export function AlertsSummaryCard({
           <ul className="alerts-list alerts-notifications-list" aria-label="Recent alerts">
             {list.map((a) => {
               const alertId = a.id || a.timestamp;
-              const displaySeverity = getDisplaySeverity(a.severity);
+              const displayClass = getDisplayClass(a);
               return (
-                <li key={alertId} className={`alerts-compact-item alert--${displaySeverity}`}>
+                <li key={alertId} className={`alerts-compact-item alert--${displayClass}`}>
                   <span className="alerts-compact-left">
                     <span className="alerts-compact-title">{a.title || "Alert"}</span>
                     <span className="alerts-compact-time">{getRelativeTime(a.timestamp || a.createdAt)}</span>

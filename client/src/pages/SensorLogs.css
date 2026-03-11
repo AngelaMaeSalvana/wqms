@@ -389,10 +389,18 @@
   white-space: nowrap;
 }
 
+.sensor-logs-data-table thead {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
 .sensor-logs-data-table th {
   color: var(--text-muted);
   font-weight: 600;
   font-size: 0.75rem;
+  background: var(--panel, #1a1d21);
+  box-shadow: 0 1px 0 var(--border);
 }
 
 .sensor-logs-th-btn {

@@ -7,6 +7,8 @@ const SEVERITY_LABELS = {
   medium: "Check when you can",
   low: "Early warning",
   info: "Information",
+  maintenance: "Due",
+  urgent: "URGENT",
 };
 
 const TRIGGER_LABELS = {
@@ -41,8 +43,9 @@ export function AlertDetailModal({ alert: a, onClose }) {
   }, [onClose]);
 
   if (!a) return null;
-  const severity = (a.severity || "info").toLowerCase();
-  const severityLabel = SEVERITY_LABELS[severity] || a.severity || "Info";
+  const t = a.type;
+  const severity = t === "maintenance" ? "maintenance" : t === "node" ? "urgent" : (a.severity || "info").toLowerCase();
+  const severityLabel = SEVERITY_LABELS[severity] || SEVERITY_LABELS[a.severity] || a.severity || "Info";
   const dateStr = a.timestamp
     ? new Date(a.timestamp).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })
     : (a.createdAt ? new Date(a.createdAt).toLocaleString() : "—");

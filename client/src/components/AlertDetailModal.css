@@ -53,6 +53,16 @@
   color: var(--success, #44d37e);
 }
 
+.alert-detail-modal__severity--maintenance {
+  background: rgba(52, 152, 219, 0.2);
+  color: #3498DB;
+}
+
+.alert-detail-modal__severity--urgent {
+  background: rgba(233, 30, 99, 0.2);
+  color: #E91E63;
+}
+
 .alert-detail-modal__title {
   margin: 0;
   font-size: 1.35rem;
