@@ -13,7 +13,7 @@ export function useLatestReadingsByNode() {
     let cancelled = false;
     setLoading(true);
     api
-      .getReadings({ limit: 200 })
+      .getReadings({ monitoringOnly: true, limit: 200 })
       .then((rows) => {
         if (!cancelled && Array.isArray(rows)) setReadings(rows);
       })

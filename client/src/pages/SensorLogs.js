@@ -5,7 +5,7 @@ import { jsPDF } from "jspdf";
 import { autoTable } from "jspdf-autotable";
 import PageDateWithStatus from "../components/PageDateWithStatus";
 import { getNH3FromReading, formatNH3 } from "../utils/nh3Calculator";
-import BatteryIndicator from "../components/BatteryIndicator";
+import BatteryIndicator, { batteryPropsFromReading } from "../components/BatteryIndicator";
 import { calculateWQI } from "../utils/wqiCalculator";
 import { getNodes, loadNodes } from "../utils/nodesStorage";
 import api from "../services/api";
@@ -189,6 +189,7 @@ export default function SensorLogs() {
         flowRate: r.flow_rate ?? r.flowRate ?? null,
         wqi: wqi != null ? Math.round(wqi) : null,
         batteryVoltage: r.battery_voltage ?? r.batteryVoltage ?? null,
+        batteryPercentage: r.battery_percentage ?? r.batteryPercentage ?? null,
       };
     });
     let filtered = rows;
@@ -694,9 +695,9 @@ export default function SensorLogs() {
                       ? `${selectedRow.nodeId} — ${selectedRow.nodeName}`
                       : selectedRow.nodeId}
                   </span>
-                  {selectedRow.batteryVoltage != null && (
+                  {(selectedRow.batteryVoltage != null || selectedRow.batteryPercentage != null) && (
                     <span className="sl-detail-battery">
-                      <BatteryIndicator voltage={selectedRow.batteryVoltage} showPercentage size="small" />
+                      <BatteryIndicator {...batteryPropsFromReading(selectedRow)} showPercentage size="small" />
                     </span>
                   )}
                 </div>

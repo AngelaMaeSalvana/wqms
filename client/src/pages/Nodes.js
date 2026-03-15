@@ -8,7 +8,7 @@ import { getNodes, loadNodes, saveNodes } from "../utils/nodesStorage";
 import { sendEventNotification } from "../services/emailService";
 import { PageLoader } from "../components/LoadingSkeleton";
 import { NodeStatus } from "../components/dashboard/NodeStatus";
-import BatteryIndicator from "../components/BatteryIndicator";
+import BatteryIndicator, { batteryPropsFromReading } from "../components/BatteryIndicator";
 import { useNodeStatus } from "../hooks/useNodeStatus";
 import { useLatestReadingsByNode } from "../hooks/useLatestReadingsByNode";
 import "./Nodes.css";
@@ -531,10 +531,9 @@ export default function Nodes() {
                       </span>
                     </div>
                     {n.active !== false && (() => {
-                      const r = readingsByNode[n.id];
-                      const v = r?.battery_voltage ?? r?.batteryVoltage ?? null;
-                      return v != null ? (
-                        <BatteryIndicator voltage={v} showPercentage size="small" />
+                      const bp = batteryPropsFromReading(readingsByNode[n.id]);
+                      return (bp.voltage != null || bp.percentage != null) ? (
+                        <BatteryIndicator {...bp} showPercentage size="small" />
                       ) : null;
                     })()}
                     <NodeStatus status={n.active === false ? 'inactive' : (nodeStatuses[n.id] ?? 'offline')} />

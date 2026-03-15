@@ -280,9 +280,8 @@ void publishSensorData() {
   // Create JSON document
   StaticJsonDocument<512> doc;
   
-  // Add node information
+  // Add node information (location is in dashboard nodes table, keyed by node_id)
   doc["nodeId"] = NODE_ID;
-  doc["location"] = NODE_LOCATION;
   doc["seq"] = ++seqCounter;
   doc["tx_millis"] = millis();
   

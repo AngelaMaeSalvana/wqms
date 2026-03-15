@@ -212,13 +212,13 @@ async function handleMQTTMessage(topic, data, t_be_rx) {
 
     const row = {
       node_id: nodeId,
-      location: reading.location || 'Unknown',
       temperature: reading.temperature,
       turbidity: reading.turbidity,
       ph: reading.pH ?? reading.ph,
       dissolved_oxygen: reading.dissolvedOxygen ?? reading.do,
       flow_rate: reading.flowRate ?? reading.flow_rate ?? null,
       battery_voltage: reading.batteryVoltage ?? reading.battery_voltage ?? null,
+      battery_percentage: reading.batteryPercentage ?? reading.battery_percentage ?? null,
       seq,
       tx_millis: reading.tx_millis != null ? (typeof reading.tx_millis === 'number' ? reading.tx_millis : parseInt(reading.tx_millis, 10)) : null,
       rx_millis: reading.rx_millis != null ? (typeof reading.rx_millis === 'number' ? reading.rx_millis : parseInt(reading.rx_millis, 10)) : null,
@@ -283,12 +283,13 @@ app.get('/api/readings/latest', async (req, res) => {
 
 app.get('/api/readings', async (req, res) => {
   try {
-    const { startDate, endDate, nodeId, testRunId, test_run_id, limit = 100 } = req.query;
+    const { startDate, endDate, nodeId, testRunId, test_run_id, monitoringOnly, limit = 100 } = req.query;
     const rows = await db.getReadings({
       startDate,
       endDate,
       nodeId,
       testRunId: testRunId || test_run_id || null,
+      monitoringOnly: monitoringOnly === '1' || monitoringOnly === 'true',
       limit,
     });
     res.json(rows);
@@ -333,7 +334,6 @@ app.post('/api/readings', async (req, res) => {
     const reading = req.body;
     const row = {
       node_id: reading.nodeId || reading.node || '1',
-      location: reading.location || 'Unknown',
       temperature: reading.temperature,
       turbidity: reading.turbidity,
       ph: reading.pH ?? reading.ph,
@@ -367,6 +367,75 @@ app.post('/api/alerts', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+// ─── SAMPLE DATA (testing only – remove this block and delete sampleDataGenerator.js when sensors are ready) ───
+const ENABLE_SAMPLE_DATA = process.env.ENABLE_SAMPLE_DATA === '1' || process.env.ENABLE_SAMPLE_DATA === 'true';
+let sampleDataIntervalId = null;
+
+if (ENABLE_SAMPLE_DATA) {
+  const sampleData = require('./sampleDataGenerator');
+
+  /** POST /api/sample-data/generate — insert one or more sample readings (body: count?, nodeIds?, startDate?, endDate?, intervalMinutes?) */
+  app.post('/api/sample-data/generate', async (req, res) => {
+    try {
+      const { count = 1, nodeIds, startDate, endDate, intervalMinutes } = req.body || {};
+      const n = Math.min(Math.max(1, parseInt(count, 10) || 1), 500);
+      const rows = sampleData.generateReadings(n, { nodeIds, startDate, endDate, intervalMinutes });
+      let inserted = 0;
+      for (const row of rows) {
+        await db.insertReading(row);
+        inserted++;
+      }
+      res.json({ success: true, inserted, message: `Inserted ${inserted} sample reading(s)` });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  /** POST /api/sample-data/start-interval — start auto-inserting sample data every N ms (body: intervalMs?) */
+  app.post('/api/sample-data/start-interval', (req, res) => {
+    if (sampleDataIntervalId) {
+      return res.json({ success: true, message: 'Sample data interval already running', intervalMs: req.body?.intervalMs });
+    }
+    const intervalMs = Math.max(2000, parseInt(req.body?.intervalMs, 10) || 5000);
+    sampleDataIntervalId = setInterval(async () => {
+      try {
+        const row = sampleData.generateOneReading();
+        await db.insertReading(row);
+        wsBroadcast('telemetry', { ...row, location: null });
+      } catch (e) {
+        console.error('[sample-data] interval insert failed:', e.message);
+      }
+    }, intervalMs);
+    console.log(`📊 Sample data interval started: every ${intervalMs}ms`);
+    res.json({ success: true, intervalMs, message: `Sample data will be inserted every ${intervalMs}ms` });
+  });
+
+  /** POST /api/sample-data/stop-interval — stop auto-insert */
+  app.post('/api/sample-data/stop-interval', (req, res) => {
+    if (sampleDataIntervalId) {
+      clearInterval(sampleDataIntervalId);
+      sampleDataIntervalId = null;
+      console.log('📊 Sample data interval stopped');
+    }
+    res.json({ success: true, message: 'Sample data interval stopped' });
+  });
+
+  const sampleIntervalEnv = process.env.SAMPLE_DATA_INTERVAL_MS;
+  if (sampleIntervalEnv && parseInt(sampleIntervalEnv, 10) > 0) {
+    const ms = Math.max(2000, parseInt(sampleIntervalEnv, 10));
+    sampleDataIntervalId = setInterval(async () => {
+      try {
+        const row = sampleData.generateOneReading();
+        await db.insertReading(row);
+        wsBroadcast('telemetry', { ...row, location: null });
+      } catch (e) {
+        console.error('[sample-data] interval insert failed:', e.message);
+      }
+    }, ms);
+    console.log(`📊 Sample data auto-interval started (ENABLE_SAMPLE_DATA): every ${ms}ms`);
+  }
+}
 
 // ─── Test Run endpoints ───────────────────────────────────────────────────────
 

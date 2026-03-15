@@ -2,7 +2,7 @@ import React, { useMemo, useState, useEffect, useCallback, useRef } from "react"
 import { createPortal } from "react-dom";
 import NodeSelector from "../components/dashboard/NodeSelector";
 import NodeStatus from "../components/dashboard/NodeStatus";
-import BatteryIndicator from "../components/BatteryIndicator";
+import BatteryIndicator, { batteryPropsFromReading } from "../components/BatteryIndicator";
 import TodayCard from "../components/dashboard/TodayCard";
 import LiveChart from "../components/dashboard/LiveChart";
 import WqiCard from "../components/dashboard/WqiCard";
@@ -20,6 +20,7 @@ import { useSensorTest } from "../hooks/useSensorTest";
 import { useNodeStatus } from "../hooks/useNodeStatus";
 import { useRealtimeReadings } from "../hooks/useRealtimeReadings";
 import { useAlertEmailNotifications } from "../hooks/useAlertEmailNotifications";
+import { supabase } from "../lib/supabaseClient";
 import { applyCalibrationToReadings } from "../utils/calibration";
 import { PageLoader } from "../components/LoadingSkeleton";
 import "../pages/Map.css";
@@ -174,6 +175,13 @@ export default function Dashboard() {
     },
   });
 
+  // Auto-refresh when Realtime is not available: poll every 60s so chart and WQI stay in sync with new data.
+  useEffect(() => {
+    if (supabase) return;
+    const interval = setInterval(() => setLastUpdated(new Date()), 60 * 1000);
+    return () => clearInterval(interval);
+  }, []);
+
   useEffect(() => {
     loadNodes()
       .then(() => {
@@ -201,7 +209,7 @@ export default function Dashboard() {
   useEffect(() => {
     setReadingsLoaded(false);
     const today = toDateStr(new Date());
-    api.getReadings({ startDate: today, endDate: today, limit: 200 })
+    api.getReadings({ startDate: today, endDate: today, monitoringOnly: true, limit: 200 })
       .then((rows) => {
         const list = applyCalibrationToReadings(Array.isArray(rows) ? rows : []);
         setTodayReadings(list);
@@ -466,10 +474,10 @@ export default function Dashboard() {
         <span className="dash__controls-divider" aria-hidden="true" />
         {selectedNode && (() => {
           const r = readingsByNode[selectedNode.id];
-          const v = r?.battery_voltage ?? r?.batteryVoltage ?? null;
-          return v != null ? (
+          const bp = batteryPropsFromReading(r);
+          return (bp.voltage != null || bp.percentage != null) ? (
             <>
-              <BatteryIndicator voltage={v} showPercentage size="medium" />
+              <BatteryIndicator {...bp} showPercentage size="medium" />
               <span className="dash__controls-divider" aria-hidden="true" />
             </>
           ) : null;

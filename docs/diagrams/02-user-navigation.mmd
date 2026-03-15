@@ -1,0 +1,30 @@
+flowchart LR
+    subgraph entry [Entry Point]
+        Root[Home] --> Dash[Dashboard]
+    end
+
+    subgraph main [Main Pages]
+        Dash
+        Rep[Reports]
+        Logs[Sensor Logs]
+        MapPage[Map]
+        NodePage[Nodes]
+        AlertPage[Alerts]
+        Set[Settings]
+    end
+
+    subgraph secondary [Secondary]
+        Inactive[Inactive Nodes]
+        Perf[Performance Test]
+    end
+
+    Dash --> Rep
+    Rep --> Logs
+    Logs --> MapPage
+    MapPage --> NodePage
+    NodePage --> AlertPage
+    AlertPage --> Set
+    NodePage --> Inactive
+    Logs --> Perf
+    Perf --> Logs
+    Inactive --> NodePage

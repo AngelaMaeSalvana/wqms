@@ -21,22 +21,23 @@ export async function getLatestReading(nodeId = null) {
   return data || {};
 }
 
-export async function getReadings({ startDate, endDate, nodeId, testRunId, limit = 100 }) {
+export async function getReadings({ startDate, endDate, nodeId, testRunId, monitoringOnly, limit = 100 }) {
   if (!isSupabaseEnabled()) return [];
   let q = supabase.from('sensor_readings').select('*');
   if (startDate) q = q.gte('timestamp', `${startDate}T00:00:00.000Z`);
   if (endDate) q = q.lte('timestamp', `${endDate}T23:59:59.999Z`);
   if (nodeId) q = q.eq('node_id', nodeId);
   if (testRunId) q = q.eq('test_run_id', testRunId);
+  else if (monitoringOnly) q = q.is('test_run_id', null);
   q = q.order('timestamp', { ascending: false }).limit(limit);
   const { data, error } = await q;
   if (error) throw new Error(error.message);
   return data || [];
 }
 
-/** Same table as getReadings; higher default limit for Reports. */
+/** Same table as getReadings; higher default limit. Monitoring only (no test_run_id). */
 export async function getSensorReadings({ startDate, endDate, nodeId, limit = 500 }) {
-  return getReadings({ startDate, endDate, nodeId, limit });
+  return getReadings({ startDate, endDate, nodeId, monitoringOnly: true, limit });
 }
 
 /**
@@ -111,7 +112,6 @@ export async function postReading(reading) {
   if (!isSupabaseEnabled()) throw new Error('Supabase not configured');
   const row = {
     node_id: reading.nodeId || reading.node || '1',
-    location: reading.location || 'Unknown',
     temperature: reading.temperature,
     turbidity: reading.turbidity,
     ph: reading.pH ?? reading.ph,
@@ -308,31 +308,33 @@ export async function getNodeLastSensorTestsMap() {
 /**
  * Returns synthetic node entries from distinct node_ids in sensor_readings.
  * Used when nodes table is empty but readings exist (e.g. bridge wrote data, nodes not yet added).
+ * Location comes from nodes table via node_id; if node is missing, uses node_id as name/location.
  */
 export async function getNodesDerivedFromReadings() {
   if (!isSupabaseEnabled()) return [];
-  const { data, error } = await supabase
+  const { data: readingsData, error } = await supabase
     .from('sensor_readings')
-    .select('node_id, location')
+    .select('node_id')
     .order('timestamp', { ascending: false })
     .limit(2000);
   if (error) return [];
   const seen = new Set();
-  const nodes = [];
-  (data || []).forEach((r) => {
+  const nodeIds = [];
+  (readingsData || []).forEach((r) => {
     const id = r.node_id || r.nodeId;
     if (!id || seen.has(id)) return;
     seen.add(id);
-    nodes.push({
-      id,
-      name: id,
-      location: r.location || id,
-      status: 'offline',
-      lat: null,
-      lng: null,
-      last_maintenance: null,
-      active: true,
-    });
+    nodeIds.push(id);
+  });
+  if (nodeIds.length === 0) return [];
+  const { data: nodesRows } = await supabase.from('nodes').select('id, name, location').in('id', nodeIds);
+  const nodesById = {};
+  (nodesRows || []).forEach((n) => { nodesById[n.id] = n; });
+  const nodes = nodeIds.map((id) => {
+    const n = nodesById[id];
+    return n
+      ? { id: n.id, name: n.name ?? n.id, location: n.location ?? n.id, status: 'offline', lat: null, lng: null, last_maintenance: null, active: true }
+      : { id, name: id, location: id, status: 'offline', lat: null, lng: null, last_maintenance: null, active: true };
   });
   return nodes.sort((a, b) => String(a.id).localeCompare(String(b.id)));
 }

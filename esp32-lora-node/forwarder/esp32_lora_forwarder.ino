@@ -14,10 +14,8 @@
  *   node_id, seq_id, t_node, all sensor values, and test_run_id (when present)
  *
  * TDMA awareness:
- *   The forwarder does not enforce slot timing — it receives any packet that arrives.
  *   It logs the TDMA slot of each received packet so you can verify nodes are
- *   transmitting in their correct slots via the serial monitor.
- *   TDMA constants must match sender_sensor_node.ino exactly.
+ *   transmitting in their correct slots. TDMA constants must match sender nodes.
  *
  * Requires: ArduinoJson, PubSubClient (Sketch -> Include Library -> Manage Libraries)
  */
@@ -32,8 +30,8 @@
 #include <time.h>
 
 // -------------------- Config (EDIT THESE before upload) --------------------
-#define WIFI_SSID          "GlobeAtHome_ea960_2.4"
-#define WIFI_PASSWORD      "yXf3bjYZ"
+#define WIFI_SSID          "GFiber_940ED_2.4"
+#define WIFI_PASSWORD      "Chikoy201***"
 #define MQTT_HOST          "c085e007016c498f841249078237ab48.s1.eu.hivemq.cloud"
 #define MQTT_PORT          8883
 #define MQTT_USER          "WaterQuality"
@@ -58,18 +56,18 @@
 
 // -------------------- Buffers --------------------
 #define RX_BUF_SIZE  256
+// Sensor JSON is 100+ bytes; shorter packets are noise or non-sensor (ignore to avoid "Bad/missing fields")
+#define MIN_SENSOR_JSON_LEN  20
 #define ACK_BUF_SIZE 140   // Must fit: ACK,<seq>,CMD:test:start:<iv>:<dur>:<run_id>
 #define TX_MQTT_BUF  768   // Extra headroom for test_run_id, rssi, snr fields
 #define CMD_BUF_SIZE 96    // Must fit: test:start:<interval_ms>:<duration_ms>:<test_run_id>
 #define MAX_NODES    16    // Support multiple nodes; increase if needed
 #define CMD_TX_BUF   128   // Must fit: CMD:test:start:<interval_ms>:<duration_ms>:<test_run_id>:<nodeId>
 
-// -------------------- TDMA (must match sender_sensor_node.ino) --------------------
-// The forwarder does not enforce slot timing; it logs which slot each packet arrived in.
-#define TDMA_NUM_SLOTS  2        // Total number of nodes sharing the channel
+// -------------------- TDMA (must match sender nodes) --------------------
+#define TDMA_NUM_SLOTS  8        // Total number of slots (max nodes)
 #define TDMA_SLOT_MS    6000UL   // Width of each slot in ms
 
-// Returns the TDMA slot index for a given epoch-ms timestamp.
 static uint8_t tdmaSlotOf(uint64_t epochMs) {
   if (epochMs == 0) return 0xFF;  // 0xFF = unknown (NTP not synced)
   return (uint8_t)((epochMs / TDMA_SLOT_MS) % TDMA_NUM_SLOTS);
@@ -98,7 +96,9 @@ static volatile bool s_broadcastCmdTxOnce = false; // triggers first proactive L
 // until every known node has acknowledged it (via an incoming packet with test_run_id set).
 // This covers the case where the one-shot broadcast lands outside the node's 400ms listen window.
 #define BROADCAST_RETRY_INTERVAL_MS 1500UL
+#define BROADCAST_STOP_TIMEOUT_MS   30000UL  // test:stop is never "confirmed" by nodes; stop retrying after 30s
 static uint32_t s_broadcastLastRetryMs = 0;
+static uint32_t s_broadcastSetMs = 0;        // when current broadcast was queued (for test:stop timeout)
 
 // Nodes observed from incoming LoRa telemetry (used to target broadcast commands proactively)
 static char    s_knownNodes[MAX_NODES][16];
@@ -120,6 +120,7 @@ static void setBroadcastCmd(const char *cmd) {
   strncpy(s_broadcastCmd, cmd, CMD_BUF_SIZE - 1);
   s_broadcastCmd[CMD_BUF_SIZE - 1] = '\0';
   s_broadcastDeliveredCount = 0;
+  s_broadcastSetMs = millis();
   for (int i = 0; i < MAX_NODES; i++) s_broadcastDelivered[i][0] = '\0';
   s_broadcastCmdTxOnce = true;
   s_broadcastLastRetryMs = 0;  // fire first retry immediately
@@ -771,14 +772,19 @@ void loop() {
 
   // Proactive broadcast for CMD:test:* — fires immediately on receipt, then retries every
   // BROADCAST_RETRY_INTERVAL_MS until every known node has confirmed (sent a packet with
-  // test_run_id set). This ensures nodes that miss the first broadcast still get the command
-  // quickly rather than waiting up to 48s for their next TDMA slot ACK.
-  if (s_broadcastCmd[0] && strncmp(s_broadcastCmd, "test:", 5) == 0 && !broadcastFullyDelivered()) {
+  // test_run_id set), or for test:stop until BROADCAST_STOP_TIMEOUT_MS (nodes don't confirm stop).
+  if (s_broadcastCmd[0] && strncmp(s_broadcastCmd, "test:", 5) == 0) {
     uint32_t nowMs = millis();
-    if (s_broadcastCmdTxOnce || (nowMs - s_broadcastLastRetryMs >= BROADCAST_RETRY_INTERVAL_MS)) {
-      sendProactiveBroadcastCmd(s_broadcastCmd);
-      s_broadcastCmdTxOnce = false;
-      s_broadcastLastRetryMs = nowMs;
+    bool isStop = (strncmp(s_broadcastCmd, "test:stop:", 10) == 0);
+    if (isStop && (nowMs - s_broadcastSetMs >= BROADCAST_STOP_TIMEOUT_MS)) {
+      s_broadcastCmd[0] = '\0';
+      Serial.println("[CMD] test:stop broadcast timeout - cleared");
+    } else if (!broadcastFullyDelivered()) {
+      if (s_broadcastCmdTxOnce || (nowMs - s_broadcastLastRetryMs >= BROADCAST_RETRY_INTERVAL_MS)) {
+        sendProactiveBroadcastCmd(s_broadcastCmd);
+        s_broadcastCmdTxOnce = false;
+        s_broadcastLastRetryMs = nowMs;
+      }
     }
   }
 
@@ -797,6 +803,13 @@ void loop() {
                     rxBuf, lastRssi, lastSnr, rxSize, (unsigned long long)t_fwd_rx, rxSlot);
     }
 
+    // Ignore very short packets (noise, fragments, or non-sensor); sensor JSON is 100+ bytes
+    if (rxSize < MIN_SENSOR_JSON_LEN) {
+      Serial.printf("[FWD] Ignore - packet too short (len=%u), likely noise or non-sensor\n", rxSize);
+      oledHoldUpdate("LoRa RX (ignored)", String("RSSI: ") + lastRssi,
+                     String("len: ") + rxSize, "Too short (noise?)", "");
+      startRx();
+    } else {
     uint32_t seq_id = 0;
     char     topic[64];
     char     nodeId[16] = "";
@@ -852,11 +865,13 @@ void loop() {
                        String("seq_id: ") + seq_id, "MQTT disconnected", "");
       }
     } else {
+      Serial.printf("[FWD] Invalid packet len=%u raw=%s\n", rxSize, rxBuf);
       oledHoldUpdate("LoRa RX (invalid)", String("RSSI: ") + lastRssi,
                      String("len: ") + rxSize, "Bad/missing fields", "");
     }
 
     startRx();
+    }  // end else (packet long enough to parse)
   }
 
   // Proactive command TX: send queued commands quickly (without waiting for next ACK cycle)

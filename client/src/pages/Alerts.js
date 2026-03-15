@@ -136,7 +136,7 @@ export default function Alerts() {
       let byNode = {};
       let prevByNode = {};
       try {
-        const rows = await api.getReadings({ startDate: today, endDate: today, limit: 200 });
+        const rows = await api.getReadings({ startDate: today, endDate: today, monitoringOnly: true, limit: 200 });
         const list = applyCalibrationToReadings(Array.isArray(rows) ? rows : []);
         // Sort ascending so we can pick latest and second-latest per node.
         const sorted = [...list].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));

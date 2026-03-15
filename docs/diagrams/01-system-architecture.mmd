@@ -1,0 +1,49 @@
+flowchart TB
+    subgraph client [React Client SPA]
+        Layout[Layout + SideNavigation]
+        Dashboard[Dashboard]
+        Reports[Reports]
+        SensorLogs[Sensor Logs]
+        Map[Map]
+        Nodes[Nodes]
+        Alerts[Alerts]
+        Settings[Settings]
+        PerfTest[Performance Test]
+        InactiveNodes[Inactive Nodes]
+    end
+
+    subgraph backend [Backend]
+        API[Express REST API]
+        WS[WebSocket Live]
+        MQTT[MQTT Bridge]
+        DB[(Supabase or SQLite)]
+    end
+
+    subgraph external [External]
+        Sensors[IoT Sensors]
+        EmailJS[EmailJS]
+    end
+
+    Layout --> Dashboard
+    Layout --> Reports
+    Layout --> SensorLogs
+    Layout --> Map
+    Layout --> Nodes
+    Layout --> Alerts
+    Layout --> Settings
+    Nodes --> InactiveNodes
+    SensorLogs --> PerfTest
+
+    Sensors --> MQTT
+    MQTT --> API
+    API --> DB
+    API --> WS
+    WS --> Dashboard
+    Dashboard --> API
+    Reports --> API
+    SensorLogs --> API
+    Map --> API
+    Nodes --> API
+    Alerts --> API
+    PerfTest --> API
+    API --> EmailJS

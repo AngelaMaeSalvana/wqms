@@ -340,8 +340,11 @@ export function buildAlertsForAllNodes(
 
     // ── Low battery warning (<15%) ───────────────────────────────────────────
     const batteryVoltage = readings.battery_voltage ?? readings.batteryVoltage ?? null;
-    if (batteryVoltage != null) {
-      const batteryPct = voltageToPercentage(batteryVoltage);
+    const batteryPctRaw = readings.battery_percentage ?? readings.batteryPercentage ?? null;
+    const batteryPct = batteryPctRaw != null && typeof batteryPctRaw === "number" && !isNaN(batteryPctRaw)
+      ? Math.round(Math.max(0, Math.min(100, batteryPctRaw)))
+      : voltageToPercentage(batteryVoltage);
+    if (batteryVoltage != null || batteryPct != null) {
       if (isLowBatteryWarning(batteryPct)) {
         alerts.push({
           id: `low-battery-${nodeId}`,

@@ -40,6 +40,17 @@
   flex-direction: column;
 }
 
+/* Performance Test: main area scrolls so the long page content is scrollable */
+.layout-main--performance-test {
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.layout-main--performance-test .page-enter {
+  flex: 0 1 auto;
+  min-height: 0;
+}
+
 /* Backdrop when mobile menu is open */
 .layout-backdrop {
   display: none;

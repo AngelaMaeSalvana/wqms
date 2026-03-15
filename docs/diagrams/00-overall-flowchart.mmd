@@ -1,0 +1,41 @@
+flowchart LR
+    subgraph collection [1. Collection]
+        Sensor[Sensor Node]
+        Proto[LoRa or MQTT]
+    end
+
+    subgraph backend [2. Backend]
+        Bridge[MQTT Bridge]
+        API[Express REST API]
+        DB[(DB)]
+    end
+
+    subgraph delivery [3. Delivery]
+        HTTP[HTTP Fetch]
+        WS[WebSocket]
+        Realtime[Supabase Realtime]
+    end
+
+    subgraph display [4. Display]
+        Dash[Dashboard]
+        Reports[Reports]
+        Logs[Sensor Logs]
+        Map[Map]
+        Nodes[Nodes]
+        Alerts[Alerts]
+    end
+
+    Sensor --> Proto
+    Proto --> Bridge
+    Bridge --> API
+    API --> DB
+    DB --> HTTP
+    DB --> WS
+    DB --> Realtime
+    HTTP --> Reports
+    HTTP --> Logs
+    WS --> Dash
+    Realtime --> Dash
+    Realtime --> Alerts
+    HTTP --> Map
+    HTTP --> Nodes

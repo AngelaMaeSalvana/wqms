@@ -56,13 +56,13 @@ async function insertReading(row) {
   if (useSupabase) {
     const payload = {
       node_id: row.node_id,
-      location: row.location,
       temperature: row.temperature,
       turbidity: row.turbidity,
       ph: row.ph,
       dissolved_oxygen: row.dissolved_oxygen,
       flow_rate: row.flow_rate ?? null,
       battery_voltage: row.battery_voltage ?? null,
+      battery_percentage: row.battery_percentage ?? null,
       seq: row.seq ?? null,
       tx_millis: row.tx_millis ?? null,
       rx_millis: row.rx_millis ?? null,
@@ -73,17 +73,18 @@ async function insertReading(row) {
       t_be_rx: row.t_be_rx ?? null,
       test_run_id: row.test_run_id ?? null,
     };
+    delete payload.location; // column removed from sensor_readings; location is in nodes
     const { data, error } = await supabase.from('sensor_readings').insert(payload).select('id').single();
     if (error) throw error;
     return { lastID: data?.id };
   }
   const sql = `INSERT INTO sensor_readings
-    (node_id, location, temperature, turbidity, ph, dissolved_oxygen, flow_rate, battery_voltage,
+    (node_id, temperature, turbidity, ph, dissolved_oxygen, flow_rate, battery_voltage, battery_percentage,
      seq, tx_millis, rx_millis, timestamp, t_node, t_fwd_rx, t_fwd_pub, t_be_rx, test_run_id)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
   return sqliteRun(sql, [
-    row.node_id, row.location, row.temperature, row.turbidity, row.ph,
-    row.dissolved_oxygen, row.flow_rate ?? null, row.battery_voltage ?? null,
+    row.node_id, row.temperature, row.turbidity, row.ph,
+    row.dissolved_oxygen, row.flow_rate ?? null, row.battery_voltage ?? null, row.battery_percentage ?? null,
     row.seq ?? null, row.tx_millis ?? null, row.rx_millis ?? null, row.timestamp,
     row.t_node ?? null, row.t_fwd_rx ?? null, row.t_fwd_pub ?? null, row.t_be_rx ?? null,
     row.test_run_id ?? null,
@@ -152,13 +153,14 @@ async function getLatestReading(nodeId = null) {
   return row || {};
 }
 
-async function getReadings({ startDate, endDate, nodeId, testRunId, limit = 100 }) {
+async function getReadings({ startDate, endDate, nodeId, testRunId, monitoringOnly, limit = 100 }) {
   if (useSupabase) {
     let q = supabase.from('sensor_readings').select('*').order('timestamp', { ascending: false }).limit(parseInt(limit));
     if (startDate) q = q.gte('timestamp', `${startDate}T00:00:00.000Z`);
     if (endDate) q = q.lte('timestamp', `${endDate}T23:59:59.999Z`);
     if (nodeId) q = q.eq('node_id', nodeId);
     if (testRunId) q = q.eq('test_run_id', testRunId);
+    else if (monitoringOnly) q = q.is('test_run_id', null);
     const { data, error } = await q;
     if (error) throw error;
     return data || [];
@@ -169,6 +171,7 @@ async function getReadings({ startDate, endDate, nodeId, testRunId, limit = 100 
   if (endDate) { sql += ' AND date(timestamp) <= ?'; params.push(endDate); }
   if (nodeId) { sql += ' AND node_id = ?'; params.push(nodeId); }
   if (testRunId) { sql += ' AND test_run_id = ?'; params.push(testRunId); }
+  else if (monitoringOnly) { sql += ' AND (test_run_id IS NULL OR test_run_id = \'\')'; }
   sql += ' ORDER BY timestamp DESC LIMIT ?';
   params.push(parseInt(limit));
   return sqliteAll(sql, params);
@@ -342,7 +345,6 @@ function initializeSqlite() {
     run(`CREATE TABLE IF NOT EXISTS sensor_readings (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       node_id TEXT NOT NULL,
-      location TEXT,
       temperature REAL,
       turbidity REAL,
       ph REAL,
@@ -421,6 +423,7 @@ function initializeSqlite() {
     )`),
     run(`ALTER TABLE sensor_readings ADD COLUMN test_run_id TEXT`).catch(() => {}),
     run(`ALTER TABLE sensor_readings ADD COLUMN battery_voltage REAL`).catch(() => {}),
+    run(`ALTER TABLE sensor_readings ADD COLUMN battery_percentage INTEGER`).catch(() => {}),
     run(`ALTER TABLE sensor_readings ADD COLUMN wqi INTEGER`).catch(() => {}),
   ]).then(() => console.log('✅ SQLite tables initialized'));
 }

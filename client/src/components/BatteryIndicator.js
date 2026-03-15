@@ -8,19 +8,23 @@ import "./BatteryIndicator.css";
 
 /**
  * Battery indicator per node.
- * Converts voltage to percentage (4.2V=100%, 3.3V=0%) and displays the appropriate icon.
+ * Uses device-reported percentage when available, else converts voltage (4.2V=100%, 3.3V=0%).
  * - ≥75%: full
  * - 50–74%: three-bar
  * - 25–49%: two-bar
  * - 10–24%: one-bar
  * - <10%: empty + low status
  */
-export default function BatteryIndicator({ voltage, showPercentage, size = "medium" }) {
-  const percentage = voltageToPercentage(voltage);
+export default function BatteryIndicator({ voltage, percentage: percentageProp, showPercentage, size = "medium" }) {
+  const percentage =
+    percentageProp != null && typeof percentageProp === "number" && !isNaN(percentageProp)
+      ? Math.round(Math.max(0, Math.min(100, percentageProp)))
+      : voltageToPercentage(voltage);
   const level = getBatteryIconLevel(percentage);
   const isLow = isBatteryLow(percentage);
 
-  if (voltage == null || (typeof voltage === "number" && isNaN(voltage))) {
+  const hasVoltage = voltage != null && (typeof voltage !== "number" || !isNaN(voltage));
+  if (!hasVoltage && (percentage == null || percentage < 0)) {
     return (
       <span className={`battery-indicator battery-indicator--${size}`} title="Battery unknown">
         <span className="battery-icon battery-icon--unknown" aria-hidden="true">
@@ -50,6 +54,13 @@ export default function BatteryIndicator({ voltage, showPercentage, size = "medi
       )}
     </span>
   );
+}
+
+/** Helper: pass both voltage and percentage; uses percentage when present, else derives from voltage. */
+export function batteryPropsFromReading(r) {
+  const v = r?.battery_voltage ?? r?.batteryVoltage ?? null;
+  const pct = r?.battery_percentage ?? r?.batteryPercentage ?? null;
+  return { voltage: v, percentage: pct };
 }
 
 function BatteryIconSvg({ level }) {

@@ -3,12 +3,9 @@
   flex-direction: column;
   gap: 20px;
   flex: 1 1 auto;
-  min-height: 0;
-  overflow-y: auto;
-  overflow-x: hidden;
+  min-height: min-content;
   padding-bottom: 32px;
   overscroll-behavior: contain;
-  -webkit-overflow-scrolling: touch;
 }
 
 .perf-test-page-header {
@@ -1056,4 +1053,103 @@
   .perf-section {
     padding: 16px;
   }
+}
+
+/* ── Range Test ───────────────────────────────────────────────────────────── */
+
+.range-test-section .perf-section-header {
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.range-test-distance-wrap {
+  flex-shrink: 0;
+}
+
+.range-test-distance-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.88rem;
+  color: var(--text-muted);
+}
+
+.range-test-distance-input {
+  width: 72px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 0.9rem;
+  background: var(--input-bg, var(--panel));
+  color: var(--text);
+}
+
+.range-test-charts {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.range-test-chart-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.range-test-chart-title {
+  font-size: 0.95rem;
+  font-weight: 600;
+  margin: 0;
+  color: var(--text);
+}
+
+.range-test-chart-inner {
+  height: 220px;
+  min-height: 180px;
+  position: relative;
+}
+
+.range-test-distance-note {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  margin: 12px 0 0;
+}
+
+/* ── Range Test (Live) ─────────────────────────────────────────────────────── */
+
+.range-test-live {
+  margin-top: 20px;
+  padding-top: 20px;
+  border-top: 1px solid var(--border);
+}
+
+.range-test-live-header {
+  margin-bottom: 14px;
+}
+
+.range-test-live-title {
+  font-size: 1rem;
+  font-weight: 700;
+  margin: 0 0 4px;
+  color: var(--text);
+}
+
+.range-test-live-desc {
+  font-size: 0.83rem;
+  color: var(--text-muted);
+  margin: 0;
+}
+
+.range-test-live-empty {
+  font-size: 0.88rem;
+  color: var(--text-muted);
+  margin: 0;
+  padding: 16px;
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 10px;
+  border: 1px dashed var(--border);
+}
+
+.range-test-live .range-test-charts {
+  margin-top: 8px;
 }

@@ -431,13 +431,39 @@
 }
 
 /* System, Alerts, and Testing tabs: allow content to grow and scroll */
-.reports-grid--alerts,
 .reports-grid--system,
 .reports-grid--testing {
   grid-template-columns: 1fr;
   grid-template-rows: none;
   grid-auto-rows: minmax(180px, auto);
-  flex: 0 1 auto;
+  flex: 0 0 auto;
+}
+
+.reports-grid--system > *,
+.reports-grid--testing > * {
+  overflow: visible;
+  min-height: 0;
+}
+
+/* Alerts tab: 4 rows, 2 cols layout */
+.reports-grid--alerts {
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: auto auto auto auto;
+  grid-auto-rows: auto;
+  flex: 0 0 auto;
+  gap: 12px;
+}
+
+.reports-alerts-row-1 { grid-column: 1 / -1; grid-row: 1; }
+.reports-alerts-row-2-col1 { grid-column: 1; grid-row: 2; }
+.reports-alerts-row-2-col2 { grid-column: 2; grid-row: 2; }
+.reports-alerts-row-3 { grid-column: 1 / -1; grid-row: 3; }
+.reports-alerts-row-4 { grid-column: 1 / -1; grid-row: 4; }
+
+/* Alerts cards: allow content to show fully, no clipping from grid */
+.reports-grid--alerts > * {
+  overflow: visible;
+  min-height: 0;
 }
 
 .reports-grid--alerts .reports-tab-full,
@@ -453,7 +479,7 @@
   gap: 12px;
 }
 
-.reports-water-wrap .reports-filter-bar {
+.reports-filter-wrap {
   flex-shrink: 0;
 }
 
@@ -489,7 +515,7 @@
 }
 
 .reports-grid__placeholder-left {
-  grid-column: 1;
+  grid-column: 1 / -1;
   grid-row: 2;
   height: 220px;
   min-height: 0;
@@ -506,12 +532,6 @@
   min-height: 0;
   display: flex;
   flex-direction: column;
-}
-
-/* WQI breakdown card: fixed height so chart area doesn't stretch */
-.reports-grid--water .reports-grid__placeholder {
-  height: 260px;
-  flex-shrink: 0;
 }
 
 /* WQI breakdown chart clarity — chart on top below card title */
@@ -664,13 +684,120 @@
   grid-column: 1 / -1;
 }
 
-.reports-grid--alerts .reports-grid__chart,
-.reports-grid--alerts .reports-grid__placeholder,
 .reports-grid--system .reports-grid__chart,
 .reports-grid--system .reports-grid__placeholder,
 .reports-grid--system .reports-grid__placeholder-bottom,
 .reports-grid--testing .reports-grid__chart {
   grid-column: 1 / -1;
+}
+
+.reports-grid--system .reports-grid__chart.card,
+.reports-grid--system .reports-grid__placeholder.card {
+  overflow: visible;
+}
+
+.reports-alerts-card .card__header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.reports-alerts-card .card__header .reports-export-btn--small {
+  margin-left: auto;
+}
+
+.reports-alerts-chart-inner {
+  height: 150px;
+  min-width: 160px;
+  position: relative;
+  width: 100%;
+}
+
+.reports-alerts-chart-inner--wide {
+  height: 200px;
+  min-width: 220px;
+}
+
+.reports-alerts-row-3.card {
+  min-height: 260px;
+}
+
+.reports-alerts-row-2-col1 .card__body,
+.reports-alerts-row-2-col2 .card__body {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.reports-alerts-row-3 .card__body {
+  overflow-x: auto;
+  overflow-y: visible;
+}
+
+.reports-alerts-row-4.card {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.reports-alerts-row-4 .card__body {
+  overflow-x: auto;
+  min-height: 0;
+}
+
+.reports-compliance-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.reports-compliance-pagination {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.reports-compliance-pagination-info {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.reports-compliance-pagination-btns {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.reports-compliance-pagination-page {
+  font-size: 0.9rem;
+  color: var(--text-muted);
+}
+
+.reports-compliance-pagination-btn {
+  padding: 6px 12px;
+  font-size: 1rem;
+  line-height: 1;
+  border: 1px solid var(--border);
+  background: var(--panel-dark);
+  color: var(--text);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s;
+}
+
+.reports-compliance-pagination-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: var(--accent, #1b9c85);
+}
+
+.reports-compliance-pagination-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .reports-alerts-tab {
@@ -751,6 +878,13 @@
   color: var(--text-muted);
 }
 
+.reports-system-desc {
+  font-size: 0.9rem;
+  color: var(--text-muted);
+  margin: 0 0 4px 0;
+  line-height: 1.4;
+}
+
 .reports-system-tab,
 .reports-system-latency,
 .reports-system-testruns {
@@ -764,7 +898,7 @@
   background: rgba(255, 255, 255, 0.02);
   border: 1px solid var(--border);
   border-radius: 10px;
-  padding: 14px;
+  padding: 14px 14px 24px 14px;
   min-height: 160px;
 }
 
@@ -772,6 +906,11 @@
   height: 160px;
   min-width: 200px;
   position: relative;
+  width: 100%;
+}
+
+.reports-system-table-wrap {
+  overflow-x: auto;
   width: 100%;
 }
 
@@ -788,8 +927,23 @@
 }
 
 @media (max-width: 768px) {
-  .reports-alerts-charts {
+  .reports-grid--alerts {
     grid-template-columns: 1fr;
+    grid-template-rows: auto auto auto auto auto;
+  }
+  .reports-alerts-row-2-col1 {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+  .reports-alerts-row-2-col2 {
+    grid-column: 1 / -1;
+    grid-row: 3;
+  }
+  .reports-alerts-row-3 {
+    grid-row: 4;
+  }
+  .reports-alerts-row-4 {
+    grid-row: 5;
   }
 }
 
@@ -803,6 +957,11 @@
 .reports-data-quality,
 .reports-test-runs {
   overflow-x: auto;
+}
+
+.reports-alerts-row-4 .reports-compliance-table-wrap {
+  overflow-y: visible;
+  min-height: 0;
 }
 
 .reports-empty {
@@ -1793,8 +1952,7 @@
     grid-template-rows: 1fr 1fr;
   }
 
-  .reports-grid--water .reports-grid__placeholder-left,
-  .reports-grid--water .reports-grid__placeholder {
+  .reports-grid--water .reports-grid__placeholder-left {
     height: auto;
     min-height: 140px;
     flex-shrink: 0;
@@ -1834,7 +1992,7 @@
 @media (max-width: 1024px), (max-height: 768px) {
   .reports-grid {
     grid-template-columns: 1fr;
-    grid-template-rows: auto auto auto auto;
+    grid-template-rows: auto auto auto;
     gap: 12px;
   }
   .reports-grid__chart {
@@ -1848,10 +2006,6 @@
   .reports-grid__calendar {
     grid-column: 1;
     grid-row: 3;
-  }
-  .reports-grid__placeholder {
-    grid-column: 1;
-    grid-row: 4;
   }
   .reports-chart-layout {
     flex-direction: column;

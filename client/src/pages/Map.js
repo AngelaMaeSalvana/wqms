@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import { createPortal } from "react-dom";
 import { MapContainer, TileLayer } from "react-leaflet";
 import MapMarkersOverlay from "../components/map/MapMarkersOverlay";
-import BatteryIndicator from "../components/BatteryIndicator";
+import BatteryIndicator, { batteryPropsFromReading } from "../components/BatteryIndicator";
 import MapRecenterButton from "../components/map/MapRecenterButton";
 import PageDateWithStatus from "../components/PageDateWithStatus";
 import { getNodes, loadNodes } from "../utils/nodesStorage";
@@ -89,6 +89,7 @@ export default function Map() {
     const statusForNode = sensorTest.allResults[n.id]?.status ?? n.lastSensorTestStatus ?? null;
     const latest = readingsByNode[n.id];
     const batteryVoltage = latest?.battery_voltage ?? latest?.batteryVoltage ?? null;
+    const batteryPercentage = latest?.battery_percentage ?? latest?.batteryPercentage ?? null;
     return {
       key: n.id,
       lat: n.lat,
@@ -98,6 +99,7 @@ export default function Map() {
       nodeLocation: n.location,
       inactive,
       batteryVoltage,
+      batteryPercentage,
       onTestSensor: inactive ? null : handleMarkerClick,
       isTesting: !inactive && sensorTest.isTesting && sensorTest.results === null,
       testStatus: inactive ? null : statusForNode,
@@ -225,12 +227,12 @@ export default function Map() {
                           </span>
                         </div>
                       )}
-                      {(readingsByNode[selectedNode.id]?.battery_voltage ?? readingsByNode[selectedNode.id]?.batteryVoltage) != null && (
+                      {(readingsByNode[selectedNode.id]?.battery_voltage != null || readingsByNode[selectedNode.id]?.battery_percentage != null) && (
                         <div className="map-node-sheet__info-item">
                           <span className="map-node-sheet__info-label">Battery</span>
                           <span className="map-node-sheet__info-value">
                             <BatteryIndicator
-                              voltage={readingsByNode[selectedNode.id]?.battery_voltage ?? readingsByNode[selectedNode.id]?.batteryVoltage}
+                              {...batteryPropsFromReading(readingsByNode[selectedNode.id])}
                               showPercentage
                               size="medium"
                             />

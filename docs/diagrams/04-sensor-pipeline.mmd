@@ -1,0 +1,36 @@
+flowchart LR
+    subgraph step1 [1. Collection]
+        Sensor[Sensor Node]
+        LoRa[LoRa or MQTT]
+    end
+
+    subgraph step2 [2. Backend]
+        Bridge[Bridge]
+        API2[REST API]
+        Store[(DB)]
+    end
+
+    subgraph step3 [3. Delivery]
+        Fetch[HTTP Fetch]
+        WS2[WebSocket]
+        RT[Realtime]
+    end
+
+    subgraph step4 [4. Display]
+        Charts[Charts]
+        Cards[Cards]
+        Map2[Map]
+    end
+
+    Sensor --> LoRa
+    LoRa --> Bridge
+    Bridge --> API2
+    API2 --> Store
+    Store --> Fetch
+    Store --> WS2
+    Store --> RT
+    Fetch --> Charts
+    Fetch --> Cards
+    WS2 --> Charts
+    RT --> Cards
+    Store --> Map2

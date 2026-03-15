@@ -31,21 +31,22 @@ class ApiService {
     return this.request(`/readings/latest${params}`);
   }
 
-  async getReadings({ startDate, endDate, nodeId, testRunId, limit = 100 }) {
-    if (isSupabaseEnabled()) return supabaseService.getReadings({ startDate, endDate, nodeId, testRunId, limit });
+  async getReadings({ startDate, endDate, nodeId, testRunId, monitoringOnly, limit = 100 }) {
+    if (isSupabaseEnabled()) return supabaseService.getReadings({ startDate, endDate, nodeId, testRunId, monitoringOnly, limit });
     const params = new URLSearchParams();
     if (startDate) params.append('startDate', startDate);
     if (endDate) params.append('endDate', endDate);
     if (nodeId) params.append('nodeId', nodeId);
     if (testRunId) params.append('testRunId', testRunId);
+    if (monitoringOnly) params.append('monitoringOnly', '1');
     params.append('limit', limit);
     return this.request(`/readings?${params.toString()}`);
   }
 
-  /** Sensor readings table (bridge / testing). Reports page uses this for now. */
+  /** Sensor readings: monitoring only (no test_run_id). Used by Sensor Logs, Reports (Water/Alerts/System). */
   async getSensorReadings({ startDate, endDate, nodeId, limit = 500 }) {
     if (isSupabaseEnabled()) return supabaseService.getSensorReadings({ startDate, endDate, nodeId, limit });
-    return this.getReadings({ startDate, endDate, nodeId, limit });
+    return this.getReadings({ startDate, endDate, nodeId, monitoringOnly: true, limit });
   }
 
   async getDailySummaries({ startDate, endDate, nodeId }) {

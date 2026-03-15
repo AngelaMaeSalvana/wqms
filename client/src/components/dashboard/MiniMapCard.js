@@ -23,12 +23,14 @@ export function MiniMapCard({ nodes = [], selectedNode, onTestSensor, isTestingS
         .map((n) => {
           const r = readingsByNode[n.id];
           const batteryVoltage = r?.battery_voltage ?? r?.batteryVoltage ?? null;
+          const batteryPercentage = r?.battery_percentage ?? r?.batteryPercentage ?? null;
           return {
             key: n.id,
             lat: n.lat,
             lng: n.lng,
             nodeId: n.id,
             batteryVoltage,
+            batteryPercentage,
             onTestSensor,
             isTesting: isTestingSensor,
             testStatus: sensorTestResults?.[n.id]?.status ?? null,

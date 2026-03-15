@@ -11,7 +11,6 @@ import { getWQIClass, calculateWQI } from "../utils/wqiCalculator";
 import { getNH3FromReading, calculateNH3FromTAN } from "../utils/nh3Calculator";
 import { getNodes, loadNodes } from "../utils/nodesStorage";
 import api from "../services/api";
-import { exportToCSV, exportToExcel } from "../utils/exportData";
 import { PageLoader } from "../components/LoadingSkeleton";
 import "./Reports.css";
 
@@ -568,9 +567,12 @@ function RangeWqiStats({ summaries = [] }) {
   );
 }
 
+const COMPLIANCE_PER_PAGE = 10;
+
 function AlertsComplianceTab({ reportRangeStart, reportRangeEnd, onSwitchToWater }) {
   const [alerts, setAlerts] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [compliancePage, setCompliancePage] = useState(1);
   useEffect(() => {
     if (!reportRangeStart || !reportRangeEnd) return;
     const start = toDateStr(reportRangeStart);
@@ -600,27 +602,34 @@ function AlertsComplianceTab({ reportRangeStart, reportRangeEnd, onSwitchToWater
   const complianceRows = useMemo(() => {
     return alerts
       .filter((a) => a.parameter && (a.value != null || a.threshold_min != null || a.threshold_max != null))
-      .slice(0, 20)
       .map((a) => ({
         date: a.timestamp ? new Date(a.timestamp).toLocaleDateString() : "—",
         node: a.node_name || a.node_id || "—",
         parameter: a.parameter || "—",
         value: a.value != null ? a.value : "—",
-        threshold: a.threshold_min != null || a.threshold_max != null ? `${a.threshold_min ?? "?"}–${a.threshold_max ?? "?"}` : "—",
+        threshold: (() => {
+          const mn = a.threshold_min;
+          const mx = a.threshold_max;
+          if (mn != null && mx != null) return `${mn}–${mx}`;
+          if (mn != null) return `≥ ${mn}`;
+          if (mx != null) return `≤ ${mx}`;
+          return "—";
+        })(),
       }));
   }, [alerts]);
-  const handleExportAlerts = (fmt) => {
-    const data = alerts.map((a) => ({
-      timestamp: a.timestamp,
-      severity: a.severity,
-      node: a.node_name || a.node_id,
-      parameter: a.parameter,
-      value: a.value,
-      title: a.title,
-    }));
-    if (fmt === "csv") exportToCSV(data, "wqms-alerts");
-    else exportToExcel(data, "wqms-alerts");
-  };
+
+  useEffect(() => setCompliancePage(1), [reportRangeStart, reportRangeEnd]);
+
+  const complianceTotalPages = Math.max(1, Math.ceil(complianceRows.length / COMPLIANCE_PER_PAGE));
+  const compliancePaginatedRows = useMemo(
+    () =>
+      complianceRows.slice(
+        (compliancePage - 1) * COMPLIANCE_PER_PAGE,
+        compliancePage * COMPLIANCE_PER_PAGE
+      ),
+    [complianceRows, compliancePage]
+  );
+
   const alertsBySeverityChart = useMemo(() => {
     const entries = Object.entries(bySeverity);
     if (entries.length === 0) return null;
@@ -652,78 +661,124 @@ function AlertsComplianceTab({ reportRangeStart, reportRangeEnd, onSwitchToWater
       datasets: [{ label: "Alerts", data: sorted.map(([, c]) => c), borderColor: "#e17055", backgroundColor: "rgba(225, 112, 85, 0.2)", fill: true }],
     };
   }, [alerts]);
-  const rangeStr = reportRangeStart && reportRangeEnd ? formatDateRange(reportRangeStart, reportRangeEnd) : "";
   const chartOptions = useMemo(() => ({
     responsive: true,
     maintainAspectRatio: false,
     plugins: { legend: { position: "top" } },
     scales: { x: { grid: { display: false } }, y: { beginAtZero: true } },
   }), []);
+  const severityOrder = ["critical", "high", "medium", "low", "info"];
+  const severityLabels = { critical: "Critical", high: "High", medium: "Medium", low: "Low", info: "Info" };
   return (
     <>
-      <section className="reports-grid__chart card reports-tab-full">
+      {/* Row 1: Alert summary — Total + severity stats, spans 2 cols */}
+      <section className="reports-alerts-card reports-alerts-row-1 card">
         <div className="card__header">
           <h2 className="card__title">Alert summary</h2>
-          {rangeStr && (
-            <span className="reports-tab-range">
-              {rangeStr}
-            </span>
-          )}
         </div>
         <div className="card__body">
           {loading ? <div className="reports-chart-placeholder">Loading…</div> : (
-            <div className="reports-alerts-tab">
-              <div className="reports-alerts-summary">
-                <div className="reports-alerts-stat"><span className="reports-alerts-stat-value">{alerts.length}</span><span className="reports-alerts-stat-label">Total alerts</span></div>
-                {Object.entries(bySeverity).map(([sev, count]) => (
-                  <div key={sev} className="reports-alerts-stat"><span className="reports-alerts-stat-value">{count}</span><span className="reports-alerts-stat-label">{sev}</span></div>
-                ))}
+            <div className="reports-alerts-summary">
+              <div className="reports-alerts-stat">
+                <span className="reports-alerts-stat-value">{alerts.length}</span>
+                <span className="reports-alerts-stat-label">Total alerts</span>
               </div>
-              <div className="reports-alerts-charts">
-                {alertsBySeverityChart && (
-                  <div className="reports-alerts-chart-wrap">
-                    <h3 className="reports-alerts-subtitle">By severity</h3>
-                    <div className="reports-alerts-chart-inner">
-                      <Bar data={alertsBySeverityChart} options={chartOptions} />
-                    </div>
-                  </div>
-                )}
-                {alertsByParamChart && (
-                  <div className="reports-alerts-chart-wrap">
-                    <h3 className="reports-alerts-subtitle">By parameter</h3>
-                    <div className="reports-alerts-chart-inner">
-                      <Doughnut data={alertsByParamChart} options={{ responsive: true, maintainAspectRatio: false, plugins: { legend: { position: "right" } } }} />
-                    </div>
-                  </div>
-                )}
-                {alertsByDayChart && (
-                  <div className="reports-alerts-chart-wrap reports-alerts-chart-wrap--wide">
-                    <h3 className="reports-alerts-subtitle">Alerts over time</h3>
-                    <div className="reports-alerts-chart-inner">
-                      <Line data={alertsByDayChart} options={chartOptions} />
-                    </div>
-                  </div>
-                )}
-              </div>
-              <button type="button" className="reports-export-btn reports-export-btn--small" onClick={() => handleExportAlerts("csv")}>Export CSV</button>
+              {severityOrder.map((sev) => (
+                <div key={sev} className="reports-alerts-stat">
+                  <span className="reports-alerts-stat-value">{bySeverity[sev] ?? 0}</span>
+                  <span className="reports-alerts-stat-label">{severityLabels[sev] ?? sev}</span>
+                </div>
+              ))}
             </div>
           )}
         </div>
       </section>
-      <section className="reports-grid__placeholder card reports-tab-full">
-        <div className="card__header"><h2 className="card__title">Compliance / threshold breaches</h2></div>
+
+      {/* Row 2: Col1 — By severity; Col2 — By parameter */}
+      <section className="reports-alerts-card reports-alerts-row-2-col1 card">
+        <div className="card__header"><h2 className="card__title">By severity</h2></div>
+        <div className="card__body">
+          {loading ? <div className="reports-chart-placeholder">Loading…</div> : alertsBySeverityChart ? (
+            <div className="reports-alerts-chart-inner">
+              <Bar data={alertsBySeverityChart} options={chartOptions} />
+            </div>
+          ) : <p className="reports-empty">No severity data</p>}
+        </div>
+      </section>
+      <section className="reports-alerts-card reports-alerts-row-2-col2 card">
+        <div className="card__header"><h2 className="card__title">By parameter</h2></div>
+        <div className="card__body">
+          {loading ? <div className="reports-chart-placeholder">Loading…</div> : alertsByParamChart ? (
+            <div className="reports-alerts-chart-inner">
+              <Doughnut data={alertsByParamChart} options={{ responsive: true, maintainAspectRatio: false, plugins: { legend: { position: "right" } } }} />
+            </div>
+          ) : <p className="reports-empty">No parameter data</p>}
+        </div>
+      </section>
+
+      {/* Row 3: Alerts over time, spans 2 cols */}
+      <section className="reports-alerts-card reports-alerts-row-3 card">
+        <div className="card__header"><h2 className="card__title">Alerts over time</h2></div>
+        <div className="card__body">
+          {loading ? <div className="reports-chart-placeholder">Loading…</div> : alertsByDayChart ? (
+            <div className="reports-alerts-chart-inner reports-alerts-chart-inner--wide">
+              <Line data={alertsByDayChart} options={chartOptions} />
+            </div>
+          ) : <p className="reports-empty">No time-series data</p>}
+        </div>
+      </section>
+
+      {/* Row 4: Threshold breaches table, spans 2 cols */}
+      <section className="reports-alerts-card reports-alerts-row-4 card">
+        <div className="card__header"><h2 className="card__title">Threshold breaches</h2></div>
         <div className="card__body">
           {loading ? <div className="reports-chart-placeholder">Loading…</div> : (
-            <div className="reports-compliance-table-wrap">
-              {complianceRows.length === 0 ? <p className="reports-empty">No threshold breach data</p> : (
-                <table className="reports-data-table">
-                  <thead><tr><th>Date</th><th>Node</th><th>Parameter</th><th>Value</th><th>Threshold</th></tr></thead>
-                  <tbody>
-                    {complianceRows.map((r, i) => (
-                      <tr key={i}><td>{r.date}</td><td>{r.node}</td><td>{r.parameter}</td><td>{r.value}</td><td>{r.threshold}</td></tr>
-                    ))}
-                  </tbody>
-                </table>
+            <div className="reports-compliance-section">
+              {complianceRows.length === 0 ? (
+                <p className="reports-empty">No threshold breach data</p>
+              ) : (
+                <>
+                  <div className="reports-compliance-table-wrap">
+                    <table className="reports-data-table">
+                      <thead><tr><th>Date</th><th>Node</th><th>Parameter</th><th>Value</th><th>Threshold</th></tr></thead>
+                      <tbody>
+                        {compliancePaginatedRows.map((r, i) => (
+                          <tr key={(compliancePage - 1) * COMPLIANCE_PER_PAGE + i}>
+                            <td>{r.date}</td><td>{r.node}</td><td>{r.parameter}</td><td>{r.value}</td><td>{r.threshold}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <nav className="reports-compliance-pagination" aria-label="Threshold breaches pagination">
+                    <span className="reports-compliance-pagination-info">
+                      {(compliancePage - 1) * COMPLIANCE_PER_PAGE + 1}–{Math.min(compliancePage * COMPLIANCE_PER_PAGE, complianceRows.length)} of {complianceRows.length}
+                    </span>
+                    <div className="reports-compliance-pagination-btns">
+                      <button
+                        type="button"
+                        className="reports-compliance-pagination-btn"
+                        onClick={() => setCompliancePage((p) => Math.max(1, p - 1))}
+                        disabled={compliancePage <= 1}
+                        aria-label="Previous page"
+                      >
+                        ‹
+                      </button>
+                      <span className="reports-compliance-pagination-page">
+                        Page {compliancePage} of {complianceTotalPages}
+                      </span>
+                      <button
+                        type="button"
+                        className="reports-compliance-pagination-btn"
+                        onClick={() => setCompliancePage((p) => Math.min(complianceTotalPages, p + 1))}
+                        disabled={compliancePage >= complianceTotalPages}
+                        aria-label="Next page"
+                      >
+                        ›
+                      </button>
+                    </div>
+                  </nav>
+                </>
               )}
             </div>
           )}
@@ -873,7 +928,7 @@ function SystemTab({ reportRangeStart, reportRangeEnd, nodes, onSwitchToWater })
     return {
       labels: dataQuality.map((r) => r.node),
       datasets: [{
-        label: "Readings",
+        label: "Measurements",
         data: dataQuality.map((r) => r.readings),
         backgroundColor: "rgba(27, 156, 133, 0.6)",
         borderColor: "#1b9c85",
@@ -892,9 +947,9 @@ function SystemTab({ reportRangeStart, reportRangeEnd, nodes, onSwitchToWater })
         const t = r.timestamp ? (typeof r.timestamp === "string" ? r.timestamp : new Date(r.timestamp).toISOString()) : "";
         return t ? t.slice(11, 19) : "";
       }),
-      datasets: [{
-        label: "Latency (ms)",
-        data: sampled.map((r) => (r.t_be_rx || 0) - (r.t_fwd_rx || 0)),
+        datasets: [{
+          label: "Response time (ms)",
+          data: sampled.map((r) => (r.t_be_rx || 0) - (r.t_fwd_rx || 0)),
         borderColor: "#6c5ce7",
         backgroundColor: "rgba(108, 92, 231, 0.2)",
         fill: true,
@@ -912,7 +967,7 @@ function SystemTab({ reportRangeStart, reportRangeEnd, nodes, onSwitchToWater })
     <>
       <section className="reports-grid__chart card reports-tab-full">
         <div className="card__header">
-          <h2 className="card__title">Data quality / uptime</h2>
+          <h2 className="card__title">Sensor activity</h2>
           {rangeStr && (
             <span className="reports-tab-range">
               {rangeStr}
@@ -922,44 +977,51 @@ function SystemTab({ reportRangeStart, reportRangeEnd, nodes, onSwitchToWater })
         <div className="card__body">
           {loading ? <div className="reports-chart-placeholder">Loading…</div> : (
             <div className="reports-system-tab">
+              <p className="reports-system-desc">How often each sensor sent measurements during the selected period.</p>
               {dataQualityChart ? (
                 <div className="reports-system-chart-wrap">
-                  <h3 className="reports-alerts-subtitle">Readings per node</h3>
+                  <h3 className="reports-alerts-subtitle">Measurements per sensor</h3>
                   <div className="reports-system-chart-inner">
                     <Bar data={dataQualityChart} options={chartOptions} />
                   </div>
                 </div>
               ) : null}
               {dataQuality.length > 0 && (
-                <table className="reports-data-table reports-system-table">
-                  <thead><tr><th>Node</th><th>Readings</th><th>Days</th><th>Avg/day</th></tr></thead>
-                  <tbody>
-                    {dataQuality.map((r, i) => <tr key={i}><td>{r.node}</td><td>{r.readings}</td><td>{r.days}</td><td>{r.avgPerDay}</td></tr>)}
-                  </tbody>
-                </table>
+                <div className="reports-system-table-wrap">
+                  <table className="reports-data-table reports-system-table">
+                    <thead><tr><th>Sensor</th><th>Measurements</th><th>Days active</th><th>Avg per day</th></tr></thead>
+                    <tbody>
+                      {dataQuality.map((r, i) => <tr key={i}><td>{r.node}</td><td>{r.readings}</td><td>{r.days}</td><td>{r.avgPerDay}</td></tr>)}
+                    </tbody>
+                  </table>
+                </div>
               )}
-              {dataQuality.length === 0 && <p className="reports-empty">No readings in range</p>}
+              {dataQuality.length === 0 && <p className="reports-empty">No measurements in this period</p>}
             </div>
           )}
         </div>
       </section>
       <section className="reports-grid__placeholder card reports-tab-full">
-        <div className="card__header"><h2 className="card__title">Pipeline latency</h2></div>
+        <div className="card__header"><h2 className="card__title">Data transfer speed</h2></div>
         <div className="card__body">
           {loading ? <div className="reports-chart-placeholder">Loading…</div> : (
             <div className="reports-system-latency">
+              <p className="reports-system-desc">How long it takes for sensor data to reach the server. Lower is better.</p>
               {latencyStats && (
-                <p className="reports-latency-stats">Fwd &#8594; Backend: avg <strong>{latencyStats.avg} ms</strong>, min {latencyStats.min} ms, max {latencyStats.max} ms ({latencyStats.samples} samples)</p>
+                <p className="reports-latency-stats">
+                  Average: <strong>{latencyStats.avg} ms</strong>
+                  {latencyStats.samples > 0 && ` (range ${latencyStats.min}–${latencyStats.max} ms over ${latencyStats.samples} measurements)`}
+                </p>
               )}
               {latencyOverTimeChart && (
                 <div className="reports-system-chart-wrap">
-                  <h3 className="reports-alerts-subtitle">Latency over time</h3>
+                  <h3 className="reports-alerts-subtitle">Speed over time</h3>
                   <div className="reports-system-chart-inner">
                     <Line data={latencyOverTimeChart} options={chartOptions} />
                   </div>
                 </div>
               )}
-              {!latencyStats && !latencyOverTimeChart && <p className="reports-empty">No timestamp chain data</p>}
+              {!latencyStats && !latencyOverTimeChart && <p className="reports-empty">No data transfer records in this period</p>}
             </div>
           )}
         </div>
@@ -972,10 +1034,14 @@ function SystemTab({ reportRangeStart, reportRangeEnd, nodes, onSwitchToWater })
  * Aggregate raw sensor_readings by date into daily-summary shape.
  * Used as a fallback when daily_summaries are not available from the DB.
  * Computes true per-parameter min/max from the raw readings.
+ * @param {object[]} readings - Raw sensor readings (no location; use nodes for location).
+ * @param {object[]} [nodes] - Optional list of nodes { id, location } to resolve location by node_id.
  */
-function aggregateReadingsToDailySummaries(readings) {
+function aggregateReadingsToDailySummaries(readings, nodes = []) {
   const list = Array.isArray(readings) ? readings : [];
   if (list.length === 0) return [];
+  const nodesById = {};
+  (nodes || []).forEach((n) => { nodesById[n.id] = n; });
   const toDateStr = (r) => {
     const t = typeof r.timestamp === "string" ? r.timestamp : (r.timestamp && r.timestamp.toISOString ? r.timestamp.toISOString() : "");
     return t ? t.slice(0, 10) : "";
@@ -1019,10 +1085,12 @@ function aggregateReadingsToDailySummaries(readings) {
       return calculateWQI({ temperature: r.temperature, pH: rPh, tan: rTan, turbidity: r.turbidity, dissolvedOxygen: rDO });
     }).filter((v) => v != null);
 
+    const nodeId = dayReadings[0]?.node_id ?? dayReadings[0]?.nodeId;
+    const location = nodesById[nodeId]?.location ?? dayReadings[0]?.location ?? nodeId ?? null;
     return {
       date,
-      node_id: dayReadings[0]?.node_id ?? dayReadings[0]?.nodeId,
-      location: dayReadings[0]?.location,
+      node_id: nodeId,
+      location,
       avg_temperature:      avgTemp,
       min_temperature:      safeMin(temps),
       max_temperature:      safeMax(temps),
@@ -1336,8 +1404,7 @@ export default function Reports() {
         </nav>
       </div>
 
-      {activeTab === "water" && (
-        <div ref={dateRangePickerRef} className="reports-water-wrap">
+      <div ref={dateRangePickerRef} className="reports-filter-wrap">
         <div className="reports-filter-bar" role="group" aria-label="Shared filters">
           <div className="reports-filter-bar__control">
             <span className="reports-filter-bar__label">Period</span>
@@ -1388,7 +1455,10 @@ export default function Reports() {
             <RangeWqiStats summaries={reportSummaries} />
           </div>
         </div>
+      </div>
 
+      {activeTab === "water" && (
+        <div className="reports-water-wrap">
         <div className="reports-grid reports-grid--water">
         <section className="reports-grid__chart card">
           <div className="card__header reports-chart-header reports-chart-header--per-chart">
@@ -1469,17 +1539,7 @@ export default function Reports() {
               rangeEnd={reportRangeEnd}
             />
           </div>
-            </aside>
-
-        <section className="reports-grid__placeholder card">
-          <div className="card__header">
-            <h2 className="card__title">WQI quality class breakdown</h2>
-            <span className="reports-wqi-breakdown-hint" title="WQI 90–100 Excellent, 70–89 Good, 50–69 Fair, 25–49 Poor, &lt;25 Very Poor">ⓘ</span>
-          </div>
-          <div className="card__body reports-chart-body--compact">
-            <WqiBreakdownChart summaries={reportSummaries} />
-          </div>
-        </section>
+        </aside>
         </div>
         </div>
         )}

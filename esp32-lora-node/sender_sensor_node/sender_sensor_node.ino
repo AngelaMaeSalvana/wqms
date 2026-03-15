@@ -74,25 +74,6 @@
 #define LORA_CRC_ON                true
 
 // -------------------- TDMA --------------------
-// Slot assignment — only NODE_SLOT needs to change per node:
-//   N1 -> NODE_SLOT 0
-//   N2 -> NODE_SLOT 1
-//   N3 -> NODE_SLOT 2
-//   N4 -> NODE_SLOT 3  ... up to NODE_SLOT 7
-//
-// TDMA_NUM_SLOTS is fixed at 8 (max nodes). Unused slots are simply idle.
-// Adding a new node only requires flashing it with the next available slot
-// number — existing nodes never need to be reflashed.
-//
-// Cycle period = TDMA_NUM_SLOTS * TDMA_SLOT_MS = 8 * 6s = 48s
-// Each node transmits once per 48s cycle in its exclusive 6s window.
-//
-// Slot boundaries are computed from NTP epoch ms (shared clock):
-//   slot_index = (epochMs / TDMA_SLOT_MS) % TDMA_NUM_SLOTS
-//
-// TDMA_TX_WINDOW_MS: TX is only allowed in the first 3500ms of the slot.
-//   Must be > (TX airtime + ACK wait + retries) = ~2500ms at SF7.
-//   Remaining 2500ms is the guard band against clock drift.
 #define NODE_SLOT          0           // CHANGE THIS: N1=0, N2=1, N3=2, N4=3 ...
 #define TDMA_NUM_SLOTS     8           // Fixed capacity — supports up to 8 nodes, never change
 #define TDMA_SLOT_MS       6000UL      // Slot width in ms  (cycle = 8 * 6s = 48s)
@@ -153,6 +134,16 @@ static float readBatteryVoltage() {
 #endif
 }
 
+// Convert Li-ion voltage to percentage (4.2V=100%, 3.3V=0%). Returns -1 if invalid.
+static int voltageToPercentage(float voltage) {
+  if (isnan(voltage) || voltage >= 4.2f) return (isnan(voltage) ? -1 : 100);
+  if (voltage <= 3.3f) return 0;
+  int pct = (int)(((voltage - 3.3f) / 0.9f) * 100.0f);
+  if (pct < 0) return 0;
+  if (pct > 100) return 100;
+  return pct;
+}
+
 // -------------------- Buffers --------------------
 #define RX_BUF_SIZE 128  // For ACK (may include CMD:test:start...) and CMD:diag:<node_id>
 #define TX_BUF_SIZE 300
@@ -163,6 +154,9 @@ static char txBuf[TX_BUF_SIZE];
 static int16_t lastRssi = 0;
 static int8_t  lastSnr  = 0;
 static uint16_t rxSize  = 0;
+
+// -------------------- Sample / test data (set to 0 when sensors are ready) --------------------
+#define USE_SAMPLE_SENSOR_DATA  1
 
 // -------------------- Sensor connectivity --------------------
 // true = use real reading if valid; false = always null. NaN/invalid readings -> null in JSON (sensor offline).
@@ -385,15 +379,29 @@ static uint64_t epochMillis() {
   return (uint64_t)secs * 1000ULL + ms_in_sec;
 }
 
+// -------------------- Sample data (when USE_SAMPLE_SENSOR_DATA is 1) --------------------
+// Randomized plausible values when no sensors are connected (monitoring + test mode).
+#if USE_SAMPLE_SENSOR_DATA
+static void getSampleSensorValues(float &do_val, float &turbidity, float &ph,
+                                  float &flow, float &temp) {
+  temp      = random(2000, 2801) / 100.0f;   // 20.0–28.0 °C
+  turbidity = random(5, 61) / 10.0f;         // 0.5–6.0 NTU
+  ph        = random(66, 79) / 10.0f;        // 6.6–7.8
+  do_val    = random(500, 901) / 100.0f;     // 5.0–9.0 mg/L
+  flow      = random(2, 11) / 10.0f;         // 0.2–1.0 m/s
+}
+#endif
+
 // -------------------- Sensor reading --------------------
-// Real sensors only. No dummy/test data. Invalid or offline -> NAN -> null in JSON.
 static void readSensors(float &do_val, float &turbidity, float &ph,
                         float &flow, float &temp) {
 
-  // Temperature - DS18B20 real reading; NAN if offline or invalid
-  temp = updateTempSensor();
+#if USE_SAMPLE_SENSOR_DATA
+  getSampleSensorValues(do_val, turbidity, ph, flow, temp);
+  return;
+#endif
 
-  // No hardware yet for these - emit null (sensor offline)
+  temp = updateTempSensor();
   do_val    = NAN;
   turbidity = NAN;
   ph        = NAN;
@@ -414,14 +422,20 @@ static void fmtOrNull(char *out, size_t outLen, const char *key, float val, bool
 //   node_id      - fixed node identifier
 //   seq_id       - monotonically increasing sequence counter
 //   t_node       - NTP epoch timestamp in ms at the moment the reading was generated (0 = unsynced)
-//   location     - human-readable location label
-//   sensor fields (temperature, turbidity, pH, dissolvedOxygen, flowRate)
+//   sensor fields (location is in dashboard nodes table, keyed by node_id) (temperature, turbidity, pH, dissolvedOxygen, flowRate)
 //   diagResult   (optional, only when diagnostics were requested)
 //   test_run_id  (optional, only when test evaluation mode is active)
 //
 // t_node is captured by the caller immediately before buildPayload() and must not be modified.
 // Use static format buffers to avoid ~140 bytes stack allocation (prevents stack overflow on ESP32)
-static char s_do[28], s_turb[28], s_ph[24], s_flow[28], s_temp[28], s_battery[32];
+static char s_do[28], s_turb[28], s_ph[24], s_flow[28], s_temp[28], s_battery[32], s_battery_pct[24];
+static void fmtOrNullInt(char *out, size_t outLen, const char *key, int val, bool useNull) {
+  if (useNull || val < 0) {
+    snprintf(out, outLen, "\"%s\":null", key);
+  } else {
+    snprintf(out, outLen, "\"%s\":%d", key, val);
+  }
+}
 static void buildPayload(char *buf, size_t bufLen,
                          uint32_t seq_id, uint64_t t_node,
                          float do_val, float turbidity, float ph,
@@ -429,40 +443,47 @@ static void buildPayload(char *buf, size_t bufLen,
                          const char *diagResult,
                          const char *testRunId) {
 
-  fmtOrNull(s_temp, sizeof(s_temp), "temperature",     temp,      !SENSOR_CONNECTED[0]);
-  fmtOrNull(s_turb, sizeof(s_turb), "turbidity",       turbidity, !SENSOR_CONNECTED[1]);
-  fmtOrNull(s_ph,   sizeof(s_ph),   "pH",              ph,        !SENSOR_CONNECTED[2]);
-  fmtOrNull(s_do,   sizeof(s_do),   "dissolvedOxygen", do_val,    !SENSOR_CONNECTED[3]);
-  fmtOrNull(s_flow, sizeof(s_flow), "flowRate",        flow,      !SENSOR_CONNECTED[4]);
+  bool useNullTemp = USE_SAMPLE_SENSOR_DATA ? false : !SENSOR_CONNECTED[0];
+  bool useNullTurb = USE_SAMPLE_SENSOR_DATA ? false : !SENSOR_CONNECTED[1];
+  bool useNullPh   = USE_SAMPLE_SENSOR_DATA ? false : !SENSOR_CONNECTED[2];
+  bool useNullDo   = USE_SAMPLE_SENSOR_DATA ? false : !SENSOR_CONNECTED[3];
+  bool useNullFlow = USE_SAMPLE_SENSOR_DATA ? false : !SENSOR_CONNECTED[4];
+  fmtOrNull(s_temp, sizeof(s_temp), "temperature",     temp,      useNullTemp);
+  fmtOrNull(s_turb, sizeof(s_turb), "turbidity",       turbidity, useNullTurb);
+  fmtOrNull(s_ph,   sizeof(s_ph),   "pH",              ph,        useNullPh);
+  fmtOrNull(s_do,   sizeof(s_do),   "dissolvedOxygen", do_val,    useNullDo);
+  fmtOrNull(s_flow, sizeof(s_flow), "flowRate",        flow,      useNullFlow);
   fmtOrNull(s_battery, sizeof(s_battery), "batteryVoltage", battery_voltage, isnan(battery_voltage));
+  int battery_pct = voltageToPercentage(battery_voltage);
+  fmtOrNullInt(s_battery_pct, sizeof(s_battery_pct), "batteryPercentage", battery_pct, battery_pct < 0);
 
   bool hasDiag = diagResult && diagResult[0];
   bool hasTest = testRunId  && testRunId[0];
 
   if (hasDiag && hasTest) {
     snprintf(buf, bufLen,
-             "{\"node_id\":\"%s\",\"seq_id\":%lu,\"t_node\":%llu,\"location\":\"%s\","
-             "%s,%s,%s,%s,%s,%s,\"diagResult\":\"%s\",\"test_run_id\":\"%s\"}",
-             NODE_ID, (unsigned long)seq_id, (unsigned long long)t_node, NODE_LOCATION,
-             s_temp, s_turb, s_ph, s_do, s_flow, s_battery, diagResult, testRunId);
+             "{\"node_id\":\"%s\",\"seq_id\":%lu,\"t_node\":%llu,"
+             "%s,%s,%s,%s,%s,%s,%s,\"diagResult\":\"%s\",\"test_run_id\":\"%s\"}",
+             NODE_ID, (unsigned long)seq_id, (unsigned long long)t_node,
+             s_temp, s_turb, s_ph, s_do, s_flow, s_battery, s_battery_pct, diagResult, testRunId);
   } else if (hasDiag) {
     snprintf(buf, bufLen,
-             "{\"node_id\":\"%s\",\"seq_id\":%lu,\"t_node\":%llu,\"location\":\"%s\","
-             "%s,%s,%s,%s,%s,%s,\"diagResult\":\"%s\"}",
-             NODE_ID, (unsigned long)seq_id, (unsigned long long)t_node, NODE_LOCATION,
-             s_temp, s_turb, s_ph, s_do, s_flow, s_battery, diagResult);
+             "{\"node_id\":\"%s\",\"seq_id\":%lu,\"t_node\":%llu,"
+             "%s,%s,%s,%s,%s,%s,%s,\"diagResult\":\"%s\"}",
+             NODE_ID, (unsigned long)seq_id, (unsigned long long)t_node,
+             s_temp, s_turb, s_ph, s_do, s_flow, s_battery, s_battery_pct, diagResult);
   } else if (hasTest) {
     snprintf(buf, bufLen,
-             "{\"node_id\":\"%s\",\"seq_id\":%lu,\"t_node\":%llu,\"location\":\"%s\","
-             "%s,%s,%s,%s,%s,%s,\"test_run_id\":\"%s\"}",
-             NODE_ID, (unsigned long)seq_id, (unsigned long long)t_node, NODE_LOCATION,
-             s_temp, s_turb, s_ph, s_do, s_flow, s_battery, testRunId);
+             "{\"node_id\":\"%s\",\"seq_id\":%lu,\"t_node\":%llu,"
+             "%s,%s,%s,%s,%s,%s,%s,\"test_run_id\":\"%s\"}",
+             NODE_ID, (unsigned long)seq_id, (unsigned long long)t_node,
+             s_temp, s_turb, s_ph, s_do, s_flow, s_battery, s_battery_pct, testRunId);
   } else {
     snprintf(buf, bufLen,
-             "{\"node_id\":\"%s\",\"seq_id\":%lu,\"t_node\":%llu,\"location\":\"%s\","
-             "%s,%s,%s,%s,%s,%s}",
-             NODE_ID, (unsigned long)seq_id, (unsigned long long)t_node, NODE_LOCATION,
-             s_temp, s_turb, s_ph, s_do, s_flow, s_battery);
+             "{\"node_id\":\"%s\",\"seq_id\":%lu,\"t_node\":%llu,"
+             "%s,%s,%s,%s,%s,%s,%s}",
+             NODE_ID, (unsigned long)seq_id, (unsigned long long)t_node,
+             s_temp, s_turb, s_ph, s_do, s_flow, s_battery, s_battery_pct);
   }
 }
 
@@ -520,11 +541,11 @@ static bool parseTestStart(const char* cmd,
   return true;
 }
 
-// Parse CMD:test:stop:<test_run_id> - returns true if it matches our active test_run_id
+// Parse CMD:test:stop:<test_run_id> - returns true when in test mode and this is a stop command.
+// We accept any test:stop (run_id match not required) so the OLED clears reliably when user stops.
 static bool parseTestStop(const char* cmd) {
   if (strncmp(cmd, "test:stop:", 10) != 0) return false;
-  const char* id = cmd + 10;
-  return (s_testModeActive && strcmp(id, s_testRunId) == 0);
+  return s_testModeActive;
 }
 
 // Activate test mode from a parsed start command
@@ -539,10 +560,14 @@ static void activateTestMode(uint32_t intervalMs, uint32_t durationMs, const cha
                 s_testRunId, (unsigned long)intervalMs, (unsigned long)durationMs);
 }
 
+// Idle OLED throttle (declared here so deactivateTestMode can reset it)
+static uint32_t s_lastOledActivityMs = 0;
+
 // Deactivate test mode (stop command or expiry)
 static void deactivateTestMode() {
   s_testModeActive = false;
   s_testRunId[0]   = '\0';
+  s_lastOledActivityMs = 0;  // Force idle OLED to refresh to MONITOR on next loop
   Serial.println("[TEST] Test mode OFF - reverted to default interval");
 }
 
@@ -587,7 +612,6 @@ static void recordTxResult(uint32_t seq, int16_t rssi, int8_t snr, bool delivere
 
 // -------------------- Idle OLED refresh --------------------
 #define OLED_HOLD_MS 1500  // How long TX/ACK screens persist before idle screen takes over
-static uint32_t s_lastOledActivityMs = 0;
 
 static void oledActivity() {
   s_lastOledActivityMs = millis();
@@ -668,7 +692,12 @@ static bool sendWithAck(uint32_t seq_id, const char* payload, uint8_t retries, u
     Serial.printf("[TX] seq_id=%lu attempt=%u payload=%s\n",
                   (unsigned long)seq_id, attempt, payload);
 
-    Radio.Send((uint8_t*)payload, (uint8_t)strlen(payload));
+    size_t plen = strlen(payload);
+    if (plen > 255) {
+      Serial.printf("[TX] WARN payload len=%u > 255, truncating - only first 255 bytes sent\n", (unsigned)plen);
+      plen = 255;
+    }
+    Radio.Send((uint8_t*)payload, (uint8_t)plen);
 
     // Wait TX done
     uint32_t t0 = millis();
@@ -715,7 +744,11 @@ static bool sendWithAck(uint32_t seq_id, const char* payload, uint8_t retries, u
           const char* statusLine = runDiagNext        ? "DELIVERED + DIAG queued"
                                  : s_testModeActive   ? "DELIVERED + TEST MODE"
                                                       : "DELIVERED OK";
-          oledShowLines(hdr, oledLineBuf, statusLine, oledLineBuf2, "");
+          // Use current mode for header so after test:stop we show MONITOR immediately
+          const char* ackHdr = s_testModeActive ? "TEST 915MHz"
+                                : runDiagNext   ? "DIAG 915MHz"
+                                                : "MONITOR 915MHz";
+          oledShowLines(ackHdr, oledLineBuf, statusLine, oledLineBuf2, "");
           oledActivity();
           delay(700);
           return true;
@@ -748,31 +781,21 @@ static const char* runDiagnostics() {
 }
 
 // -------------------- TDMA state --------------------
-// s_lastTxSlot: the ABSOLUTE slot counter of the last transmission.
-// Using the absolute counter (not reduced by % NUM_SLOTS) means each slot
-// occurrence is unique, so the node correctly re-transmits every cycle.
-// Initialized to UINT64_MAX so the very first matching slot fires immediately.
 static uint64_t s_lastTxSlot = UINT64_MAX;
 
-// Returns the ABSOLUTE slot counter: total slots elapsed since epoch.
-// This number increases monotonically and is unique per slot occurrence.
-// Returns UINT64_MAX if NTP is not yet synced.
 static uint64_t tdmaAbsoluteSlot() {
   if (!s_timeSynced) return UINT64_MAX;
   uint64_t now = epochMillis();
   if (now == 0) return UINT64_MAX;
-  return now / TDMA_SLOT_MS;  // no modulo - unique per slot occurrence
+  return now / TDMA_SLOT_MS;
 }
 
-// Returns the slot INDEX (0..NUM_SLOTS-1) for display and assignment checks.
 static uint8_t tdmaSlotIndex() {
   uint64_t abs = tdmaAbsoluteSlot();
   if (abs == UINT64_MAX) return 0xFF;
   return (uint8_t)(abs % TDMA_NUM_SLOTS);
 }
 
-// Returns ms elapsed since the start of the current slot.
-// Used to enforce TDMA_TX_WINDOW_MS (guard band).
 static uint32_t tdmaSlotOffset() {
   if (!s_timeSynced) return 0;
   uint64_t now = epochMillis();
@@ -780,14 +803,12 @@ static uint32_t tdmaSlotOffset() {
   return (uint32_t)(now % TDMA_SLOT_MS);
 }
 
-// Returns true when it is this node's turn to transmit and it hasn't
-// already transmitted in the current slot occurrence.
 static bool tdmaShouldTx() {
   uint64_t absSlot = tdmaAbsoluteSlot();
-  if (absSlot == UINT64_MAX) return false;                  // NTP not synced
-  if ((absSlot % TDMA_NUM_SLOTS) != (uint64_t)NODE_SLOT) return false; // Not our slot
-  if (absSlot == s_lastTxSlot) return false;                // Already sent this occurrence
-  if (tdmaSlotOffset() >= TDMA_TX_WINDOW_MS) return false;  // Past TX window (guard band)
+  if (absSlot == UINT64_MAX) return false;
+  if ((absSlot % TDMA_NUM_SLOTS) != (uint64_t)NODE_SLOT) return false;
+  if (absSlot == s_lastTxSlot) return false;
+  if (tdmaSlotOffset() >= TDMA_TX_WINDOW_MS) return false;
   return true;
 }
 
@@ -836,29 +857,23 @@ void loop() {
     syncNTP();
   }
 
-  // Determine if we should transmit this iteration.
   // Priority: triggerReadingNow (remote command) > test mode interval > TDMA slot.
-  // In test mode the TDMA slot constraint is lifted so the dashboard gets rapid readings.
   bool inTest = testModeActive();
   bool shouldTx = false;
 
   if (triggerReadingNow) {
     shouldTx = true;
   } else if (inTest) {
-    // Test mode: use its own interval, ignore TDMA
     shouldTx = (now - lastSendTime >= s_testIntervalMs);
   } else if (s_timeSynced) {
-    // Normal TDMA operation
     shouldTx = tdmaShouldTx();
   } else {
-    // NTP not yet synced: fall back to simple interval so node isn't silent forever
     shouldTx = (now - lastSendTime >= TDMA_FALLBACK_MS);
   }
 
   if (shouldTx) {
     lastSendTime      = now;
     triggerReadingNow = false;
-    // Record the absolute slot counter so we don't re-transmit this slot occurrence
     if (!inTest && s_timeSynced) s_lastTxSlot = tdmaAbsoluteSlot();
 
     // Re-check after potential expiry inside testModeActive() above

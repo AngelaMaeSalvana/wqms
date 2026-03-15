@@ -109,6 +109,7 @@ export default function MapMarkersOverlay({ markers = [] }) {
               testStatus={m.testStatus}
               inactive={m.inactive}
               batteryVoltage={m.batteryVoltage}
+              batteryPercentage={m.batteryPercentage}
             />
           </div>
         );

@@ -1,11 +1,13 @@
 import React, { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
+import { Line } from "react-chartjs-2";
 import PageDateWithStatus from "../components/PageDateWithStatus";
 import { getNodes, loadNodes } from "../utils/nodesStorage";
 import api from "../services/api";
 import { computeIoTMetrics } from "../utils/iotMetrics";
 import { useTestRun } from "../contexts/TestRunContext";
+import "../utils/chartConfig";
 import "./PerformanceTest.css";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -63,6 +65,40 @@ function toFreqMs(value, unit) {
   return 0;
 }
 
+/** Convert run meta (duration_ms, interval_ms) to form fields for use as next-test defaults. */
+function runMetaToConfigForm(runMeta) {
+  if (!runMeta) return {};
+  const durationMs = runMeta.durationMs != null ? Number(runMeta.durationMs)
+    : (runMeta.startedAt != null && runMeta.endsAt != null ? Math.max(0, Number(runMeta.endsAt) - Number(runMeta.startedAt)) : null);
+  const intervalMs = runMeta.intervalMs != null ? Number(runMeta.intervalMs) : null;
+  const out = {};
+  if (durationMs != null && durationMs > 0) {
+    if (durationMs >= 3600000 && durationMs % 3600000 === 0) {
+      out.durationValue = String(durationMs / 3600000);
+      out.durationUnit = "hours";
+    } else if (durationMs >= 60000 && durationMs % 60000 === 0) {
+      out.durationValue = String(durationMs / 60000);
+      out.durationUnit = "minutes";
+    } else {
+      out.durationValue = String(Math.round(durationMs / 1000));
+      out.durationUnit = "seconds";
+    }
+  }
+  if (intervalMs != null && intervalMs > 0) {
+    if (intervalMs >= 60000 && intervalMs % 60000 === 0) {
+      out.freqValue = String(intervalMs / 60000);
+      out.freqUnit = "minutes";
+    } else {
+      out.freqValue = String(Math.round(intervalMs / 1000));
+      out.freqUnit = "seconds";
+    }
+  }
+  if (runMeta.node_id != null && runMeta.node_id !== "") {
+    out.nodeId = runMeta.node_id;
+  }
+  return out;
+}
+
 function formatDuration(value, unit) {
   const v = Number(value);
   if (!v) return "—";
@@ -104,11 +140,12 @@ function computeExpectedFromRunMeta(runMeta) {
 
 // ─── CSV export ───────────────────────────────────────────────────────────────
 
-function exportEvalCSV(evalResult, config, nodeNames) {
+function exportEvalCSV(evalResult, config, nodeNames, rangeTestDistance = "") {
   if (!evalResult) return;
   const durationMs = toDurationMs(config.durationValue, config.durationUnit);
   const freqMs = toFreqMs(config.freqValue, config.freqUnit);
-  const expectedPackets = durationMs > 0 && freqMs > 0 ? Math.floor(durationMs / freqMs) : null;
+  const expectedFromConfig = durationMs > 0 && freqMs > 0 ? Math.floor(durationMs / freqMs) : null;
+  const expectedPackets = evalResult.expectedUsed != null ? evalResult.expectedUsed : expectedFromConfig;
   const lines = [
     ["WQMS IoT Performance Evaluation Report"],
     [`Generated: ${new Date().toLocaleString()}`],
@@ -116,7 +153,8 @@ function exportEvalCSV(evalResult, config, nodeNames) {
     [`Target nodes: ${config.nodeId === "all" ? "All" : config.nodeId}`],
     [`Test duration: ${config.durationValue} ${config.durationUnit}`],
     [`Transmission frequency: every ${config.freqValue} ${config.freqUnit}`],
-    [`Expected packets (duration ÷ interval): ${expectedPackets ?? "—"}`],
+    [`Expected packets (duration ÷ interval): ${expectedPackets ?? "—"}${evalResult.expectedFormulaUsed ? ` (${evalResult.expectedFormulaUsed})` : ""}`],
+    ...(rangeTestDistance.trim() ? [[`Range test distance (m): ${rangeTestDistance.trim()}`]] : []),
     [],
     ["Node", "Packets Sent (inferred)", "Packets Received", "Packets Lost",
       "PLR (%)", "PDR (%)", "Availability (%)",
@@ -225,11 +263,32 @@ export default function PerformanceTest() {
 
   const [testRunError, setTestRunError] = useState(null);
   const [packetsModalOpen, setPacketsModalOpen] = useState(false);
+  const [rangeTestDistance, setRangeTestDistance] = useState("");
+  const [liveRangeRows, setLiveRangeRows] = useState([]);
   const autoStopTriggeredRef = useRef(false);
 
   useEffect(() => {
     loadNodes().then(() => setNodes(getNodes()));
   }, []);
+
+  // Live range test: poll packets while a test run is active
+  const LIVE_RANGE_POLL_MS = 4000;
+  useEffect(() => {
+    if (!testRun?.id) {
+      setLiveRangeRows([]);
+      return;
+    }
+    const nodeArg = evalConfig.nodeId === "all" ? undefined : evalConfig.nodeId;
+    const fetchLive = () => {
+      api
+        .getPerformanceReadings({ testRunId: testRun.id, nodeId: nodeArg, limit: 2000 })
+        .then((data) => setLiveRangeRows(Array.isArray(data) ? data : []))
+        .catch(() => setLiveRangeRows((prev) => prev));
+    };
+    fetchLive();
+    const id = setInterval(fetchLive, LIVE_RANGE_POLL_MS);
+    return () => clearInterval(id);
+  }, [testRun?.id, evalConfig.nodeId]);
 
   // (no auto-lock to test run on mount — user controls onlyTestRun manually)
 
@@ -287,6 +346,104 @@ export default function PerformanceTest() {
 
   // Top panel always shows config-based expected
   const expectedPackets = expectedFromConfig;
+
+  // Range Test: chart data per node (RSSI / SNR vs packet index) from raw rows
+  const rangeTestChartDataByNode = useMemo(() => {
+    const raw = evalResult?.rawRows;
+    if (!raw || !Array.isArray(raw) || raw.length === 0) return {};
+    const byNode = {};
+    raw.forEach((r) => {
+      const nid = r.node_id || "?";
+      if (!byNode[nid]) byNode[nid] = [];
+      byNode[nid].push(r);
+    });
+    const out = {};
+    Object.entries(byNode).forEach(([nid, rows]) => {
+      const withSeq = rows
+        .filter((r) => r.seq != null && Number.isFinite(Number(r.seq)))
+        .map((r) => ({ ...r, seq: Number(r.seq) }));
+      withSeq.sort((a, b) => a.seq - b.seq);
+      const hasRssi = withSeq.some((r) => r.rssi != null && Number.isFinite(Number(r.rssi)));
+      const hasSnr = withSeq.some((r) => r.snr != null && Number.isFinite(Number(r.snr)));
+      if (!hasRssi && !hasSnr) return;
+      const labels = withSeq.map((r) => String(r.seq));
+      out[nid] = {
+        labels,
+        datasets: [
+          ...(hasRssi
+            ? [{
+                label: "RSSI (dBm)",
+                data: withSeq.map((r) => (r.rssi != null && Number.isFinite(Number(r.rssi)) ? Number(r.rssi) : null)),
+                borderColor: "rgb(75, 192, 192)",
+                backgroundColor: "rgba(75, 192, 192, 0.1)",
+                yAxisID: "y",
+                spanGaps: true,
+              }]
+            : []),
+          ...(hasSnr
+            ? [{
+                label: "SNR (dB)",
+                data: withSeq.map((r) => (r.snr != null && Number.isFinite(Number(r.snr)) ? Number(r.snr) : null)),
+                borderColor: "rgb(255, 159, 64)",
+                backgroundColor: "rgba(255, 159, 64, 0.1)",
+                yAxisID: "y1",
+                spanGaps: true,
+              }]
+            : []),
+        ],
+      };
+    });
+    return out;
+  }, [evalResult?.rawRows]);
+
+  // Live range: same chart data shape from polled packets during active test
+  const liveRangeChartDataByNode = useMemo(() => {
+    const raw = liveRangeRows;
+    if (!raw || !Array.isArray(raw) || raw.length === 0) return {};
+    const byNode = {};
+    raw.forEach((r) => {
+      const nid = r.node_id || "?";
+      if (!byNode[nid]) byNode[nid] = [];
+      byNode[nid].push(r);
+    });
+    const out = {};
+    Object.entries(byNode).forEach(([nid, rows]) => {
+      const withSeq = rows
+        .filter((r) => r.seq != null && Number.isFinite(Number(r.seq)))
+        .map((r) => ({ ...r, seq: Number(r.seq) }));
+      withSeq.sort((a, b) => a.seq - b.seq);
+      const hasRssi = withSeq.some((r) => r.rssi != null && Number.isFinite(Number(r.rssi)));
+      const hasSnr = withSeq.some((r) => r.snr != null && Number.isFinite(Number(r.snr)));
+      if (!hasRssi && !hasSnr) return;
+      const labels = withSeq.map((r) => String(r.seq));
+      out[nid] = {
+        labels,
+        datasets: [
+          ...(hasRssi
+            ? [{
+                label: "RSSI (dBm)",
+                data: withSeq.map((r) => (r.rssi != null && Number.isFinite(Number(r.rssi)) ? Number(r.rssi) : null)),
+                borderColor: "rgb(75, 192, 192)",
+                backgroundColor: "rgba(75, 192, 192, 0.1)",
+                yAxisID: "y",
+                spanGaps: true,
+              }]
+            : []),
+          ...(hasSnr
+            ? [{
+                label: "SNR (dB)",
+                data: withSeq.map((r) => (r.snr != null && Number.isFinite(Number(r.snr)) ? Number(r.snr) : null)),
+                borderColor: "rgb(255, 159, 64)",
+                backgroundColor: "rgba(255, 159, 64, 0.1)",
+                yAxisID: "y1",
+                spanGaps: true,
+              }]
+            : []),
+        ],
+      };
+    });
+    return out;
+  }, [liveRangeRows]);
 
   // ── IoT Evaluation ───────────────────────────────────────────────────────
 
@@ -362,6 +519,15 @@ export default function PerformanceTest() {
         return expectedPackets ?? null;
       })();
 
+      // Store the formula used for expected (so results stay fixed when user changes config later)
+      const expectedFormulaUsed = (() => {
+        if (usedTestRunFilter && runMeta) {
+          const fromRun = computeExpectedFromRunMeta(runMeta);
+          if (fromRun.formula) return fromRun.formula;
+        }
+        return expectedSubLabelConfig;
+      })();
+
       const nodeMetrics = computeIoTMetrics(perfRowsFiltered, nodeId, evalExpected);
       const alertMetrics = metrics.alerts ? computeAlertMetrics(alertRows) : null;
 
@@ -369,10 +535,24 @@ export default function PerformanceTest() {
         nodeMetrics,
         alertMetrics,
         rowCount: perfRowsFiltered.length,
+        rawRows: perfRowsFiltered,
         testRunId: usedTestRunFilter ? lastTestRunId : null,
         testRunMeta: usedTestRunFilter ? runMeta : null,
         testRunFallback: useRun && !usedTestRunFilter,
+        expectedUsed: evalExpected,
+        expectedFormulaUsed,
       });
+
+      // Use this run's params as default for the next test (date stays current)
+      if (runMeta) {
+        const today = todayLocalYMD();
+        setEvalConfig((c) => ({
+          ...c,
+          ...runMetaToConfigForm(runMeta),
+          dateFrom: today,
+          dateTo: today,
+        }));
+      }
     } catch (err) {
       setEvalError(String(err.message || err));
     }
@@ -669,7 +849,7 @@ export default function PerformanceTest() {
               <button
                 type="button"
                 className="ghost-btn eval-export-btn"
-                onClick={() => exportEvalCSV(evalResult, evalConfig, nodeNames)}
+                onClick={() => exportEvalCSV(evalResult, evalConfig, nodeNames, rangeTestDistance)}
               >
                 Export CSV
               </button>
@@ -738,6 +918,57 @@ export default function PerformanceTest() {
         </div>
 
         </div>{/* end eval-top-row */}
+
+        {/* ── Range Test (Live): updates every 4 s while test runs ── */}
+        {testRun && (
+          <div className="range-test-live">
+            <div className="range-test-live-header">
+              <h3 className="range-test-live-title">Range Test (Live)</h3>
+              <p className="range-test-live-desc">
+                RSSI and SNR update every {LIVE_RANGE_POLL_MS / 1000} s. Move the node to see signal strength change in real time.
+              </p>
+            </div>
+            {Object.keys(liveRangeChartDataByNode).length === 0 ? (
+              <p className="range-test-live-empty">Waiting for packets… Send a test packet from the node to see the chart.</p>
+            ) : (
+              <div className="range-test-charts">
+                {Object.entries(liveRangeChartDataByNode).map(([nid, chartData]) => {
+                  const name = nodeNames[nid] ? `${nid} — ${nodeNames[nid]}` : nid;
+                  const options = {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: { mode: "index", intersect: false },
+                    plugins: { legend: { position: "top" } },
+                    scales: {
+                      x: { title: { display: true, text: "Packet (seq)" }, grid: { display: true } },
+                      y: {
+                        type: "linear",
+                        position: "left",
+                        title: { display: true, text: "RSSI (dBm)" },
+                        min: -120,
+                        max: -30,
+                      },
+                      y1: {
+                        type: "linear",
+                        position: "right",
+                        title: { display: true, text: "SNR (dB)" },
+                        grid: { drawOnChartArea: false },
+                      },
+                    },
+                  };
+                  return (
+                    <div key={nid} className="range-test-chart-wrap">
+                      <h4 className="range-test-chart-title">{name}</h4>
+                      <div className="range-test-chart-inner">
+                        <Line data={chartData} options={options} />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* ── Test run error ── */}
         {testRunError && (
@@ -824,15 +1055,13 @@ export default function PerformanceTest() {
                               <div className="eval-metric-group-label">Packet Statistics</div>
                               <div className="eval-metric-row">
                                 {(() => {
-                                  const useRunExpected = Boolean(evalResult?.testRunId && evalConfig.onlyTestRun);
-                                  const expectedValue =
-                                    useRunExpected && expectedFromEvalRun.expected != null
-                                      ? expectedFromEvalRun.expected
-                                      : expectedPackets;
-                                  const expectedFormula =
-                                    useRunExpected && expectedFromEvalRun.expected != null && expectedFromEvalRun.formula
-                                      ? expectedFromEvalRun.formula
-                                      : expectedSubLabelConfig;
+                                  // Use the expected value stored at analysis time so results stay fixed when user changes config
+                                  const expectedValue = evalResult.expectedUsed != null
+                                    ? evalResult.expectedUsed
+                                    : (expectedFromEvalRun.expected != null ? expectedFromEvalRun.expected : expectedPackets);
+                                  const expectedFormula = evalResult.expectedFormulaUsed
+                                    ? evalResult.expectedFormulaUsed
+                                    : (expectedFromEvalRun.formula || expectedSubLabelConfig);
                                   return expectedValue != null ? (
                                     <EvalMetric label="Expected" value={expectedValue} formula={expectedFormula} />
                                   ) : null;
@@ -978,6 +1207,76 @@ export default function PerformanceTest() {
           </div>
         )}
       </section>
+
+      {/* ── Range Test (RSSI/SNR vs packet for distance testing) ── */}
+      {evalResult?.rawRows?.length > 0 && Object.keys(rangeTestChartDataByNode).length > 0 && (
+        <section className="perf-section range-test-section" aria-labelledby="range-test-title">
+          <div className="perf-section-header">
+            <div>
+              <h2 id="range-test-title" className="perf-section-title">Range Test</h2>
+              <p className="perf-section-desc">
+                Signal strength (RSSI) and signal-to-noise (SNR) over the run. Use to test node–forwarder distance: start a test, move the node, then Analyse. Stronger signal (RSSI &gt; −70 dBm, SNR &gt; 5 dB) indicates better range.
+              </p>
+            </div>
+            <div className="range-test-distance-wrap">
+              <label className="range-test-distance-label">
+                Distance (m)
+                <input
+                  type="text"
+                  className="range-test-distance-input"
+                  placeholder="e.g. 50"
+                  value={rangeTestDistance}
+                  onChange={(e) => setRangeTestDistance(e.target.value)}
+                  title="Optional: label this run with approximate distance for your records"
+                />
+              </label>
+            </div>
+          </div>
+          <div className="range-test-charts">
+            {Object.entries(rangeTestChartDataByNode).map(([nid, chartData]) => {
+              const name = nodeNames[nid] ? `${nid} — ${nodeNames[nid]}` : nid;
+              const options = {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: { mode: "index", intersect: false },
+                plugins: { legend: { position: "top" } },
+                scales: {
+                  x: {
+                    title: { display: true, text: "Packet (seq)" },
+                    grid: { display: true },
+                  },
+                  y: {
+                    type: "linear",
+                    position: "left",
+                    title: { display: true, text: "RSSI (dBm)" },
+                    min: (ctx) => (ctx.chart?.data?.datasets?.some((d) => d.yAxisID === "y") ? -120 : undefined),
+                    max: -30,
+                  },
+                  y1: {
+                    type: "linear",
+                    position: "right",
+                    title: { display: true, text: "SNR (dB)" },
+                    grid: { drawOnChartArea: false },
+                  },
+                },
+              };
+              return (
+                <div key={nid} className="range-test-chart-wrap">
+                  <h3 className="range-test-chart-title">{name}</h3>
+                  <div className="range-test-chart-inner">
+                    <Line data={chartData} options={options} />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          {rangeTestDistance.trim() && (
+            <p className="range-test-distance-note">
+              This run tagged with distance: <strong>{rangeTestDistance.trim()} m</strong> (for your records; not stored on server).
+            </p>
+          )}
+        </section>
+      )}
 
       {packetsModalOpen && lastTestRunId && (
         <PacketsTableModal

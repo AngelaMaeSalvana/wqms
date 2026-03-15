@@ -1,7 +1,7 @@
 import React from "react";
 import BatteryIndicator from "../BatteryIndicator";
 
-export default function NodeMarker({ nodeId, onTestSensor, isTesting, testStatus, inactive, batteryVoltage }) {
+export default function NodeMarker({ nodeId, onTestSensor, isTesting, testStatus, inactive, batteryVoltage, batteryPercentage }) {
   const handleClick = () => {
     if (onTestSensor && !isTesting && !inactive) onTestSensor(nodeId);
   };
@@ -112,9 +112,9 @@ export default function NodeMarker({ nodeId, onTestSensor, isTesting, testStatus
       >
           {icon}
         </button>
-        {batteryVoltage != null && (
+        {(batteryVoltage != null || batteryPercentage != null) && (
           <div className="node-marker-battery">
-            <BatteryIndicator voltage={batteryVoltage} size="small" />
+            <BatteryIndicator voltage={batteryVoltage} percentage={batteryPercentage} size="small" />
           </div>
         )}
       </div>

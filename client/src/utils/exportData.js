@@ -86,20 +86,26 @@ export const exportToExcel = (data, filename = 'water-quality-data') => {
 };
 
 /**
- * Format readings data for export
+ * Format readings data for export.
+ * @param {object[]} readings - Raw readings (sensor_readings or similar).
+ * @param {object} [nodesById] - Optional map of node id -> { location, ... } to resolve location from nodes table.
  */
-export const formatReadingsForExport = (readings) => {
-  return readings.map(reading => ({
-    date: reading.date || reading.timestamp,
-    wqi: reading.wqi,
-    temperature: reading.temperature,
-    turbidity: reading.turbidity,
-    pH: reading.pH || reading.ph,
-    dissolvedOxygen: reading.dissolvedOxygen || reading.dissolved_oxygen,
-    nh3: reading.nh3 || reading.NH3,
-    nodeId: reading.nodeId || reading.node_id,
-    location: reading.location,
-  }));
+export const formatReadingsForExport = (readings, nodesById = null) => {
+  return readings.map(reading => {
+    const nodeId = reading.nodeId || reading.node_id;
+    const location = nodesById?.[nodeId]?.location ?? reading.location ?? '';
+    return {
+      date: reading.date || reading.timestamp,
+      wqi: reading.wqi,
+      temperature: reading.temperature,
+      turbidity: reading.turbidity,
+      pH: reading.pH || reading.ph,
+      dissolvedOxygen: reading.dissolvedOxygen || reading.dissolved_oxygen,
+      nh3: reading.nh3 || reading.NH3,
+      nodeId,
+      location,
+    };
+  });
 };
 
 /**

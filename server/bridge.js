@@ -168,13 +168,13 @@ function payloadToRow(topic, data, t_be_rx) {
 
   return {
     node_id: nodeId,
-    location: data.location ?? 'Unknown',
     temperature: temp,
     turbidity: turb,
     ph,
     dissolved_oxygen: doVal,
     flow_rate: data.flowRate ?? data.flow_rate ?? null,
     battery_voltage: data.batteryVoltage ?? data.battery_voltage ?? null,
+    battery_percentage: data.batteryPercentage ?? data.battery_percentage ?? null,
     wqi: wqi != null ? wqi : null,
     seq,
     tx_millis: data.tx_millis != null ? (typeof data.tx_millis === 'number' ? data.tx_millis : parseInt(data.tx_millis, 10)) : null,
@@ -190,10 +190,10 @@ function payloadToRow(topic, data, t_be_rx) {
   };
 }
 
-/** Columns allowed on sensor_readings. wqi = calculated in backend from temp, ph, do, turbidity, etc. */
+/** Columns allowed on sensor_readings. wqi = calculated in backend from temp, ph, do, turbidity, etc. Location is in nodes table. */
 const SENSOR_READINGS_COLUMNS = [
-  'node_id', 'location', 'temperature', 'turbidity', 'ph', 'dissolved_oxygen',
-  'flow_rate', 'battery_voltage', 'wqi',
+  'node_id', 'temperature', 'turbidity', 'ph', 'dissolved_oxygen',
+  'flow_rate', 'battery_voltage', 'battery_percentage', 'wqi',
   'seq', 'tx_millis', 'rx_millis', 'timestamp',
   't_node', 't_fwd_rx', 't_fwd_pub', 't_be_rx', 'test_run_id',
   'rssi', 'snr',
@@ -239,7 +239,8 @@ const testRunPollInterval = setInterval(pollActiveTestRun, 10000);
 /** Recalculate and upsert the daily summary for a node after a new reading is stored. */
 async function updateDailySummary(data, nodeId) {
   const today = new Date().toISOString().split('T')[0];
-  const location = data.location ?? 'Unknown';
+  const { data: nodeRow } = await supabase.from('nodes').select('location').eq('id', nodeId).maybeSingle();
+  const location = nodeRow?.location ?? nodeId;
   const ph = data.pH ?? data.ph ?? null;
   const tan = data.tan ?? data.TAN ?? 0.5;
   const doVal = data.dissolvedOxygen ?? data.do ?? data.dissolved_oxygen ?? null;
@@ -313,7 +314,7 @@ async function updateDailySummary(data, nodeId) {
     summary = {
       date: today,
       node_id: nodeId,
-      location,
+      location: location,
       avg_temperature:      temp,
       avg_turbidity:        turb,
       avg_ph:               ph,
@@ -348,12 +349,13 @@ async function updateDailySummary(data, nodeId) {
   }
 }
 
-/** Insert one reading into Supabase. Only whitelisted columns are sent (never nh3/tan/wqi). */
+/** Insert one reading into Supabase. Only whitelisted columns are sent (location lives in nodes table). */
 async function insertReading(row) {
   const payload = {};
   for (const k of SENSOR_READINGS_COLUMNS) {
     payload[k] = row[k] ?? null;
   }
+  delete payload.location; // ensure never sent — column removed from sensor_readings
   const { data, error } = await supabase
     .from(SUPABASE_TABLE)
     .insert(payload)
