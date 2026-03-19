@@ -1153,3 +1153,105 @@
 .range-test-live .range-test-charts {
   margin-top: 8px;
 }
+
+/* ── Scenario Evaluator: pass/fail score ───────────────────────────────────── */
+
+.scenario-eval-result {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.scenario-eval-result-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.scenario-eval-badge {
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+}
+
+.scenario-eval-badge--pass {
+  background: rgba(34, 160, 107, 0.18);
+  color: #2d8f5f;
+  border-color: rgba(34, 160, 107, 0.45);
+}
+
+.scenario-eval-badge--partial {
+  background: var(--warn-bg, #fff8e6);
+  color: var(--warn-text, #b38600);
+  border-color: var(--warn-border, #e6c84a);
+}
+
+.scenario-eval-badge--fail {
+  background: rgba(220, 80, 80, 0.15);
+  color: #c44;
+  border-color: rgba(220, 80, 80, 0.4);
+}
+
+.scenario-eval-badge--neutral {
+  color: var(--text-muted);
+}
+
+.scenario-eval-score {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.scenario-eval-reasons {
+  margin: 10px 0 0;
+  padding-left: 1.2rem;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  line-height: 1.45;
+}
+
+.scenario-eval-reset-btn {
+  font-size: 0.82rem;
+}
+
+.scenario-eval-reset-note {
+  margin: 10px 0 0;
+  padding: 10px 12px;
+  font-size: 0.82rem;
+  line-height: 1.4;
+  color: var(--text);
+  background: rgba(34, 160, 107, 0.12);
+  border: 1px solid rgba(34, 160, 107, 0.35);
+  border-radius: 8px;
+}
+
+.scenario-eval-output-label {
+  margin: 0 0 8px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.scenario-eval-focus-note {
+  margin: 10px 0 0;
+  padding: 8px 10px;
+  font-size: 0.8rem;
+  line-height: 1.45;
+  color: var(--text-muted);
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 8px;
+  border: 1px dashed var(--border);
+}
+
+.scenario-eval-focus-note-sev {
+  font-weight: 700;
+  color: var(--text);
+}

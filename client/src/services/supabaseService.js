@@ -8,6 +8,23 @@ export { isSupabaseEnabled };
 
 // --- Readings ---
 
+const READINGS_PAGE_SIZE = 2000;
+
+async function getAllRows(buildQuery, pageSize = READINGS_PAGE_SIZE) {
+  const all = [];
+  let from = 0;
+  while (true) {
+    const to = from + pageSize - 1;
+    const { data, error } = await buildQuery().range(from, to);
+    if (error) throw new Error(error.message);
+    const rows = data || [];
+    all.push(...rows);
+    if (rows.length < pageSize) break;
+    from += pageSize;
+  }
+  return all;
+}
+
 export async function getLatestReading(nodeId = null) {
   if (!isSupabaseEnabled()) return null;
   let q = supabase
@@ -23,14 +40,23 @@ export async function getLatestReading(nodeId = null) {
 
 export async function getReadings({ startDate, endDate, nodeId, testRunId, monitoringOnly, limit = 100 }) {
   if (!isSupabaseEnabled()) return [];
-  let q = supabase.from('sensor_readings').select('*');
-  if (startDate) q = q.gte('timestamp', `${startDate}T00:00:00.000Z`);
-  if (endDate) q = q.lte('timestamp', `${endDate}T23:59:59.999Z`);
-  if (nodeId) q = q.eq('node_id', nodeId);
-  if (testRunId) q = q.eq('test_run_id', testRunId);
-  else if (monitoringOnly) q = q.is('test_run_id', null);
-  q = q.order('timestamp', { ascending: false }).limit(limit);
-  const { data, error } = await q;
+
+  const wantAll = limit == null || limit === 0 || limit === Infinity;
+  const build = () => {
+    let q = supabase.from('sensor_readings').select('*');
+    if (startDate) q = q.gte('timestamp', `${startDate}T00:00:00.000Z`);
+    if (endDate) q = q.lte('timestamp', `${endDate}T23:59:59.999Z`);
+    if (nodeId) q = q.eq('node_id', nodeId);
+    if (testRunId) q = q.eq('test_run_id', testRunId);
+    else if (monitoringOnly) q = q.is('test_run_id', null);
+    return q.order('timestamp', { ascending: false });
+  };
+
+  if (wantAll) {
+    return getAllRows(build);
+  }
+
+  const { data, error } = await build().limit(limit);
   if (error) throw new Error(error.message);
   return data || [];
 }
@@ -60,13 +86,13 @@ export async function getPerformanceReadings({ startDate, endDate, nodeId, testR
 }
 
 /**
- * Fetch alerts with t_alert_trigger for alert responsiveness evaluation.
+ * Fetch alerts with t_alert_trigger and email_sent_at for alert responsiveness and email evaluation.
  */
 export async function getPerformanceAlerts({ startDate, endDate, nodeId, limit = 200 }) {
   if (!isSupabaseEnabled()) return [];
   let q = supabase
     .from('alerts')
-    .select('node_id, seq, t_alert_trigger, timestamp')
+    .select('id, node_id, seq, parameter, value, t_alert_trigger, timestamp, email_sent_at')
     .not('t_alert_trigger', 'is', null);
   if (startDate) q = q.gte('timestamp', `${startDate}T00:00:00.000Z`);
   if (endDate) q = q.lte('timestamp', `${endDate}T23:59:59.999Z`);
@@ -133,7 +159,7 @@ export async function postReading(reading) {
 
 // --- Alerts ---
 
-export async function getAlerts({ limit = 50, severity, startDate, endDate } = {}) {
+export async function getAlerts({ limit = 50, severity, startDate, endDate, nodeId } = {}) {
   if (!isSupabaseEnabled()) return [];
   let q = supabase
     .from('alerts')
@@ -143,9 +169,23 @@ export async function getAlerts({ limit = 50, severity, startDate, endDate } = {
   if (severity) q = q.eq('severity', severity);
   if (startDate) q = q.gte('timestamp', `${startDate}T00:00:00.000Z`);
   if (endDate) q = q.lte('timestamp', `${endDate}T23:59:59.999Z`);
+  if (nodeId) q = q.eq('node_id', nodeId);
   const { data, error } = await q;
   if (error) throw new Error(error.message);
   return data || [];
+}
+
+/**
+ * Record that an alert notification email was sent (for performance evaluation).
+ */
+export async function patchAlertEmailSent(alertId, emailSentAt = new Date().toISOString()) {
+  if (!isSupabaseEnabled()) throw new Error('Supabase not configured');
+  const { error } = await supabase
+    .from('alerts')
+    .update({ email_sent_at: typeof emailSentAt === 'number' ? new Date(emailSentAt).toISOString() : emailSentAt })
+    .eq('id', alertId);
+  if (error) throw new Error(error.message);
+  return { success: true };
 }
 
 export async function postAlert(alert) {
@@ -243,7 +283,13 @@ export async function getNodesFromSupabase() {
         .select('id, name, location, status, lat, lng, last_maintenance')
         .order('id');
       if (err2) throw new Error(err2.message);
-      const withDefault = (fallback || []).map((r) => ({ ...r, active: true, last_sensor_test_at: null, last_sensor_test_status: null }));
+      // Older schema may not have nodes.active; persist deactivation using nodes.status='inactive'.
+      const withDefault = (fallback || []).map((r) => ({
+        ...r,
+        active: r.status !== 'inactive',
+        last_sensor_test_at: null,
+        last_sensor_test_status: null,
+      }));
       const filtered = withDefault.filter((r) => r.status !== 'removed');
       if (filtered.length > 0) return filtered;
       const derived = await getNodesDerivedFromReadings();
@@ -388,7 +434,7 @@ export async function saveNodesToSupabase(nodes) {
     await supabase.from('nodes').update({ status: 'removed' }).eq('id', id);
   }
 
-  const rows = nodes.map((n) => {
+  const rowsWithActive = nodes.map((n) => {
     const isDeactivated = n.active === false;
     return {
       id: n.id,
@@ -401,8 +447,25 @@ export async function saveNodesToSupabase(nodes) {
       active: !isDeactivated,
     };
   });
-  const { error } = await supabase.from('nodes').upsert(rows, { onConflict: 'id' });
-  if (error) throw new Error(error.message);
+
+  const upsertRows = async (rows) => {
+    const { error } = await supabase.from('nodes').upsert(rows, { onConflict: 'id' });
+    if (error) throw new Error(error.message);
+  };
+
+  try {
+    await upsertRows(rowsWithActive);
+  } catch (e) {
+    // Older schema may not have nodes.active; retry without the column
+    // (deactivation is persisted via nodes.status='inactive').
+    if (/column.*active.*does not exist/i.test(String(e?.message ?? e))) {
+      const rowsWithoutActive = rowsWithActive.map(({ active, ...rest }) => rest);
+      await upsertRows(rowsWithoutActive);
+    } else {
+      throw e;
+    }
+  }
+
   return { success: true };
 }
 

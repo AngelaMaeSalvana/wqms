@@ -230,12 +230,13 @@ async function insertAlert(row) {
   ]);
 }
 
-async function getAlerts({ limit = 50, severity, startDate, endDate } = {}) {
+async function getAlerts({ limit = 50, severity, startDate, endDate, nodeId } = {}) {
   if (useSupabase) {
     let q = supabase.from('alerts').select('*').order('timestamp', { ascending: false }).limit(limit);
     if (severity) q = q.eq('severity', severity);
     if (startDate) q = q.gte('timestamp', `${startDate}T00:00:00.000Z`);
     if (endDate) q = q.lte('timestamp', `${endDate}T23:59:59.999Z`);
+    if (nodeId) q = q.eq('node_id', nodeId);
     const { data, error } = await q;
     if (error) throw error;
     return data || [];
@@ -245,9 +246,20 @@ async function getAlerts({ limit = 50, severity, startDate, endDate } = {}) {
   if (severity) { sql += ' AND severity = ?'; params.push(severity); }
   if (startDate) { sql += ' AND date(timestamp) >= ?'; params.push(startDate); }
   if (endDate) { sql += ' AND date(timestamp) <= ?'; params.push(endDate); }
+  if (nodeId) { sql += ' AND node_id = ?'; params.push(nodeId); }
   sql += ' ORDER BY timestamp DESC LIMIT ?';
   params.push(parseInt(limit));
   return sqliteAll(sql, params);
+}
+
+async function updateAlertEmailSent(id, emailSentAt) {
+  const ts = emailSentAt ? new Date(emailSentAt).toISOString() : null;
+  if (useSupabase) {
+    const { error } = await supabase.from('alerts').update({ email_sent_at: ts }).eq('id', id);
+    if (error) throw error;
+    return;
+  }
+  await sqliteRun('UPDATE alerts SET email_sent_at = ? WHERE id = ?', [ts, id]);
 }
 
 async function getTestRunsList({ limit = 50 } = {}) {
@@ -410,6 +422,7 @@ function initializeSqlite() {
     run(`ALTER TABLE alerts ADD COLUMN status TEXT DEFAULT 'active'`).catch(() => {}),
     run(`ALTER TABLE alerts ADD COLUMN seq INTEGER`).catch(() => {}),
     run(`ALTER TABLE alerts ADD COLUMN t_alert_trigger INTEGER`).catch(() => {}),
+    run(`ALTER TABLE alerts ADD COLUMN email_sent_at DATETIME`).catch(() => {}),
     run(`CREATE TABLE IF NOT EXISTS test_runs (
       id TEXT PRIMARY KEY,
       started_at INTEGER NOT NULL,
@@ -447,6 +460,7 @@ module.exports = {
   getReadingByDate,
   insertAlert,
   getAlerts,
+  updateAlertEmailSent,
   getTimestampLogs,
   getDailySummaries,
   getDailySummaryByDateAndNode,

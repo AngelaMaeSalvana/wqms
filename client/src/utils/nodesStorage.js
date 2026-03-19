@@ -20,6 +20,14 @@ export function getNodes() {
 }
 
 /**
+ * Clears the in-memory nodes cache. Next getNodes() will use localStorage until
+ * loadNodes() runs again. Call before loadNodes() to force a fresh fetch from Supabase.
+ */
+export function invalidateNodesCache() {
+  nodesCache = null;
+}
+
+/**
  * When Supabase is enabled: fetches nodes from DB, updates cache and localStorage.
  * Always uses Supabase as source when enabled; never falls back to localStorage
  * so that deleted nodes don't reappear from stale cache.
@@ -30,6 +38,7 @@ export async function loadNodes() {
     const { isSupabaseEnabled } = await import('../lib/supabaseClient');
     const { getNodesFromSupabase } = await import('../services/supabaseService');
     if (isSupabaseEnabled()) {
+      nodesCache = null;
       const [fromDb, lastTestsMap] = await Promise.all([
         getNodesFromSupabase(),
         (await import('../services/supabaseService')).getNodeLastSensorTestsMap(),
@@ -88,6 +97,9 @@ export async function saveNodes(nodes) {
     const { isSupabaseEnabled } = await import('../lib/supabaseClient');
     const { saveNodesToSupabase } = await import('../services/supabaseService');
     if (isSupabaseEnabled()) await saveNodesToSupabase(nodes);
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('wqms-nodes-updated'));
+    }
   } catch (e) {
     console.warn("saveNodes to Supabase failed", e);
   }

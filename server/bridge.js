@@ -397,6 +397,11 @@ client.on('connect', () => {
     }
     console.log('[MQTT] Subscribed to water-quality/#');
   });
+  // Explicit subscription for test_start/test_stop commands (ensure receipt on all brokers)
+  client.subscribe('water-quality/command', { qos: 1 }, (err) => {
+    if (err) console.error('[MQTT] Subscribe error water-quality/command:', err);
+    else console.log('[MQTT] Subscribed to water-quality/command');
+  });
 });
 
 client.on('message', (topic, message) => {

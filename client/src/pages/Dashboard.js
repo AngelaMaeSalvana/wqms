@@ -14,7 +14,7 @@ import { useToast } from "../hooks/useToast";
 import { calculateWQI, getWQIClass } from "../utils/wqiCalculator";
 import { getNH3FromReading } from "../utils/nh3Calculator";
 import { buildAlertsForAllNodes } from "../utils/alertsData";
-import { getNodes, loadNodes } from "../utils/nodesStorage";
+import { getNodes, loadNodes, invalidateNodesCache } from "../utils/nodesStorage";
 import api from "../services/api";
 import { useSensorTest } from "../hooks/useSensorTest";
 import { useNodeStatus } from "../hooks/useNodeStatus";
@@ -182,34 +182,41 @@ export default function Dashboard() {
     return () => clearInterval(interval);
   }, []);
 
-  useEffect(() => {
-    loadNodes()
-      .then(() => {
-        const list = getNodes();
-        setNodes(list);
-        const activeList = list.filter((n) => n.active !== false);
-        const stored = getStoredNodeId();
-        const validStored = stored && activeList.some((n) => n.id === stored);
-        setSelectedNodeId((id) => {
-          const validCurrent = id && activeList.some((n) => n.id === id);
-          if (validCurrent) return id;
-          if (validStored) return stored;
-          return activeList[0]?.id ?? list[0]?.id ?? "";
-        });
-      })
-      .finally(() => setNodesLoaded(true));
+  const refreshNodes = useCallback(() => {
+    invalidateNodesCache();
+    return loadNodes().then(() => {
+      const list = getNodes();
+      setNodes(list);
+      const activeList = list.filter((n) => n.active !== false);
+      const stored = getStoredNodeId();
+      setSelectedNodeId((id) => {
+        const validCurrent = id && activeList.some((n) => n.id === id);
+        if (validCurrent) return id;
+        if (stored && activeList.some((n) => n.id === stored)) return stored;
+        return activeList[0]?.id ?? list[0]?.id ?? "";
+      });
+    });
   }, []);
+
   useEffect(() => {
-    const onFocus = () => loadNodes().then(() => setNodes(getNodes()));
-    window.addEventListener("focus", onFocus);
-    return () => window.removeEventListener("focus", onFocus);
-  }, []);
+    refreshNodes().finally(() => setNodesLoaded(true));
+  }, [refreshNodes]);
+
+  useEffect(() => {
+    window.addEventListener("focus", refreshNodes);
+    const onNodesUpdated = () => refreshNodes();
+    window.addEventListener("wqms-nodes-updated", onNodesUpdated);
+    return () => {
+      window.removeEventListener("focus", refreshNodes);
+      window.removeEventListener("wqms-nodes-updated", onNodesUpdated);
+    };
+  }, [refreshNodes]);
 
   // All data from Supabase/API only; no dummy/test/mock data.
   useEffect(() => {
     setReadingsLoaded(false);
     const today = toDateStr(new Date());
-    api.getReadings({ startDate: today, endDate: today, monitoringOnly: true, limit: 200 })
+    api.getReadings({ startDate: today, endDate: today, monitoringOnly: true, limit: 2000 })
       .then((rows) => {
         const list = applyCalibrationToReadings(Array.isArray(rows) ? rows : []);
         setTodayReadings(list);
@@ -327,10 +334,10 @@ export default function Dashboard() {
 
   const handleRefresh = () => {
     setIsRefreshing(true);
-    setTimeout(() => {
+    refreshNodes().finally(() => {
       setIsRefreshing(false);
       setLastUpdated(new Date());
-    }, 800);
+    });
   };
 
   /** Today's data from API/Supabase only. One point per reading for selected node. */

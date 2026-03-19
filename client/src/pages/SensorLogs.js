@@ -130,6 +130,28 @@ export default function SensorLogs() {
     setCollapsedSections((prev) => ({ ...prev, [key]: !prev[key] }));
   }, []);
 
+  const dateBucketLabel = useCallback((d) => {
+    if (!d) return "";
+    const now = new Date();
+    const todayStart = new Date(now);
+    todayStart.setHours(0, 0, 0, 0);
+    const tomorrowStart = new Date(todayStart);
+    tomorrowStart.setDate(tomorrowStart.getDate() + 1);
+
+    const yesterdayStart = new Date(todayStart);
+    yesterdayStart.setDate(yesterdayStart.getDate() - 1);
+
+    // "This week" = last 7 days including today & yesterday buckets.
+    const thisWeekStart = new Date(todayStart);
+    thisWeekStart.setDate(thisWeekStart.getDate() - 6);
+
+    const t = d.getTime();
+    if (t >= todayStart.getTime() && t < tomorrowStart.getTime()) return "Today";
+    if (t >= yesterdayStart.getTime() && t < todayStart.getTime()) return "Yesterday";
+    if (t >= thisWeekStart.getTime()) return "This week";
+    return "Older";
+  }, []);
+
   const tableDateRange = useMemo(() => {
     if (tableDateFrom && tableDateTo) {
       const start = new Date(tableDateFrom);
@@ -219,13 +241,16 @@ export default function SensorLogs() {
   const groupedRows = useMemo(() => {
     const groups = {};
     sensorTableRows.forEach((row) => {
-      const key = getDateKey(row.date);
+      const key = dateBucketLabel(row.date);
       if (!groups[key]) groups[key] = [];
       groups[key].push(row);
     });
-    const todayKey = getDateKey(new Date());
-    const dateKeys = Object.keys(groups).sort((a, b) => (tableSort.column === "date" && tableSort.direction === "asc" ? a.localeCompare(b) : b.localeCompare(a)));
-    return { groups, dateKeys, todayKey };
+    const keys = Object.keys(groups);
+    const orderDesc = ["Today", "Yesterday", "This week", "Older"];
+    const orderAsc = ["Older", "This week", "Yesterday", "Today"];
+    const order = tableSort.column === "date" && tableSort.direction === "asc" ? orderAsc : orderDesc;
+    const dateKeys = order.filter((k) => keys.includes(k)).concat(keys.filter((k) => !order.includes(k)));
+    return { groups, dateKeys };
   }, [sensorTableRows, tableSort.column, tableSort.direction]);
 
   const handleExport = (format) => {
@@ -598,8 +623,7 @@ export default function SensorLogs() {
                   groupedRows.dateKeys.map((dateKey) => {
                     const rows = groupedRows.groups[dateKey] || [];
                     if (rows.length === 0) return null;
-                    const [y, m, d] = dateKey.split("-").map(Number);
-                    const label = dateKey === groupedRows.todayKey ? "Today" : new Date(y, m - 1, d).toLocaleDateString();
+                    const label = dateKey;
                     const collapsed = collapsedSections[dateKey];
                     return (
                       <React.Fragment key={dateKey}>

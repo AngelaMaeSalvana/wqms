@@ -9,6 +9,13 @@ const PUBLIC_KEY = process.env.REACT_APP_EMAILJS_PUBLIC_KEY;
 const SERVICE_ID = process.env.REACT_APP_EMAILJS_SERVICE_ID;
 const TEMPLATE_ID = process.env.REACT_APP_EMAILJS_TEMPLATE_ID;
 
+function maskToken(v) {
+  if (!v) return 'missing';
+  const s = String(v);
+  if (s.length <= 6) return `${s[0] ?? ''}***`;
+  return `${s.slice(0, 2)}***${s.slice(-2)}`;
+}
+
 const DEFAULT_THRESHOLDS = {
   temperatureMin: 18,
   temperatureMax: 30,
@@ -20,7 +27,7 @@ const DEFAULT_THRESHOLDS = {
 };
 
 export function isEmailJsConfigured() {
-  return !!(PUBLIC_KEY && SERVICE_ID && TEMPLATE_ID);
+  return !!(String(PUBLIC_KEY || '').trim() && String(SERVICE_ID || '').trim() && String(TEMPLATE_ID || '').trim());
 }
 
 function getThresholds() {
@@ -114,7 +121,18 @@ export async function sendAlertEmail(alert, toEmail, readingsByNode = {}) {
     await emailjs.send(SERVICE_ID, TEMPLATE_ID, params, { publicKey: PUBLIC_KEY });
     return { success: true };
   } catch (err) {
-    console.warn('EmailJS send failed:', err);
+    console.warn(
+      'EmailJS send failed:',
+      err,
+      '| debug:',
+      {
+        status: err?.status,
+        text: err?.text || err?.message,
+        publicKey: maskToken(PUBLIC_KEY),
+        serviceId: SERVICE_ID || 'missing',
+        templateId: TEMPLATE_ID || 'missing',
+      }
+    );
     return { success: false, error: err?.text || err?.message || 'Send failed' };
   }
 }

@@ -1,10 +1,13 @@
 import React, { useEffect, useState, useMemo, useCallback } from "react";
 import { createPortal } from "react-dom";
+import { Line } from "react-chartjs-2";
 import { jsPDF } from "jspdf";
 import { autoTable } from "jspdf-autotable";
 import * as XLSX from "xlsx";
 import api from "../../services/api";
 import { computeIoTMetrics } from "../../utils/iotMetrics";
+import { computeAlertMetrics } from "../../utils/alertMetrics";
+import "../../utils/chartConfig";
 import "./TestRunDetailModal.css";
 
 function formatTsShort(v) {
@@ -67,12 +70,14 @@ function MetricValue({ value, highlight }) {
 export default function TestRunDetailModal({ runId, nodes, onClose }) {
   const [run, setRun] = useState(null);
   const [perfRows, setPerfRows] = useState([]);
+  const [alertRows, setAlertRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [activeView, setActiveView] = useState("metrics"); // "metrics" | "packets"
   const [packetSort, setPacketSort] = useState({ col: "seq", dir: "asc" });
   const [packetNodeFilter, setPacketNodeFilter] = useState("all");
   const [exporting, setExporting] = useState(false);
+  const [rangeTestDistance, setRangeTestDistance] = useState("");
 
   useEffect(() => {
     if (!runId) return;
@@ -84,9 +89,18 @@ export default function TestRunDetailModal({ runId, nodes, onClose }) {
         return null;
       }),
       api.getPerformanceReadings({ testRunId: runId, limit: 5000 }).catch(() => []),
-    ]).then(([r, rows]) => {
+    ]).then(async ([r, rows]) => {
       setRun(r);
       setPerfRows(Array.isArray(rows) ? rows : []);
+      let alerts = [];
+      if (r?.started_at) {
+        const startDate = new Date(r.started_at).toISOString().slice(0, 10);
+        const endDate = (r.stopped_at ? new Date(r.stopped_at) : new Date()).toISOString().slice(0, 10);
+        try {
+          alerts = await api.getPerformanceAlerts({ startDate, endDate, nodeId: r.node_id || undefined, limit: 500 });
+        } catch (_) {}
+      }
+      setAlertRows(Array.isArray(alerts) ? alerts : []);
     }).finally(() => setLoading(false));
   }, [runId]);
 
@@ -108,10 +122,63 @@ export default function TestRunDetailModal({ runId, nodes, onClose }) {
     [perfRows, expectedPackets]
   );
 
+  const alertMetrics = useMemo(
+    () => computeAlertMetrics(alertRows, perfRows),
+    [alertRows, perfRows]
+  );
+
   const packetUniqueNodes = useMemo(
     () => [...new Set(perfRows.map((r) => r.node_id).filter(Boolean))].sort(),
     [perfRows]
   );
+
+  const rangeTestChartDataByNode = useMemo(() => {
+    const raw = perfRows;
+    if (!raw || !Array.isArray(raw) || raw.length === 0) return {};
+    const byNode = {};
+    raw.forEach((r) => {
+      const nid = r.node_id || "?";
+      if (!byNode[nid]) byNode[nid] = [];
+      byNode[nid].push(r);
+    });
+    const out = {};
+    Object.entries(byNode).forEach(([nid, rows]) => {
+      const withSeq = rows
+        .filter((r) => r.seq != null && Number.isFinite(Number(r.seq)))
+        .map((r) => ({ ...r, seq: Number(r.seq) }));
+      withSeq.sort((a, b) => a.seq - b.seq);
+      const hasRssi = withSeq.some((r) => r.rssi != null && Number.isFinite(Number(r.rssi)));
+      const hasSnr = withSeq.some((r) => r.snr != null && Number.isFinite(Number(r.snr)));
+      if (!hasRssi && !hasSnr) return;
+      const labels = withSeq.map((r) => String(r.seq));
+      out[nid] = {
+        labels,
+        datasets: [
+          ...(hasRssi
+            ? [{
+                label: "RSSI (dBm)",
+                data: withSeq.map((r) => (r.rssi != null && Number.isFinite(Number(r.rssi)) ? Number(r.rssi) : null)),
+                borderColor: "rgb(75, 192, 192)",
+                backgroundColor: "rgba(75, 192, 192, 0.1)",
+                yAxisID: "y",
+                spanGaps: true,
+              }]
+            : []),
+          ...(hasSnr
+            ? [{
+                label: "SNR (dB)",
+                data: withSeq.map((r) => (r.snr != null && Number.isFinite(Number(r.snr)) ? Number(r.snr) : null)),
+                borderColor: "rgb(255, 159, 64)",
+                backgroundColor: "rgba(255, 159, 64, 0.1)",
+                yAxisID: "y1",
+                spanGaps: true,
+              }]
+            : []),
+        ],
+      };
+    });
+    return out;
+  }, [perfRows]);
 
   const sortedPackets = useMemo(() => {
     const filtered = packetNodeFilter === "all" ? perfRows : perfRows.filter((r) => r.node_id === packetNodeFilter);
@@ -265,6 +332,37 @@ export default function TestRunDetailModal({ runId, nodes, onClose }) {
         },
       });
 
+      y = doc.lastAutoTable.finalY + 10;
+    }
+
+    // ── Section: Alert Responsiveness ───────────────────────────────────────
+    if (alertMetrics.count > 0) {
+      if (y > pageH - 45) { doc.addPage(); y = 18; }
+      doc.setFontSize(9);
+      doc.setFont("helvetica", "bold");
+      doc.setTextColor(...ACCENT);
+      doc.text("Alert Responsiveness", margin, y);
+      y += 5;
+      const alertHead = [["Alerts", "Mean response (ms)", "Max response (ms)", "Trigger latency mean (ms)", "Trigger latency max (ms)", "Samples", "Emails sent", "Email delay mean (ms)", "Email delay max (ms)"]];
+      const alertBody = [[
+        alertMetrics.count,
+        alertMetrics.meanMs != null ? Math.round(alertMetrics.meanMs) : "—",
+        alertMetrics.maxMs != null ? Math.round(alertMetrics.maxMs) : "—",
+        alertMetrics.triggerLatencyMeanMs != null ? Math.round(alertMetrics.triggerLatencyMeanMs) : "—",
+        alertMetrics.triggerLatencyMaxMs != null ? Math.round(alertMetrics.triggerLatencyMaxMs) : "—",
+        alertMetrics.triggerLatencySamples ?? 0,
+        alertMetrics.emailSentCount ?? 0,
+        alertMetrics.emailDelayMeanMs != null ? Math.round(alertMetrics.emailDelayMeanMs) : "—",
+        alertMetrics.emailDelayMaxMs != null ? Math.round(alertMetrics.emailDelayMaxMs) : "—",
+      ]];
+      autoTable(doc, {
+        head: alertHead,
+        body: alertBody,
+        startY: y,
+        margin: { left: margin, right: margin },
+        styles: { fontSize: 7, cellPadding: 2.5 },
+        headStyles: { fillColor: ACCENT, textColor: 255, fontStyle: "bold", fontSize: 6 },
+      });
       y = doc.lastAutoTable.finalY + 10;
     }
 
@@ -502,7 +600,7 @@ export default function TestRunDetailModal({ runId, nodes, onClose }) {
     const ts = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
     doc.save(`wqms-testrun-${String(run.id).slice(0, 8)}-${ts}.pdf`);
     setExporting(false);
-  }, [run, nodes, nodeMetrics, expectedPackets, perfRows, e2eMs]);
+  }, [run, nodes, nodeMetrics, expectedPackets, perfRows, e2eMs, alertMetrics]);
 
   const exportExcel = useCallback(() => {
     if (!run) return;
@@ -561,6 +659,27 @@ export default function TestRunDetailModal({ runId, nodes, onClose }) {
     const wsMetrics = XLSX.utils.aoa_to_sheet([metricsHeader, ...metricsData]);
     wsMetrics["!cols"] = [{ wch: 28 }, ...Array(13).fill({ wch: 16 })];
     XLSX.utils.book_append_sheet(wb, wsMetrics, "IoT Metrics");
+
+    // ── Sheet: Alert Responsiveness ──────────────────────────────────────────
+    const alertHeader = [
+      "Alerts triggered", "Mean response (ms)", "Max response (ms)",
+      "Trigger latency mean (ms)", "Trigger latency max (ms)", "Trigger latency samples",
+      "Emails sent", "Email delay mean (ms)", "Email delay max (ms)",
+    ];
+    const alertData = [[
+      alertMetrics.count,
+      alertMetrics.meanMs != null ? Math.round(alertMetrics.meanMs) : "",
+      alertMetrics.maxMs != null ? Math.round(alertMetrics.maxMs) : "",
+      alertMetrics.triggerLatencyMeanMs != null ? Math.round(alertMetrics.triggerLatencyMeanMs) : "",
+      alertMetrics.triggerLatencyMaxMs != null ? Math.round(alertMetrics.triggerLatencyMaxMs) : "",
+      alertMetrics.triggerLatencySamples ?? 0,
+      alertMetrics.emailSentCount ?? 0,
+      alertMetrics.emailDelayMeanMs != null ? Math.round(alertMetrics.emailDelayMeanMs) : "",
+      alertMetrics.emailDelayMaxMs != null ? Math.round(alertMetrics.emailDelayMaxMs) : "",
+    ]];
+    const wsAlerts = XLSX.utils.aoa_to_sheet([alertHeader, ...alertData]);
+    wsAlerts["!cols"] = [{ wch: 18 }, { wch: 18 }, { wch: 16 }, { wch: 22 }, { wch: 22 }, { wch: 14 }, { wch: 14 }, { wch: 20 }, { wch: 20 }];
+    XLSX.utils.book_append_sheet(wb, wsAlerts, "Alert Responsiveness");
 
     // ── Sheet 3: Packet Log ──────────────────────────────────────────────────
     const packetHeader = [
@@ -633,7 +752,7 @@ export default function TestRunDetailModal({ runId, nodes, onClose }) {
     const ts2 = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
     XLSX.writeFile(wb, `wqms-testrun-${String(run.id).slice(0, 8)}-${ts2}.xlsx`);
     setExporting(false);
-  }, [run, nodes, nodeMetrics, expectedPackets, perfRows]);
+  }, [run, nodes, nodeMetrics, expectedPackets, perfRows, alertMetrics]);
 
   if (!runId) return null;
 
@@ -736,6 +855,7 @@ export default function TestRunDetailModal({ runId, nodes, onClose }) {
                   {Object.keys(nodeMetrics).length === 0 ? (
                     <p className="testrun-eval-no-chain">
                       No timestamp chain data (t_fwd_rx / t_be_rx) available for this test run.
+                      {perfRows.length === 0 && " Ensure the bridge is running and you started a test run before running scenarios or having nodes transmit."}
                     </p>
                   ) : (
                     Object.entries(nodeMetrics).map(([nid, m]) => (
@@ -896,6 +1016,144 @@ export default function TestRunDetailModal({ runId, nodes, onClose }) {
                         </div>
                       </div>
                     ))
+                  )}
+
+                  {/* ── Alert responsiveness ── */}
+                  <div className="testrun-eval-alerts-section">
+                    <h3 className="testrun-eval-section-title">
+                      Alert responsiveness ({alertMetrics.count} alert{alertMetrics.count !== 1 ? "s" : ""})
+                    </h3>
+                    {alertMetrics.count === 0 ? (
+                      <p className="testrun-eval-no-chain">
+                        No alerts with t_alert_trigger in this test run window.
+                      </p>
+                    ) : (
+                      <div className="testrun-eval-alerts-body">
+                        <div className="testrun-eval-metric-row">
+                          <div className="testrun-eval-metric">
+                            <span className="testrun-eval-metric-label">Alerts triggered</span>
+                            <MetricValue value={alertMetrics.count} />
+                          </div>
+                          <div className="testrun-eval-metric">
+                            <span className="testrun-eval-metric-label">Mean response</span>
+                            <MetricValue value={fmtLatMs(alertMetrics.meanMs)} />
+                          </div>
+                          <div className="testrun-eval-metric">
+                            <span className="testrun-eval-metric-label">Max response</span>
+                            <MetricValue value={fmtLatMs(alertMetrics.maxMs)} />
+                          </div>
+                        </div>
+                        {alertMetrics.triggerLatencySamples > 0 && (
+                          <div className="testrun-eval-metric-row" style={{ marginTop: "8px" }}>
+                            <div className="testrun-eval-metric">
+                              <span className="testrun-eval-metric-label">Trigger latency (mean)</span>
+                              <MetricValue
+                                value={fmtLatMs(alertMetrics.triggerLatencyMeanMs)}
+                                highlight={
+                                  alertMetrics.triggerLatencyMeanMs != null
+                                    ? alertMetrics.triggerLatencyMeanMs < 30000 ? "ok" : alertMetrics.triggerLatencyMeanMs < 120000 ? "warn" : "bad"
+                                    : null
+                                }
+                              />
+                            </div>
+                            <div className="testrun-eval-metric">
+                              <span className="testrun-eval-metric-label">Trigger latency (max)</span>
+                              <MetricValue value={fmtLatMs(alertMetrics.triggerLatencyMaxMs)} />
+                            </div>
+                            <div className="testrun-eval-metric">
+                              <span className="testrun-eval-metric-label">Samples</span>
+                              <MetricValue value={alertMetrics.triggerLatencySamples} />
+                            </div>
+                          </div>
+                        )}
+                        {alertMetrics.emailSentCount > 0 && (
+                          <div className="testrun-eval-metric-row" style={{ marginTop: "8px" }}>
+                            <div className="testrun-eval-metric">
+                              <span className="testrun-eval-metric-label">Emails sent</span>
+                              <MetricValue value={alertMetrics.emailSentCount} />
+                            </div>
+                            <div className="testrun-eval-metric">
+                              <span className="testrun-eval-metric-label">Email delay (mean)</span>
+                              <MetricValue
+                                value={fmtLatMs(alertMetrics.emailDelayMeanMs)}
+                                highlight={
+                                  alertMetrics.emailDelayMeanMs != null
+                                    ? alertMetrics.emailDelayMeanMs < 10000 ? "ok" : alertMetrics.emailDelayMeanMs < 60000 ? "warn" : "bad"
+                                    : null
+                                }
+                              />
+                            </div>
+                            <div className="testrun-eval-metric">
+                              <span className="testrun-eval-metric-label">Email delay (max)</span>
+                              <MetricValue value={fmtLatMs(alertMetrics.emailDelayMaxMs)} />
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* ── Range Test (RSSI/SNR vs packet) ── */}
+                  {perfRows.length > 0 && Object.keys(rangeTestChartDataByNode).length > 0 && (
+                    <div className="testrun-eval-alerts-section" style={{ marginTop: "20px", paddingTop: "16px", borderTop: "1px solid var(--border)" }}>
+                      <h3 className="testrun-eval-section-title">Range Test</h3>
+                      <p className="testrun-eval-no-chain" style={{ marginBottom: "12px", color: "var(--text-muted)" }}>
+                        Signal strength (RSSI) and SNR over the run. Stronger signal (RSSI &gt; −70 dBm, SNR &gt; 5 dB) indicates better range.
+                      </p>
+                      <div className="range-test-distance-wrap" style={{ marginBottom: "12px" }}>
+                        <label className="range-test-distance-label">
+                          Distance (m)
+                          <input
+                            type="text"
+                            className="range-test-distance-input"
+                            placeholder="e.g. 50"
+                            value={rangeTestDistance}
+                            onChange={(e) => setRangeTestDistance(e.target.value)}
+                            title="Optional: label this run with approximate distance for your records"
+                          />
+                        </label>
+                      </div>
+                      <div className="range-test-charts" style={{ display: "grid", gap: "16px" }}>
+                        {Object.entries(rangeTestChartDataByNode).map(([nid, chartData]) => {
+                          const name = nodes?.find((n) => n.id === nid)?.name ? `${nid} — ${nodes.find((n) => n.id === nid).name}` : nid;
+                          const options = {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            interaction: { mode: "index", intersect: false },
+                            plugins: { legend: { position: "top" } },
+                            scales: {
+                              x: { title: { display: true, text: "Packet (seq)" }, grid: { display: true } },
+                              y: {
+                                type: "linear",
+                                position: "left",
+                                title: { display: true, text: "RSSI (dBm)" },
+                                min: (ctx) => (ctx.chart?.data?.datasets?.some((d) => d.yAxisID === "y") ? -120 : undefined),
+                                max: -30,
+                              },
+                              y1: {
+                                type: "linear",
+                                position: "right",
+                                title: { display: true, text: "SNR (dB)" },
+                                grid: { drawOnChartArea: false },
+                              },
+                            },
+                          };
+                          return (
+                            <div key={nid} className="range-test-chart-wrap" style={{ minHeight: "200px" }}>
+                              <h4 className="range-test-chart-title" style={{ margin: "0 0 8px 0", fontSize: "0.95rem" }}>{name}</h4>
+                              <div className="range-test-chart-inner" style={{ height: "180px" }}>
+                                <Line data={chartData} options={options} />
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                      {rangeTestDistance.trim() && (
+                        <p className="range-test-distance-note" style={{ marginTop: "8px", fontSize: "0.85rem", color: "var(--text-muted)" }}>
+                          This run tagged with distance: <strong>{rangeTestDistance.trim()} m</strong> (for your records; not stored on server).
+                        </p>
+                      )}
+                    </div>
                   )}
                 </div>
               )}

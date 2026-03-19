@@ -62,8 +62,12 @@ if (!MQTT_URL) {
 const args = process.argv.slice(2);
 const scenarioIdx = args.indexOf('--scenario');
 const repeatIdx   = args.indexOf('--repeat');
+const testRunIdIdx = args.indexOf('--test-run-id');
+const nodeIdx     = args.indexOf('--node');
 const scenarioArg = scenarioIdx !== -1 ? args[scenarioIdx + 1] : null;
 const repeatCount = repeatIdx   !== -1 ? Math.max(1, parseInt(args[repeatIdx + 1], 10) || 1) : 1;
+const testRunId   = testRunIdIdx !== -1 ? args[testRunIdIdx + 1] : null;
+const nodeArg     = nodeIdx     !== -1 ? args[nodeIdx + 1] : 'node1';
 
 // ── Thresholds (mirror client DEFAULT_THRESHOLDS) ─────────────────────────────
 
@@ -109,6 +113,8 @@ function basePayload(overrides = {}) {
     t_node:           now,
     t_fwd_rx:         now + randInt(50, 300),
     t_fwd_pub:        now + randInt(310, 600),
+    rssi:             randInt(-85, -65),
+    snr:              randInt(5, 12),
     ...overrides,
   };
 }
@@ -288,6 +294,27 @@ const SCENARIOS = {
       basePayload({ dissolved_oxygen: belowMin(T.dissolvedOxygenMin, 3) }),
     ],
   },
+
+  // ── Low battery (test trigger) ──────────────────────────────────────────────
+  'low-battery': {
+    label: 'Low battery — battery_percentage 8% → HIGH alert',
+    expectedAlerts: 'HIGH Low battery',
+    payloads: () => [basePayload({ battery_percentage: 8, battery_voltage: 3.35 })],
+  },
+
+  // ── Offline (test trigger, UI-only for full simulation) ─────────────────────
+  offline: {
+    label: 'Node offline — simulated by absence of data (use Scenario Evaluator for full test)',
+    expectedAlerts: 'HIGH Node offline',
+    payloads: () => [],  // No payloads; offline = no recent data
+  },
+
+  // ── Maintenance due (test trigger, UI-only for full simulation) ─────────────
+  maintenance: {
+    label: 'Maintenance due — depends on node.lastMaintenance (use Scenario Evaluator for full test)',
+    expectedAlerts: 'MEDIUM Maintenance due',
+    payloads: () => [basePayload()],  // Normal reading; maintenance alert comes from node metadata
+  },
 };
 
 // ── Print scenario list if no args ────────────────────────────────────────────
@@ -298,11 +325,15 @@ if (!scenarioArg) {
   for (const [name, s] of Object.entries(SCENARIOS)) {
     console.log(`  ${name.padEnd(maxLen + 2)} ${s.label}`);
   }
+  console.log('\nOptions: --scenario <name> [--repeat N] [--test-run-id <uuid>] [--node node1|node2]');
   console.log('\nExamples:');
   console.log('  node scripts/test.js --scenario high-do');
   console.log('  node scripts/test.js --scenario low-do --repeat 3');
   console.log('  node scripts/test.js --scenario persistence');
-  console.log('  node scripts/test.js --scenario wqi-drop\n');
+  console.log('  node scripts/test.js --scenario wqi-drop');
+  console.log('  node scripts/test.js --scenario low-battery');
+  console.log('  node scripts/test.js --scenario offline   (no payloads; use Scenario Evaluator for full test)');
+  console.log('  node scripts/test.js --scenario maintenance (use Scenario Evaluator for full test)\n');
   process.exit(0);
 }
 
@@ -318,12 +349,17 @@ if (!scenario) {
 // --repeat builds the queue by calling payloads()[0] freshly for each slot.
 let queue;
 if (repeatCount > 1) {
-  queue = Array.from({ length: repeatCount }, () => scenario.payloads()[0]);
+  const first = scenario.payloads()[0];
+  queue = first != null ? Array.from({ length: repeatCount }, () => ({ ...first })) : [];
 } else {
   queue = scenario.payloads();
 }
 
-const topic = 'water-quality/node1';
+if (testRunId) {
+  queue = queue.map((p) => ({ ...p, test_run_id: testRunId }));
+}
+
+const topic = 'water-quality/' + (nodeArg.startsWith('node') ? nodeArg : 'node' + nodeArg);
 
 // ── MQTT connection ───────────────────────────────────────────────────────────
 
@@ -332,10 +368,15 @@ if (MQTT_USER) opts.username = MQTT_USER;
 if (MQTT_PASS) opts.password = MQTT_PASS;
 if (MQTT_URL.startsWith('mqtts://')) opts.rejectUnauthorized = true;
 
-console.log(`\n[Test] Scenario : ${scenarioArg}`);
-console.log(`[Test] Label    : ${scenario.label}`);
-console.log(`[Test] Expected : ${scenario.expectedAlerts}`);
-console.log(`[Test] Payloads : ${queue.length}\n`);
+console.log(`\n[Test] Scenario  : ${scenarioArg}`);
+console.log(`[Test] Label     : ${scenario.label}`);
+console.log(`[Test] Expected  : ${scenario.expectedAlerts}`);
+console.log(`[Test] Payloads  : ${queue.length}`);
+if (scenarioArg === 'offline' && queue.length === 0) {
+  console.log('[Test] Note: Offline = no data. Use Scenario Evaluator "Node offline (test)" for immediate simulation.');
+}
+if (testRunId) console.log(`[Test] Test Run  : ${testRunId}`);
+console.log(`[Test] Topic     : ${topic}\n`);
 console.log('[Test] Connecting to MQTT broker...');
 
 const client = mqtt.connect(MQTT_URL, opts);

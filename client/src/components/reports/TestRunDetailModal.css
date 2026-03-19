@@ -279,6 +279,19 @@
   margin: 0;
 }
 
+.testrun-eval-alerts-section {
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid var(--border, rgba(255, 255, 255, 0.1));
+}
+
+.testrun-eval-alerts-body {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px 24px;
+  align-items: flex-start;
+}
+
 /* ── Modal header actions (view tabs + close) ─────────────────────────────── */
 
 .testrun-modal-header-actions {
@@ -549,3 +562,31 @@
 .testrun-packets-sig--ok   { color: #34c77b; }
 .testrun-packets-sig--warn { color: #f5a623; }
 .testrun-packets-sig--bad  { color: #e05252; }
+
+/* Range Test section */
+.range-test-distance-wrap { flex-shrink: 0; }
+.range-test-distance-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.88rem;
+  color: var(--text-muted);
+}
+.range-test-distance-input {
+  width: 72px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 0.9rem;
+  background: var(--input-bg, var(--panel));
+  color: var(--text);
+}
+.range-test-charts { display: flex; flex-direction: column; gap: 24px; }
+.range-test-chart-wrap { display: flex; flex-direction: column; gap: 10px; }
+.range-test-chart-title { font-size: 0.95rem; font-weight: 600; margin: 0; color: var(--text); }
+.range-test-chart-inner {
+  height: 220px;
+  min-height: 180px;
+  position: relative;
+}
+.range-test-distance-note { font-size: 0.85rem; color: var(--text-muted); margin: 12px 0 0; }

@@ -158,6 +158,121 @@ function publishTestCommand(type, payload) {
   console.log(`📤 Test command [${type}] published to ${topic}${raw ? ' (json+raw)' : ''}`);
 }
 
+// Publish a crafted telemetry reading to MQTT (used by Scenario Evaluator).
+function publishTestReadingToMQTT(nodeId, payload) {
+  if (!mqttClient?.connected) return false;
+  const normalized = normalizeNodeId(String(nodeId || 'N1'));
+  const topic = `water-quality/${normalized}`;
+  mqttClient.publish(topic, JSON.stringify(payload), { qos: 1 });
+  return true;
+}
+
+function rand(min, max, dp = 2) {
+  const n = min + Math.random() * (max - min);
+  const f = Math.pow(10, dp);
+  return Math.round(n * f) / f;
+}
+
+function randInt(min, max) {
+  return Math.floor(min + Math.random() * (max - min + 1));
+}
+
+function belowMin(threshold, pct) {
+  return +(threshold * (1 - pct / 100)).toFixed(3);
+}
+
+function aboveMax(threshold, pct) {
+  return +(threshold * (1 + pct / 100)).toFixed(3);
+}
+
+function buildScenarioPayloads(scenario, nodeId, testRunId, seqBase) {
+  const T = {
+    temperatureMin: 18,
+    temperatureMax: 30,
+    pHMin: 6.5,
+    pHMax: 8.5,
+    turbidityMax: 25,
+    dissolvedOxygenMin: 4,
+    nh3Max: 0.5,
+  };
+
+  // Fixed in-range defaults so one-parameter scenarios do not randomly breach *other*
+  // parameters under stricter client Settings (e.g. temperature min 26°C).
+  const SAFE_SCENARIO_BASELINE = {
+    temperature: 27,
+    turbidity: 3,
+    ph: 7.2,
+    dissolved_oxygen: 8,
+    flow_rate: 2,
+  };
+
+  let seqCursor = Number.isFinite(Number(seqBase)) ? Number(seqBase) : randInt(1, 9999);
+
+  const basePayload = (overrides = {}) => {
+    const now = Date.now();
+    const tx_millis = randInt(10000, 2000000);
+    const rx_millis = tx_millis + randInt(20, 400);
+    return {
+      nodeId: String(nodeId),
+      seq: seqCursor++,
+      ...SAFE_SCENARIO_BASELINE,
+      tx_millis,
+      rx_millis,
+      location: 'Scenario Evaluator',
+      timestamp: new Date(now).toISOString(),
+      t_node: now,
+      t_fwd_rx: now + randInt(50, 300),
+      t_fwd_pub: now + randInt(310, 600),
+      rssi: randInt(-85, -65),
+      snr: randInt(5, 12),
+      ...(testRunId ? { test_run_id: String(testRunId) } : {}),
+      ...overrides,
+    };
+  };
+
+  const scenarios = {
+    normal: () => [basePayload()],
+    'all-clear': () => [basePayload({ temperature: 24, turbidity: 3, ph: 7.2, dissolved_oxygen: 8.0 })],
+    'low-do': () => [basePayload({ dissolved_oxygen: belowMin(T.dissolvedOxygenMin, 3) })],
+    'medium-do': () => [basePayload({ dissolved_oxygen: belowMin(T.dissolvedOxygenMin, 7) })],
+    'high-do': () => [basePayload({ dissolved_oxygen: belowMin(T.dissolvedOxygenMin, 15) })],
+    'low-ph': () => [basePayload({ ph: aboveMax(T.pHMax, 3) })],
+    'medium-ph': () => [basePayload({ ph: aboveMax(T.pHMax, 7) })],
+    'high-ph': () => [basePayload({ ph: aboveMax(T.pHMax, 15) })],
+    'low-turbidity': () => [basePayload({ turbidity: aboveMax(T.turbidityMax, 3) })],
+    'medium-turbidity': () => [basePayload({ turbidity: aboveMax(T.turbidityMax, 7) })],
+    'high-turbidity': () => [basePayload({ turbidity: aboveMax(T.turbidityMax, 15) })],
+    'low-temp': () => [basePayload({ temperature: belowMin(T.temperatureMin, 3) })],
+    'high-temp': () => [basePayload({ temperature: aboveMax(T.temperatureMax, 15) })],
+    'low-nh3': () => [basePayload({ nh3: aboveMax(T.nh3Max, 3) })],
+    'high-nh3': () => [basePayload({ nh3: aboveMax(T.nh3Max, 15) })],
+    'nh3-slope': () => [basePayload({ nh3: 0.2 }), basePayload({ nh3: 0.45 })],
+    'multi-param': () => [basePayload({
+      dissolved_oxygen: belowMin(T.dissolvedOxygenMin, 7),
+      turbidity: aboveMax(T.turbidityMax, 7),
+      ph: aboveMax(T.pHMax, 7),
+    })],
+    'wqi-drop': () => [
+      basePayload({ dissolved_oxygen: 8.5, turbidity: 2, ph: 7.2, temperature: 23 }),
+      basePayload({
+        dissolved_oxygen: belowMin(T.dissolvedOxygenMin, 20),
+        turbidity: aboveMax(T.turbidityMax, 30),
+        ph: aboveMax(T.pHMax, 20),
+        temperature: aboveMax(T.temperatureMax, 15),
+      }),
+    ],
+    persistence: () => [
+      basePayload({ dissolved_oxygen: belowMin(T.dissolvedOxygenMin, 3) }),
+      basePayload({ dissolved_oxygen: belowMin(T.dissolvedOxygenMin, 3) }),
+      basePayload({ dissolved_oxygen: belowMin(T.dissolvedOxygenMin, 3) }),
+    ],
+    'low-battery': () => [basePayload({ battery_percentage: 8, battery_voltage: 3.35 })],
+  };
+
+  const fn = scenarios[String(scenario || '').toLowerCase()];
+  return fn ? fn() : null;
+}
+
 async function expireTestRun(id) {
   if (!activeTestRun || activeTestRun.id !== id) return;
   clearTimeout(activeTestRun.timer);
@@ -321,9 +436,20 @@ app.get('/api/readings/date/:date', async (req, res) => {
 
 app.get('/api/alerts', async (req, res) => {
   try {
-    const { limit = 50, severity, startDate, endDate } = req.query;
-    const rows = await db.getAlerts({ limit: parseInt(limit), severity, startDate, endDate });
+    const { limit = 50, severity, startDate, endDate, nodeId } = req.query;
+    const rows = await db.getAlerts({ limit: parseInt(limit), severity, startDate, endDate, nodeId });
     res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.patch('/api/alerts/:id', async (req, res) => {
+  try {
+    const id = req.params.id;
+    const { email_sent_at } = req.body || {};
+    await db.updateAlertEmailSent(id, email_sent_at);
+    res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -363,6 +489,37 @@ app.post('/api/alerts', async (req, res) => {
     };
     const result = await db.insertAlert(row);
     res.json({ success: true, id: result.lastID, message: 'Alert stored successfully' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * POST /api/test-scenario/publish
+ * Body: { scenario, nodeId, test_run_id? }
+ * Publishes crafted telemetry to MQTT (bridge will store to Supabase).
+ */
+app.post('/api/test-scenario/publish', async (req, res) => {
+  try {
+    if (!mqttClient?.connected) {
+      return res.status(503).json({ error: 'MQTT not connected' });
+    }
+    const { scenario, nodeId, test_run_id } = req.body || {};
+    if (!scenario) return res.status(400).json({ error: 'scenario is required' });
+    if (!nodeId) return res.status(400).json({ error: 'nodeId is required' });
+    const seqBase = Date.now() % 1000000000;
+    const payloads = buildScenarioPayloads(scenario, nodeId, test_run_id || null, seqBase);
+    if (!payloads) return res.status(400).json({ error: `Unknown scenario: ${scenario}` });
+
+    payloads.forEach((p) => publishTestReadingToMQTT(nodeId, p));
+    res.json({
+      ok: true,
+      published: payloads.length,
+      nodeId,
+      scenario,
+      seqs: payloads.map((p) => p.seq),
+      published_at: new Date().toISOString(),
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

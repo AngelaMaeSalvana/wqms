@@ -9,6 +9,9 @@
     "bridge": "node bridge.js",
     "test": "node scripts/test.js",
     "test-publish": "node scripts/test.js",
+    "scenarios": "node scripts/run-random-scenarios.js",
+    "scenarios:rest-of-day": "node scripts/run-random-scenarios.js --until-end-of-day",
+    "test-with-scenarios": "node scripts/run-test-with-scenarios.js",
     "mqtt-broker": "node mqtt-broker-test.js"
   },
   "keywords": [

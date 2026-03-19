@@ -111,6 +111,23 @@ export function saveAlertLogic(values) {
   } catch { /* non-fatal */ }
 }
 
+/**
+ * Clear browser-side state used by the 3-layer alert system so isolated tests (e.g. Scenario Evaluator)
+ * are not affected by prior dashboard visits or earlier runs.
+ *
+ * Removes: consecutive-violation counters (persistence), previous WQI per node (rapid-drop logic),
+ * and pH hysteresis latch state. Does not change thresholds/settings or Supabase alerts.
+ */
+export function resetAlertPersistenceForTests() {
+  try {
+    localStorage.removeItem(PERSISTENCE_KEY);
+    localStorage.removeItem(PREV_WQI_KEY);
+    localStorage.removeItem(PH_STATE_KEY);
+  } catch {
+    /* non-fatal */
+  }
+}
+
 // ── Layer 1: Deviation-based severity ─────────────────────────────────────────
 
 /**

@@ -792,10 +792,16 @@ function TestingTab({ nodes = [] }) {
   const [testRuns, setTestRuns] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedRunId, setSelectedRunId] = useState(null);
+  const [testRunsPage, setTestRunsPage] = useState(1);
+  const testRunsPerPage = 10;
   useEffect(() => {
     setLoading(true);
-    api.getTestRunsList({ limit: 20 })
-      .then((tr) => setTestRuns(Array.isArray(tr) ? tr : []))
+    api.getTestRunsList({ limit: 200 })
+      .then((tr) => {
+        const list = Array.isArray(tr) ? tr : [];
+        setTestRuns(list);
+        setTestRunsPage(1);
+      })
       .catch(() => setTestRuns([]))
       .finally(() => setLoading(false));
   }, []);
@@ -824,6 +830,12 @@ function TestingTab({ nodes = [] }) {
     const n = nodes.find((x) => x.id === nid);
     return n?.name || nid;
   };
+  const testRunsTotalPages = Math.max(1, Math.ceil(testRuns.length / testRunsPerPage));
+  const testRunsPageSafe = Math.min(Math.max(1, testRunsPage), testRunsTotalPages);
+  const testRunsPageRows = testRuns.slice(
+    (testRunsPageSafe - 1) * testRunsPerPage,
+    testRunsPageSafe * testRunsPerPage
+  );
   return (
     <>
       <section className="reports-grid__chart card reports-tab-full">
@@ -840,27 +852,54 @@ function TestingTab({ nodes = [] }) {
                 </div>
               )}
               {testRuns.length === 0 ? <p className="reports-empty">No test runs</p> : (
-                <table className="reports-data-table reports-system-table reports-testruns-table">
-                  <thead><tr><th>ID</th><th>Started</th><th>Duration</th><th>Node</th><th>Status</th></tr></thead>
-                  <tbody>
-                    {testRuns.slice(0, 10).map((r) => (
-                      <tr
-                        key={r.id}
-                        className="reports-testruns-row"
-                        onClick={() => setSelectedRunId(r.id)}
-                        role="button"
-                        tabIndex={0}
-                        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setSelectedRunId(r.id); } }}
+                <>
+                  <table className="reports-data-table reports-system-table reports-testruns-table">
+                    <thead><tr><th>ID</th><th>Started</th><th>Duration</th><th>Node</th><th>Status</th></tr></thead>
+                    <tbody>
+                      {testRunsPageRows.map((r) => (
+                        <tr
+                          key={r.id}
+                          className="reports-testruns-row"
+                          onClick={() => setSelectedRunId(r.id)}
+                          role="button"
+                          tabIndex={0}
+                          onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setSelectedRunId(r.id); } }}
+                        >
+                          <td>{String(r.id).slice(0, 8)}…</td>
+                          <td>{r.started_at ? new Date(r.started_at).toLocaleString() : "—"}</td>
+                          <td>{r.duration_ms ? `${(r.duration_ms / 1000).toFixed(1)}s` : "—"}</td>
+                          <td>{nodeLabel(r.node_id)}</td>
+                          <td>{r.status || "—"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {testRuns.length > testRunsPerPage && (
+                    <nav className="reports-compliance-pagination" aria-label="Test runs pagination">
+                      <button
+                        type="button"
+                        className="reports-compliance-pagination-btn"
+                        onClick={() => setTestRunsPage((p) => Math.max(1, p - 1))}
+                        disabled={testRunsPageSafe <= 1}
+                        aria-label="Previous page"
                       >
-                        <td>{String(r.id).slice(0, 8)}…</td>
-                        <td>{r.started_at ? new Date(r.started_at).toLocaleString() : "—"}</td>
-                        <td>{r.duration_ms ? `${(r.duration_ms / 1000).toFixed(1)}s` : "—"}</td>
-                        <td>{nodeLabel(r.node_id)}</td>
-                        <td>{r.status || "—"}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                        ‹
+                      </button>
+                      <span className="reports-compliance-pagination-page">
+                        Page {testRunsPageSafe} of {testRunsTotalPages}
+                      </span>
+                      <button
+                        type="button"
+                        className="reports-compliance-pagination-btn"
+                        onClick={() => setTestRunsPage((p) => Math.min(testRunsTotalPages, p + 1))}
+                        disabled={testRunsPageSafe >= testRunsTotalPages}
+                        aria-label="Next page"
+                      >
+                        ›
+                      </button>
+                    </nav>
+                  )}
+                </>
               )}
             </div>
           )}
@@ -887,7 +926,8 @@ function SystemTab({ reportRangeStart, reportRangeEnd, nodes, onSwitchToWater })
     const end = toDateStr(reportRangeEnd);
     setLoading(true);
     Promise.all([
-      api.getSensorReadings({ startDate: start, endDate: end, limit: 1000 }),
+      // Fetch ALL readings for the selected period (no cap) so older readings are included.
+      api.getSensorReadings({ startDate: start, endDate: end, limit: null }),
       api.getTimestampLogs({ startDate: start, endDate: end, limit: 200 }).catch(() => []),
     ]).then(([r, t]) => {
       setReadings(Array.isArray(r) ? r : []);
@@ -1262,6 +1302,16 @@ export default function Reports() {
     [calendarView.year, calendarView.month, calendarSummaries]
   );
 
+  // In week mode, always snap range to full week (Sunday–Saturday)
+  useEffect(() => {
+    if (reportPeriod !== "week" || !reportRangeStart || !reportRangeEnd) return;
+    const { start, end } = getWeekRange(reportRangeStart);
+    if (reportRangeStart.getTime() !== start.getTime() || reportRangeEnd.getTime() !== end.getTime()) {
+      setReportRangeStart(start);
+      setReportRangeEnd(end);
+    }
+  }, [reportPeriod, reportRangeStart, reportRangeEnd]);
+
   // Sync calendar view to the shared filter's date range
   useEffect(() => {
     if (!reportRangeStart) return;
@@ -1286,6 +1336,12 @@ export default function Reports() {
   const handleSelectDate = (day) => {
     setSelectedDay(day);
     setModalOpen(true);
+    // In week mode, set the filter range to the full week (Sun–Sat) containing the clicked day
+    if (reportPeriod === "week" && day?.date) {
+      const { start, end } = getWeekRange(day.date);
+      setReportRangeStart(start);
+      setReportRangeEnd(end);
+    }
   };
 
   const handleReportPeriodChange = (e) => {

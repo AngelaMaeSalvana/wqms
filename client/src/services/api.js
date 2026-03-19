@@ -39,14 +39,18 @@ class ApiService {
     if (nodeId) params.append('nodeId', nodeId);
     if (testRunId) params.append('testRunId', testRunId);
     if (monitoringOnly) params.append('monitoringOnly', '1');
-    params.append('limit', limit);
+    // Backend requires a numeric limit; if caller requests "all", use a high cap.
+    const effectiveLimit = (limit == null || limit === 0 || limit === Infinity) ? 100000 : limit;
+    params.append('limit', effectiveLimit);
     return this.request(`/readings?${params.toString()}`);
   }
 
   /** Sensor readings: monitoring only (no test_run_id). Used by Sensor Logs, Reports (Water/Alerts/System). */
   async getSensorReadings({ startDate, endDate, nodeId, limit = 500 }) {
     if (isSupabaseEnabled()) return supabaseService.getSensorReadings({ startDate, endDate, nodeId, limit });
-    return this.getReadings({ startDate, endDate, nodeId, monitoringOnly: true, limit });
+    // If caller requests "all", use high cap for backend mode.
+    const effectiveLimit = (limit == null || limit === 0 || limit === Infinity) ? 100000 : limit;
+    return this.getReadings({ startDate, endDate, nodeId, monitoringOnly: true, limit: effectiveLimit });
   }
 
   async getDailySummaries({ startDate, endDate, nodeId }) {
@@ -64,13 +68,14 @@ class ApiService {
     return this.request(`/readings/date/${date}${params}`);
   }
 
-  async getAlerts({ limit = 50, severity, startDate, endDate } = {}) {
-    if (isSupabaseEnabled()) return supabaseService.getAlerts({ limit, severity, startDate, endDate });
+  async getAlerts({ limit = 50, severity, startDate, endDate, nodeId } = {}) {
+    if (isSupabaseEnabled()) return supabaseService.getAlerts({ limit, severity, startDate, endDate, nodeId });
     const params = new URLSearchParams();
     if (limit) params.append('limit', limit);
     if (severity) params.append('severity', severity);
     if (startDate) params.append('startDate', startDate);
     if (endDate) params.append('endDate', endDate);
+    if (nodeId) params.append('nodeId', nodeId);
     return this.request(`/alerts?${params.toString()}`);
   }
 
@@ -116,7 +121,22 @@ class ApiService {
 
   async getPerformanceAlerts({ startDate, endDate, nodeId, limit = 200 }) {
     if (isSupabaseEnabled()) return supabaseService.getPerformanceAlerts({ startDate, endDate, nodeId, limit });
-    return this.getAlerts({ limit });
+    return this.getAlerts({ limit, startDate, endDate, nodeId });
+  }
+
+  /**
+   * Record that an alert notification email was sent (for performance evaluation).
+   * @param {string|number} alertId - Alert id (DB id or Supabase uuid)
+   * @param {string|number} [emailSentAt] - ISO string or epoch ms; defaults to now
+   */
+  async recordAlertEmailSent(alertId, emailSentAt) {
+    if (isSupabaseEnabled()) {
+      return supabaseService.patchAlertEmailSent(alertId, emailSentAt);
+    }
+    const body = emailSentAt
+      ? { email_sent_at: typeof emailSentAt === 'number' ? new Date(emailSentAt).toISOString() : emailSentAt }
+      : { email_sent_at: new Date().toISOString() };
+    return this.request(`/alerts/${encodeURIComponent(alertId)}`, { method: 'PATCH', body: JSON.stringify(body) });
   }
 
   // ── Test Run endpoints (always go to backend REST, not Supabase directly) ──
@@ -142,6 +162,17 @@ class ApiService {
   async getTestRun(testRunId) {
     if (!testRunId) throw new Error('testRunId is required');
     return this.request(`/test-run/${encodeURIComponent(testRunId)}`);
+  }
+
+  /**
+   * Publish a preset test scenario reading to MQTT (bridge will store to Supabase).
+   * Body: { scenario, nodeId, test_run_id? }
+   */
+  async publishTestScenario({ scenario, nodeId, testRunId }) {
+    return this.request('/test-scenario/publish', {
+      method: 'POST',
+      body: JSON.stringify({ scenario, nodeId, test_run_id: testRunId }),
+    });
   }
 }
 

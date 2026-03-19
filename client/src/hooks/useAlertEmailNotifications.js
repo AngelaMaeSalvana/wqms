@@ -9,13 +9,21 @@ import { sendAlertEmail, isEmailJsConfigured } from '../services/emailService';
 import { isSupabaseEnabled } from '../lib/supabaseClient';
 import api from '../services/api';
 
-const NOTIFICATIONS_KEY = 'wqms_notifications';
-const SENT_ALERTS_KEY = 'wqms_alerts_emailed_ids';
-const MAX_SENT_IDS = 500;
+/** Record email sent in DB for performance evaluation (when backend or Supabase is used). */
+function recordEmailSentIfPossible(alert, api) {
+  const id = alert.id ?? alert.db_id;
+  if (id == null) return;
+  api.recordAlertEmailSent(id).catch(() => {});
+}
 
-function loadSentIds() {
+const NOTIFICATIONS_KEY = 'wqms_notifications';
+const EMAILED_ALERTS_KEY = 'wqms_alerts_emailed_ids';
+const SAVED_ALERTS_KEY = 'wqms_alerts_saved_ids';
+const MAX_TRACKED_IDS = 800;
+
+function loadIds(key) {
   try {
-    const s = localStorage.getItem(SENT_ALERTS_KEY);
+    const s = localStorage.getItem(key);
     const arr = s ? JSON.parse(s) : [];
     return new Set(Array.isArray(arr) ? arr : []);
   } catch {
@@ -23,13 +31,24 @@ function loadSentIds() {
   }
 }
 
-function saveSentIds(ids) {
+function saveIds(key, ids) {
   try {
-    const arr = [...ids].slice(-MAX_SENT_IDS);
-    localStorage.setItem(SENT_ALERTS_KEY, JSON.stringify(arr));
+    const arr = [...ids].slice(-MAX_TRACKED_IDS);
+    localStorage.setItem(key, JSON.stringify(arr));
   } catch (e) {
-    console.warn('Could not save emailed alert IDs', e);
+    console.warn('Could not save tracked alert IDs', e);
   }
+}
+
+function dedupeKeyForAlert(alert) {
+  // DB rows have unique numeric/uuid ids; use those directly.
+  if (alert?.db_id != null) return `db:${alert.db_id}`;
+  if (alert?.id != null && (typeof alert.id === 'number' || /^\d+$/.test(String(alert.id)))) return `id:${alert.id}`;
+
+  // For computed alerts, include timestamp so repeated occurrences can email again.
+  const base = alert?.id || `${alert?.nodeId ?? alert?.node_id ?? ''}|${alert?.type ?? ''}|${alert?.parameter ?? ''}`;
+  const ts = alert?.timestamp ?? alert?.createdAt ?? '';
+  return `${base}|${ts}`;
 }
 
 /**
@@ -37,8 +56,8 @@ function saveSentIds(ids) {
  * @param {Object} [readingsByNode] - Optional { [nodeId]: readings } for latest sensor values in the email
  */
 export function useAlertEmailNotifications(alerts, readingsByNode = {}) {
-  const sentIdsRef = useRef(loadSentIds());
-  const prevAlertsRef = useRef([]);
+  const emailedIdsRef = useRef(loadIds(EMAILED_ALERTS_KEY));
+  const savedIdsRef = useRef(loadIds(SAVED_ALERTS_KEY));
 
   useEffect(() => {
     if (!alerts || !Array.isArray(alerts) || alerts.length === 0) return;
@@ -49,44 +68,38 @@ export function useAlertEmailNotifications(alerts, readingsByNode = {}) {
     const sendEmail = emailEnabled && isEmailJsConfigured();
     const saveToSupabase = isSupabaseEnabled();
 
-    const sentIds = sentIdsRef.current;
-    let hasNew = false;
+    const emailedIds = emailedIdsRef.current;
+    const savedIds = savedIdsRef.current;
 
     for (const alert of alerts) {
-      const id = alert.id || alert.timestamp || `${alert.nodeId}-${alert.type}-${alert.parameter || ''}`;
-      if (!id || sentIds.has(id)) continue;
-
-      hasNew = true;
-      sentIds.add(id);
+      const key = dedupeKeyForAlert(alert);
+      if (!key) continue;
 
       // Save to Supabase (when configured)
-      if (saveToSupabase) {
+      if (saveToSupabase && !savedIds.has(key)) {
+        savedIds.add(key);
         const payload = {
           ...alert,
           timestamp: alert.timestamp || alert.createdAt || new Date().toISOString(),
         };
         api.postAlert(payload).catch((err) => {
           console.warn('Could not save alert to Supabase', err);
-          sentIds.delete(id);
+          savedIds.delete(key);
         });
       }
 
       // Send email (when configured)
-      if (sendEmail && toEmail) {
+      if (sendEmail && toEmail && !emailedIds.has(key)) {
         sendAlertEmail(alert, toEmail, readingsByNode).then((res) => {
           if (res.success) {
-            saveSentIds(sentIds);
-          } else {
-            sentIds.delete(id);
+            emailedIds.add(key);
+            saveIds(EMAILED_ALERTS_KEY, emailedIds);
+            recordEmailSentIfPossible(alert, api);
           }
         });
       }
     }
 
-    if (hasNew) {
-      saveSentIds(sentIds);
-    }
-
-    prevAlertsRef.current = alerts;
+    saveIds(SAVED_ALERTS_KEY, savedIds);
   }, [alerts, readingsByNode]);
 }
