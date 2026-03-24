@@ -89,6 +89,7 @@ class ApiService {
   }
 
   async getTestRunsList({ limit = 50 } = {}) {
+    if (isSupabaseEnabled()) return supabaseService.getTestRunsList({ limit });
     const params = new URLSearchParams();
     params.append('limit', limit);
     return this.request(`/test-runs?${params.toString()}`);

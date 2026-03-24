@@ -117,6 +117,19 @@ export async function getDailySummaries({ startDate, endDate, nodeId }) {
   return data || [];
 }
 
+/** List test runs for Reports > Testing (newest first). Matches server/db getTestRunsList shape. */
+export async function getTestRunsList({ limit = 50 } = {}) {
+  if (!isSupabaseEnabled()) return [];
+  const cap = Math.min(Math.max(1, parseInt(limit, 10) || 50), 500);
+  const { data, error } = await supabase
+    .from('test_runs')
+    .select('*')
+    .order('started_at', { ascending: false })
+    .limit(cap);
+  if (error) throw new Error(error.message);
+  return data || [];
+}
+
 export async function getReadingByDate(date, nodeId = null) {
   if (!isSupabaseEnabled()) return null;
   const start = `${date}T00:00:00.000Z`;
