@@ -9,8 +9,8 @@ import api from "../services/api";
 import { computeIoTMetrics } from "../utils/iotMetrics";
 import { computeAlertMetrics } from "../utils/alertMetrics";
 import { useTestRun } from "../contexts/TestRunContext";
-import { buildAlertsForAllNodes, resetAlertPersistenceForTests } from "../utils/alertsData";
-import { isEmailJsConfigured, sendAlertEmail } from "../services/emailService";
+import { buildAlertsForAllNodes, resetAlertPersistenceForTests, getThresholds } from "../utils/alertsData";
+import { isEmailJsConfigured, sendAlertEmail, shouldSendAlertEmailBySeverity } from "../services/emailService";
 import "../utils/chartConfig";
 import "./PerformanceTest.css";
 
@@ -190,7 +190,7 @@ function scoreScenarioRun(alerts, spec) {
       return { label: "PASS", score: 100, pass: true, reasons };
     }
     if (got === "medium") {
-      reasons.push("DO alert at MEDIUM (2 strikes). Run scenario again to reach HIGH, or rely on prior persistence.");
+      reasons.push("DO alert at MEDIUM (2 strikes). Run scenario again to reach HIGH.");
       return { label: "PARTIAL", score: 85, pass: false, reasons };
     }
     reasons.push("DO alert at LOW (1 strike). Run scenario again to escalate persistence.");
@@ -450,7 +450,7 @@ export default function PerformanceTest() {
     { id: "high-temp", label: "Temperature above max (HIGH)", expected: "HIGH temperature above maximum", spec: { mode: "threshold_exact", parameter: "temperature", severity: "high" } },
     { id: "multi-param", label: "Multi-parameter degraded", expected: "HIGH Multiple parameters degraded", spec: { mode: "multi_param" } },
     { id: "wqi-drop", label: "WQI rapid drop", expected: "HIGH WQI rapid drop alert", spec: { mode: "title_includes", titleIncludes: "wqi rapid drop", severity: "high" } },
-    { id: "persistence", label: "Persistence escalation", expected: "HIGH DO after 3× low DO (may be PARTIAL)", spec: { mode: "persistence_do" } },
+    { id: "persistence", label: "Persistence escalation", expected: "HIGH DO after 3× low DO", spec: { mode: "persistence_do" } },
     { id: "low-battery", label: "Low battery (test)", expected: "HIGH Low battery", spec: { mode: "title_includes", titleIncludes: "low battery", severity: "high" } },
     { id: "offline", label: "Node offline (test)", expected: "HIGH Node offline", spec: { mode: "title_includes", titleIncludes: "node offline", severity: "high" }, simulated: true },
     { id: "maintenance", label: "Maintenance due (test)", expected: "MEDIUM Maintenance due", spec: { mode: "title_includes", titleIncludes: "maintenance", severity: "medium" }, simulated: true },
@@ -554,7 +554,8 @@ export default function PerformanceTest() {
           computed = [];
         }
       } else {
-        const publishResult = await api.publishTestScenario({ scenario: scenarioId, nodeId: chosenNode });
+        const thresholds = getThresholds();
+        const publishResult = await api.publishTestScenario({ scenario: scenarioId, nodeId: chosenNode, thresholds });
         publishedSeqs = new Set(
           (publishResult?.seqs || [])
             .map((v) => Number(v))
@@ -597,7 +598,9 @@ export default function PerformanceTest() {
       const emailEnabledInSettings = !!notifications?.emailEnabled;
       const notificationEmail = (notifications?.notificationEmail || "").trim();
       const emailConfigured = isEmailJsConfigured();
-      const shouldSendEmail = filtered.length > 0 && emailEnabledInSettings && !!notificationEmail && emailConfigured;
+      const emailEligible = filtered.filter(shouldSendAlertEmailBySeverity);
+      const shouldSendEmail =
+        emailEligible.length > 0 && emailEnabledInSettings && !!notificationEmail && emailConfigured;
 
       let emailAttempted = 0;
       let emailSent = 0;
@@ -610,9 +613,11 @@ export default function PerformanceTest() {
         emailStatusMessage = "Notification email is empty in Settings.";
       } else if (!emailConfigured) {
         emailStatusMessage = "EmailJS env vars are missing (PUBLIC_KEY / SERVICE_ID / TEMPLATE_ID).";
+      } else if (emailEligible.length === 0) {
+        emailStatusMessage = "No LOW/HIGH alerts — emails are only sent for warning (LOW) and critical (HIGH), not MEDIUM.";
       } else {
-        const readingsForEmail = { [chosenNode]: latest };
-        for (const a of filtered) {
+        const readingsForEmail = latest != null ? { [chosenNode]: latest } : {};
+        for (const a of emailEligible) {
           emailAttempted += 1;
           try {
             const res = await sendAlertEmail(a, notificationEmail, readingsForEmail);
@@ -641,7 +646,7 @@ export default function PerformanceTest() {
       setScenarioOutput({
         expected: scenario.expected,
         nodeId: chosenNode,
-        readingTs: latest.timestamp || null,
+        readingTs: latest?.timestamp ?? null,
         alerts: sorted,
         primary,
         omittedAlertCount,

@@ -6,10 +6,11 @@ import AlertDetailModal from "../components/AlertDetailModal";
 import EmptyState from "../components/EmptyState";
 import { buildAlertsForAllNodes } from "../utils/alertsData";
 import { useAlertEmailNotifications } from "../hooks/useAlertEmailNotifications";
+import { useNodeStatus } from "../hooks/useNodeStatus";
 import { getNodes, loadNodes } from "../utils/nodesStorage";
 import api from "../services/api";
 import { supabase } from "../lib/supabaseClient";
-import { applyCalibrationToReadings } from "../utils/calibration";
+import { displayReadings } from "../utils/calibration";
 import { exportToCSV, exportToExcel, formatAlertsForExport } from "../utils/exportData";
 import { PageLoader } from "../components/LoadingSkeleton";
 import "./Alerts.css";
@@ -89,6 +90,7 @@ function getRelativeTime(date) {
 export default function Alerts() {
   const lastUpdated = useRef(new Date()).current;
   const [nodes, setNodes] = useState([]);
+  const { nodeStatuses } = useNodeStatus(nodes);
   const [readingsByNode, setReadingsByNode] = useState({});
   const [alerts, setAlerts] = useState([]);
   const [search, setSearch] = useState("");
@@ -137,7 +139,7 @@ export default function Alerts() {
       let prevByNode = {};
       try {
         const rows = await api.getReadings({ startDate: today, endDate: today, monitoringOnly: true, limit: 200 });
-        const list = applyCalibrationToReadings(Array.isArray(rows) ? rows : []);
+        const list = displayReadings(Array.isArray(rows) ? rows : []);
         // Sort ascending so we can pick latest and second-latest per node.
         const sorted = [...list].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
         sorted.forEach((r) => {
@@ -163,7 +165,7 @@ export default function Alerts() {
       if (!cancelled) setReadingsByNode(byNode);
 
       // 2. Detect live threshold/status alerts and upsert them to the DB.
-      const liveAlerts = buildAlertsForAllNodes(loadedNodes, byNode, {}, prevByNode);
+      const liveAlerts = buildAlertsForAllNodes(loadedNodes, byNode, nodeStatuses, prevByNode);
       if (liveAlerts.length > 0) {
         try { await api.upsertAlerts(liveAlerts); } catch { /* non-fatal */ }
       }
@@ -182,9 +184,9 @@ export default function Alerts() {
 
     loadAlerts();
     return () => { cancelled = true; };
-  }, []);
+  }, [nodeStatuses]);
 
-  useAlertEmailNotifications(alerts, readingsByNode);
+  useAlertEmailNotifications(alerts, readingsByNode, nodeStatuses);
 
   // Realtime: prepend newly inserted alert rows without a full page refresh.
   const handleNewAlert = useCallback((payload) => {
@@ -219,6 +221,12 @@ export default function Alerts() {
 
   const filteredAlerts = useMemo(() => {
     let list = [...alerts];
+    // Node Offline: only show while node is offline; hide when it comes back online.
+    list = list.filter(
+      (a) =>
+        (a.type || '').toLowerCase() !== 'node' ||
+        nodeStatuses[a.nodeId ?? a.node_id] !== 'online'
+    );
     const q = search.trim().toLowerCase();
     if (q) {
       list = list.filter(
@@ -252,7 +260,7 @@ export default function Alerts() {
       list.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
     }
     return list;
-  }, [alerts, search, severityFilter, dateFrom, dateTo, sortBy]);
+  }, [alerts, search, severityFilter, dateFrom, dateTo, sortBy, nodeStatuses]);
 
   useEffect(() => {
     if (!exportOpen) return;

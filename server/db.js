@@ -63,6 +63,12 @@ async function insertReading(row) {
       flow_rate: row.flow_rate ?? null,
       battery_voltage: row.battery_voltage ?? null,
       battery_percentage: row.battery_percentage ?? null,
+      temperature_corrected: row.temperature_corrected ?? null,
+      ph_corrected: row.ph_corrected ?? null,
+      turbidity_corrected: row.turbidity_corrected ?? null,
+      dissolved_oxygen_corrected: row.dissolved_oxygen_corrected ?? null,
+      flow_rate_corrected: row.flow_rate_corrected ?? null,
+      nh3_corrected: row.nh3_corrected ?? null,
       seq: row.seq ?? null,
       tx_millis: row.tx_millis ?? null,
       rx_millis: row.rx_millis ?? null,
@@ -80,11 +86,14 @@ async function insertReading(row) {
   }
   const sql = `INSERT INTO sensor_readings
     (node_id, temperature, turbidity, ph, dissolved_oxygen, flow_rate, battery_voltage, battery_percentage,
+     temperature_corrected, ph_corrected, turbidity_corrected, dissolved_oxygen_corrected, flow_rate_corrected, nh3_corrected,
      seq, tx_millis, rx_millis, timestamp, t_node, t_fwd_rx, t_fwd_pub, t_be_rx, test_run_id)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
   return sqliteRun(sql, [
     row.node_id, row.temperature, row.turbidity, row.ph,
     row.dissolved_oxygen, row.flow_rate ?? null, row.battery_voltage ?? null, row.battery_percentage ?? null,
+    row.temperature_corrected ?? null, row.ph_corrected ?? null, row.turbidity_corrected ?? null,
+    row.dissolved_oxygen_corrected ?? null, row.flow_rate_corrected ?? null, row.nh3_corrected ?? null,
     row.seq ?? null, row.tx_millis ?? null, row.rx_millis ?? null, row.timestamp,
     row.t_node ?? null, row.t_fwd_rx ?? null, row.t_fwd_pub ?? null, row.t_be_rx ?? null,
     row.test_run_id ?? null,
@@ -438,6 +447,12 @@ function initializeSqlite() {
     run(`ALTER TABLE sensor_readings ADD COLUMN battery_voltage REAL`).catch(() => {}),
     run(`ALTER TABLE sensor_readings ADD COLUMN battery_percentage INTEGER`).catch(() => {}),
     run(`ALTER TABLE sensor_readings ADD COLUMN wqi INTEGER`).catch(() => {}),
+    run(`ALTER TABLE sensor_readings ADD COLUMN temperature_corrected REAL`).catch(() => {}),
+    run(`ALTER TABLE sensor_readings ADD COLUMN ph_corrected REAL`).catch(() => {}),
+    run(`ALTER TABLE sensor_readings ADD COLUMN turbidity_corrected REAL`).catch(() => {}),
+    run(`ALTER TABLE sensor_readings ADD COLUMN dissolved_oxygen_corrected REAL`).catch(() => {}),
+    run(`ALTER TABLE sensor_readings ADD COLUMN flow_rate_corrected REAL`).catch(() => {}),
+    run(`ALTER TABLE sensor_readings ADD COLUMN nh3_corrected REAL`).catch(() => {}),
   ]).then(() => console.log('✅ SQLite tables initialized'));
 }
 

@@ -7,12 +7,12 @@
  *   0–10% beyond limit → MEDIUM
  *   >10% beyond limit  → HIGH
  *
- * Layer 2 — Persistence Escalation
- *   Tracks consecutive violations per node+parameter in localStorage.
- *   1 reading  → LOW
- *   2 readings → MEDIUM
- *   3+         → HIGH
- *   Resets to 0 when the parameter returns within limits.
+ * Layer 2 — Persistence Escalation (threshold alert title severity)
+ *   Consecutive violations per node+parameter in localStorage.
+ *   1st violation → LOW, 2nd → MEDIUM, 3+ → HIGH (not merged with Layer 1 % in the label).
+ *   Normal/safe reading → reset counter; next breach starts again at LOW.
+ *   If the previous reading was normal but the latest breaches, counter resets to 1 (all-clear → low-do).
+ *   pH uses hysteresis — “normal” only after pH returns within the hysteresis band.
  *
  * Layer 3 — WQI Escalation
  *   WQI ≥ 80           → no escalation
@@ -25,7 +25,7 @@
  */
 import { getNH3FromReading, formatNH3 } from './nh3Calculator';
 import { voltageToPercentage, isLowBatteryWarning } from './batteryUtils';
-import { getMaintenanceSettings } from './settingsStorage';
+import { getMaintenanceSettings, loadFromStorage } from './settingsStorage';
 import { calculateWQI } from './wqiCalculator';
 
 const THRESHOLDS_KEY = 'wqms_thresholds';
@@ -85,13 +85,8 @@ function savePrevWqi(state) {
 }
 
 function getThresholds() {
-  try {
-    const s = localStorage.getItem(THRESHOLDS_KEY);
-    const parsed = s ? JSON.parse(s) : null;
-    return { ...DEFAULT_THRESHOLDS, ...parsed };
-  } catch {
-    return { ...DEFAULT_THRESHOLDS };
-  }
+  const parsed = loadFromStorage(THRESHOLDS_KEY, {});
+  return { ...DEFAULT_THRESHOLDS, ...(parsed && typeof parsed === 'object' ? parsed : {}) };
 }
 
 export function getAlertLogic() {
@@ -185,23 +180,24 @@ function maxSeverity(a, b) {
 
 /**
  * Increment violation count for a node+param key, return escalated severity.
- * Resets to 0 if `violated` is false.
+ * Strike ladder only: 1st violation → LOW, 2nd → MEDIUM, 3+ → HIGH.
+ * Resets to 0 when readings return to safe range (violated=false).
+ * When prevWasNormal, resets first so a normal reading (even if not the “latest” row alone)
+ * starts the next breach at strike 1 again (e.g. all-clear then low-do).
+ * baseSeverity (Layer 1) is not merged into the label — detail text still shows value vs limit.
  */
-function applyPersistence(persistence, key, violated, baseSeverity) {
+function applyPersistence(persistence, key, violated, _baseSeverity, prevWasNormal = false) {
   if (!violated) {
     persistence[key] = 0;
     return null;
   }
+  if (prevWasNormal) persistence[key] = 0;
   persistence[key] = (persistence[key] || 0) + 1;
   const count = persistence[key];
 
-  // Escalate by persistence
-  let persistSeverity;
-  if (count >= 3) persistSeverity = 'high';
-  else if (count >= 2) persistSeverity = 'medium';
-  else persistSeverity = 'low';
-
-  return maxSeverity(baseSeverity, persistSeverity);
+  if (count >= 3) return 'high';
+  if (count >= 2) return 'medium';
+  return 'low';
 }
 
 // ── Layer 3: WQI escalation ────────────────────────────────────────────────────
@@ -395,10 +391,12 @@ export function buildAlertsForAllNodes(
 
     // ── Temperature ────────────────────────────────────────────────────────────
     const temp = readings.temperature ?? readings.temp;
+    const prevTemp = prev ? (prev.temperature ?? prev.temp) : null;
     const tempKey = `${nodeId}-temperature`;
     if (temp != null) {
       const breach = deviationSeverityRange(temp, thresholds.temperatureMin, thresholds.temperatureMax);
-      const sev = applyPersistence(persistence, tempKey, !!breach, breach?.severity || 'low');
+      const prevTempNormal = prevTemp != null && !deviationSeverityRange(prevTemp, thresholds.temperatureMin, thresholds.temperatureMax);
+      const sev = applyPersistence(persistence, tempKey, !!breach, breach?.severity || 'low', prevTempNormal);
       if (sev) {
         const which = breach.which === 'low' ? 'below minimum' : 'above maximum';
         const limit = breach.which === 'low' ? thresholds.temperatureMin : thresholds.temperatureMax;
@@ -448,7 +446,9 @@ export function buildAlertsForAllNodes(
             : (deviationSeverityMax(ph, thresholds.pHMax) || 'low'))
         : 'low';
 
-      const sev = applyPersistence(persistence, phKey, phViolated, phBreachSeverity);
+      const prevPh = prev ? (prev.pH ?? prev.ph) : null;
+      const prevPhNormal = prevPh != null && prevPh >= thresholds.pHMin && prevPh <= thresholds.pHMax;
+      const sev = applyPersistence(persistence, phKey, phViolated, phBreachSeverity, prevPhNormal);
       if (sev && nextPhState) {
         const count = persistence[phKey];
         const isLow = nextPhState === 'low';
@@ -482,7 +482,8 @@ export function buildAlertsForAllNodes(
 
     if (turbAvg != null) {
       const baseSev = deviationSeverityMax(turbAvg, thresholds.turbidityMax);
-      const sev = applyPersistence(persistence, turbKey, !!baseSev, baseSev || 'low');
+      const prevTurbNormal = prevTurbidity != null && !deviationSeverityMax(prevTurbidity, thresholds.turbidityMax);
+      const sev = applyPersistence(persistence, turbKey, !!baseSev, baseSev || 'low', prevTurbNormal);
       if (sev) {
         const usingAvg = prevTurbidity != null;
         const count = persistence[turbKey];
@@ -507,15 +508,14 @@ export function buildAlertsForAllNodes(
 
     // ── Dissolved Oxygen — deviation severity + persistence ────────────────────
     const doVal = readings.dissolvedOxygen ?? readings.dissolved_oxygen ?? readings.do ?? readings.DO;
+    const prevDoVal = prev ? (prev.dissolvedOxygen ?? prev.dissolved_oxygen ?? prev.do ?? prev.DO) : null;
     const doKey = `${nodeId}-dissolvedOxygen`;
 
     if (doVal != null) {
       const baseSev = deviationSeverityMin(doVal, thresholds.dissolvedOxygenMin);
-      const sev = applyPersistence(persistence, doKey, !!baseSev, baseSev || 'low');
+      const prevDoNormal = prevDoVal != null && !deviationSeverityMin(prevDoVal, thresholds.dissolvedOxygenMin);
+      const sev = applyPersistence(persistence, doKey, !!baseSev, baseSev || 'low', prevDoNormal);
       if (sev) {
-        const prevDoVal = prev
-          ? (prev.dissolvedOxygen ?? prev.dissolved_oxygen ?? prev.do ?? prev.DO)
-          : null;
         const count = persistence[doKey];
         nodeParamAlerts.push({
           id: `threshold-${nodeId}-dissolvedOxygen`,
@@ -543,7 +543,8 @@ export function buildAlertsForAllNodes(
 
     if (nh3 != null) {
       const baseSev = deviationSeverityMax(nh3, thresholds.nh3Max);
-      const sev = applyPersistence(persistence, nh3Key, !!baseSev, baseSev || 'low');
+      const prevNh3Normal = prevNh3 != null && !deviationSeverityMax(prevNh3, thresholds.nh3Max);
+      const sev = applyPersistence(persistence, nh3Key, !!baseSev, baseSev || 'low', prevNh3Normal);
       if (sev) {
         const count = persistence[nh3Key];
         nodeParamAlerts.push({

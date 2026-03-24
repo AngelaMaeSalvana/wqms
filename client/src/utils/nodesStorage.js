@@ -96,11 +96,20 @@ export async function saveNodes(nodes) {
   try {
     const { isSupabaseEnabled } = await import('../lib/supabaseClient');
     const { saveNodesToSupabase } = await import('../services/supabaseService');
-    if (isSupabaseEnabled()) await saveNodesToSupabase(nodes);
+    if (isSupabaseEnabled()) {
+      await saveNodesToSupabase(nodes);
+    }
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('wqms-nodes-updated'));
     }
   } catch (e) {
     console.warn("saveNodes to Supabase failed", e);
+    if (typeof window !== 'undefined') {
+      window.alert(
+        "Could not save nodes to the database. Changes may be lost on refresh.\n\n" +
+        "If add/deactivate don't persist, run this in Supabase Dashboard → SQL Editor:\n" +
+        "ALTER TABLE nodes ADD COLUMN IF NOT EXISTS active boolean NOT NULL DEFAULT true;"
+      );
+    }
   }
 }

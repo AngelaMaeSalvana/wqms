@@ -166,12 +166,12 @@ class ApiService {
 
   /**
    * Publish a preset test scenario reading to MQTT (bridge will store to Supabase).
-   * Body: { scenario, nodeId, test_run_id? }
+   * Body: { scenario, nodeId, test_run_id?, thresholds? } — thresholds from Settings used for scenario payloads
    */
-  async publishTestScenario({ scenario, nodeId, testRunId }) {
+  async publishTestScenario({ scenario, nodeId, testRunId, thresholds }) {
     return this.request('/test-scenario/publish', {
       method: 'POST',
-      body: JSON.stringify({ scenario, nodeId, test_run_id: testRunId }),
+      body: JSON.stringify({ scenario, nodeId, test_run_id: testRunId, thresholds }),
     });
   }
 }

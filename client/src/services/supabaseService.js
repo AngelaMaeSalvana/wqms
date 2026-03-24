@@ -456,9 +456,14 @@ export async function saveNodesToSupabase(nodes) {
   try {
     await upsertRows(rowsWithActive);
   } catch (e) {
+    const msg = String(e?.message ?? e);
     // Older schema may not have nodes.active; retry without the column
     // (deactivation is persisted via nodes.status='inactive').
-    if (/column.*active.*does not exist/i.test(String(e?.message ?? e))) {
+    const isActiveColumnMissing =
+      /column.*active.*does not exist/i.test(msg) ||
+      /42703/.test(msg) || // Postgres: undefined_column
+      /\bactive\b.*exist|exist.*\bactive\b/i.test(msg);
+    if (isActiveColumnMissing) {
       const rowsWithoutActive = rowsWithActive.map(({ active, ...rest }) => rest);
       await upsertRows(rowsWithoutActive);
     } else {
@@ -478,6 +483,7 @@ const SETTINGS_KEYS = [
   'wqms_data_collection',
   'wqms_wqi_weights',
   'wqms_notifications',
+  'wqms_maintenance',
 ];
 
 export async function getSettingsFromSupabase() {

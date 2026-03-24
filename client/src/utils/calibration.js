@@ -1,33 +1,26 @@
+import { loadFromStorage, SETTINGS_KEYS } from "./settingsStorage";
+
 /**
- * Apply calibration offsets from Settings (wqms_calibration) to a single reading.
- * Used when displaying readings in Dashboard, Reports, Map, and Alerts.
- * Offsets are read from localStorage at apply time.
+ * Display pipeline for readings:
+ * - If the row includes backend-stored *_corrected fields (from bridge + Supabase), use those only
+ *   (offsets already applied server-side from wqms_calibration).
+ * - Otherwise applyCalibration uses wqms_calibration from Supabase-backed cache (see settingsStorage),
+ *   or localStorage when Supabase is disabled.
  */
 
-const CALIBRATION_KEY = "wqms_calibration";
 const DEFAULT_OFFSETS = {
   temperatureOffset: 0,
   pHOffset: 0,
-  turbidityOffset: 0,
-  dissolvedOxygenOffset: 0,
-  nh3Offset: 0,
-  flowRateOffset: 0,
 };
 
 function getCalibration() {
-  try {
-    const s = localStorage.getItem(CALIBRATION_KEY);
-    const parsed = s ? JSON.parse(s) : null;
-    return { ...DEFAULT_OFFSETS, ...parsed };
-  } catch {
-    return DEFAULT_OFFSETS;
-  }
+  return loadFromStorage(SETTINGS_KEYS.calibration, DEFAULT_OFFSETS);
 }
 
 /**
  * Returns a copy of the reading with calibration offsets applied.
  * Handles both API shape (snake_case) and display shape (camelCase).
- * @param {Object} reading - Raw reading: { temperature?, ph?, pH?, turbidity?, dissolved_oxygen?, dissolvedOxygen?, do?, nh3?, NH3?, flowRate? }
+ * @param {Object} reading - Raw reading: { temperature?, ph?, pH?, turbidity?, dissolved_oxygen?, dissolvedOxygen?, do?, nh3?, NH3?, flowRate? } — only temp/pH offsets are applied client-side.
  * @returns {Object} New object with same keys plus calibrated numeric values where present
  */
 export function applyCalibration(reading) {
@@ -44,25 +37,6 @@ export function applyCalibration(reading) {
     out.pH = calibrated;
     out.ph = calibrated;
   }
-  if (reading.turbidity != null && !isNaN(reading.turbidity)) {
-    out.turbidity = reading.turbidity + (off.turbidityOffset ?? 0);
-  }
-  const doVal = reading.dissolved_oxygen ?? reading.dissolvedOxygen ?? reading.do;
-  if (doVal != null && !isNaN(doVal)) {
-    const calibrated = doVal + (off.dissolvedOxygenOffset ?? 0);
-    out.dissolved_oxygen = calibrated;
-    out.dissolvedOxygen = calibrated;
-    out.do = calibrated;
-  }
-  const nh3Val = reading.nh3 ?? reading.NH3;
-  if (nh3Val != null && !isNaN(nh3Val)) {
-    const calibrated = nh3Val + (off.nh3Offset ?? 0);
-    out.nh3 = calibrated;
-    out.NH3 = calibrated;
-  }
-  if (reading.flowRate != null && !isNaN(reading.flowRate)) {
-    out.flowRate = reading.flowRate + (off.flowRateOffset ?? 0);
-  }
 
   return out;
 }
@@ -73,4 +47,49 @@ export function applyCalibration(reading) {
 export function applyCalibrationToReadings(readings) {
   if (!Array.isArray(readings)) return readings;
   return readings.map(applyCalibration);
+}
+
+/** True if any server-persisted corrected column is present (avoids double-applying local offsets). */
+function hasBackendCorrected(reading) {
+  if (!reading || typeof reading !== "object") return false;
+  return (
+    reading.temperature_corrected != null ||
+    reading.ph_corrected != null ||
+    reading.turbidity_corrected != null ||
+    reading.dissolved_oxygen_corrected != null ||
+    reading.flow_rate_corrected != null ||
+    reading.nh3_corrected != null
+  );
+}
+
+/**
+ * Map *_corrected columns onto the primary field names used by charts and NH₃ helpers.
+ */
+export function normalizeReadingForDisplay(r) {
+  if (!r || typeof r !== "object") return r;
+  return {
+    ...r,
+    temperature: r.temperature_corrected ?? r.temperature,
+    ph: r.ph_corrected ?? r.ph,
+    pH: r.ph_corrected ?? r.pH ?? r.ph,
+    turbidity: r.turbidity_corrected ?? r.turbidity,
+    dissolved_oxygen: r.dissolved_oxygen_corrected ?? r.dissolved_oxygen,
+    dissolvedOxygen: r.dissolved_oxygen_corrected ?? r.dissolvedOxygen,
+    do: r.dissolved_oxygen_corrected ?? r.do,
+    flow_rate: r.flow_rate_corrected ?? r.flow_rate,
+    flowRate: r.flow_rate_corrected ?? r.flowRate,
+    nh3: r.nh3_corrected ?? r.nh3,
+    NH3: r.nh3_corrected ?? r.NH3,
+  };
+}
+
+export function displayReading(reading) {
+  if (!reading || typeof reading !== "object") return reading;
+  if (hasBackendCorrected(reading)) return normalizeReadingForDisplay(reading);
+  return applyCalibration(reading);
+}
+
+export function displayReadings(readings) {
+  if (!Array.isArray(readings)) return readings;
+  return readings.map(displayReading);
 }

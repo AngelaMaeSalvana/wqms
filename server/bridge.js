@@ -22,7 +22,7 @@ try {
 
 const mqtt = require('mqtt');
 const { createClient } = require('@supabase/supabase-js');
-const { calculateWQI } = require('./utils/nh3Wqi');
+const { mqttToSensorRow } = require('./utils/mqttToSensorRow');
 
 // ---------- Environment (use same .env: MQTT_* / SUPABASE_* or REACT_APP_* fallbacks) ----------
 let MQTT_URL = process.env.MQTT_URL || process.env.REACT_APP_MQTT_WS_URL || '';
@@ -113,87 +113,12 @@ function normalizeNodeId(id) {
   return s;
 }
 
-/**
- * Build DB row from parsed forwarder JSON + backend reception timestamp.
- *
- * Timestamp chain (all epoch ms / bigint):
- *   t_node    – epoch ms the sensor node transmitted (requires NTP on node; may be 0/null)
- *   t_fwd_rx  – epoch ms the forwarder received the LoRa packet  ← PRIMARY start timestamp
- *   t_fwd_pub – epoch ms the forwarder published to MQTT broker
- *   t_be_rx   – epoch ms this bridge received the MQTT message   ← always Date.now()
- *
- * Forwarder-to-Dashboard latency (computed client-side) = t_dash_rx - t_fwd_rx
- * Backend processing component                           = t_be_rx  - t_fwd_pub
- */
-function payloadToRow(topic, data, t_be_rx) {
-  const rawId = data.nodeId ?? data.node ?? data.node_id ?? nodeIdFromTopic(topic) ?? 'unknown';
-  const nodeId = normalizeNodeId(rawId);
-  const timestamp = data.timestamp || new Date().toISOString();
-
-  // seq: accept both seq_id (sender firmware) and seq (bridge alias)
-  const seqRaw = data.seq ?? data.seq_id;
-  const seq = seqRaw != null ? (typeof seqRaw === 'number' ? seqRaw : parseInt(seqRaw, 10)) : null;
-
-  // t_fwd_rx MUST be preserved exactly as received — it is the canonical start timestamp
-  // when sensor nodes do not have reliable NTP (t_node may be 0 or null).
-  const t_fwd_rx = data.t_fwd_rx != null ? parseInt(data.t_fwd_rx, 10) : null;
-  const t_fwd_pub = data.t_fwd_pub != null ? parseInt(data.t_fwd_pub, 10) : null;
-  const t_node = data.t_node != null ? parseInt(data.t_node, 10) : null;
-
-  if (t_fwd_rx == null) {
-    console.warn(`[Bridge] ⚠️  t_fwd_rx missing | node=${nodeId} seq=${seq ?? '—'} — latency metrics will be degraded`);
-  }
-
-  // Attach test_run_id if there is an active run covering this node
-  let test_run_id = data.test_run_id ?? null;
-  if (!test_run_id && activeTestRunContext && Date.now() <= activeTestRunContext.endsAt) {
-    const ctx = activeTestRunContext;
-    if (!ctx.nodeId || ctx.nodeId === 'all' || normalizeNodeId(ctx.nodeId) === nodeId) {
-      test_run_id = ctx.id;
-    }
-  }
-
-  const ph = data.pH ?? data.ph ?? null;
-  const tan = data.tan ?? data.TAN ?? 0.5;
-  const doVal = data.dissolvedOxygen ?? data.do ?? data.dissolved_oxygen ?? null;
-  const temp = data.temperature ?? null;
-  const turb = data.turbidity ?? null;
-  const wqi = calculateWQI({
-    temperature: temp,
-    ph,
-    tan,
-    dissolvedOxygen: doVal,
-    turbidity: turb,
-  });
-
-  return {
-    node_id: nodeId,
-    temperature: temp,
-    turbidity: turb,
-    ph,
-    dissolved_oxygen: doVal,
-    flow_rate: data.flowRate ?? data.flow_rate ?? null,
-    battery_voltage: data.batteryVoltage ?? data.battery_voltage ?? null,
-    battery_percentage: data.batteryPercentage ?? data.battery_percentage ?? null,
-    wqi: wqi != null ? wqi : null,
-    seq,
-    tx_millis: data.tx_millis != null ? (typeof data.tx_millis === 'number' ? data.tx_millis : parseInt(data.tx_millis, 10)) : null,
-    rx_millis: data.rx_millis != null ? (typeof data.rx_millis === 'number' ? data.rx_millis : parseInt(data.rx_millis, 10)) : null,
-    timestamp,
-    t_node,
-    t_fwd_rx,   // preserved exactly from forwarder — PRIMARY latency start
-    t_fwd_pub,
-    t_be_rx,    // always Date.now() at MQTT message arrival
-    test_run_id,
-    rssi: data.rssi != null ? parseInt(data.rssi, 10) : null,
-    snr:  data.snr  != null ? parseInt(data.snr,  10) : null,
-  };
-}
-
-/** Columns allowed on sensor_readings. wqi = calculated in backend from temp, ph, do, turbidity, etc. Location is in nodes table. */
+/** Columns allowed on sensor_readings (lab + user-calibrated fields). */
 const SENSOR_READINGS_COLUMNS = [
   'node_id', 'temperature', 'turbidity', 'ph', 'dissolved_oxygen',
   'flow_rate', 'battery_voltage', 'battery_percentage', 'wqi',
+  'temperature_corrected', 'ph_corrected', 'turbidity_corrected',
+  'dissolved_oxygen_corrected', 'flow_rate_corrected', 'nh3_corrected',
   'seq', 'tx_millis', 'rx_millis', 'timestamp',
   't_node', 't_fwd_rx', 't_fwd_pub', 't_be_rx', 'test_run_id',
   'rssi', 'snr',
@@ -237,23 +162,17 @@ pollActiveTestRun();
 const testRunPollInterval = setInterval(pollActiveTestRun, 10000);
 
 /** Recalculate and upsert the daily summary for a node after a new reading is stored. */
-async function updateDailySummary(data, nodeId) {
+async function updateDailySummary(row, nodeId) {
   const today = new Date().toISOString().split('T')[0];
   const { data: nodeRow } = await supabase.from('nodes').select('location').eq('id', nodeId).maybeSingle();
   const location = nodeRow?.location ?? nodeId;
-  const ph = data.pH ?? data.ph ?? null;
-  const tan = data.tan ?? data.TAN ?? 0.5;
-  const doVal = data.dissolvedOxygen ?? data.do ?? data.dissolved_oxygen ?? null;
-  const flowRate = data.flowRate ?? data.flow_rate ?? null;
-  const temp = data.temperature ?? null;
-  const turb = data.turbidity ?? null;
-  const wqi = calculateWQI({
-    temperature: temp,
-    ph,
-    tan,
-    dissolvedOxygen: doVal,
-    turbidity: turb,
-  });
+  const temp = row.temperature_corrected ?? row.temperature ?? null;
+  const ph = row.ph_corrected ?? row.ph ?? null;
+  const turb = row.turbidity_corrected ?? row.turbidity ?? null;
+  const doVal = row.dissolved_oxygen_corrected ?? row.dissolved_oxygen ?? null;
+  const flowRate = row.flow_rate_corrected ?? row.flow_rate ?? null;
+  const tan = row.tan ?? 0.5;
+  const wqi = row.wqi ?? null;
 
   const { data: existing, error: fetchErr } = await supabase
     .from('daily_summaries')
@@ -404,7 +323,7 @@ client.on('connect', () => {
   });
 });
 
-client.on('message', (topic, message) => {
+client.on('message', async (topic, message) => {
   // Record backend reception time immediately upon message arrival (epoch ms, bigint)
   const t_be_rx = Date.now();
 
@@ -475,10 +394,16 @@ client.on('message', (topic, message) => {
     fwdToBeMs != null ? `| fwd→be: ${fwdToBeMs}ms` : '',
   );
 
-  const row = payloadToRow(topic, data, t_be_rx);
+  let row;
+  try {
+    row = await mqttToSensorRow(topic, data, t_be_rx, { activeTestRunContext });
+  } catch (err) {
+    console.error('[MQTT] Row build error:', err.message);
+    return;
+  }
   insertReading(row)
     .then(({ ok }) => {
-      if (ok) updateDailySummary(data, row.node_id).catch((err) => console.error('[Bridge] daily summary error:', err));
+      if (ok) updateDailySummary(row, row.node_id).catch((err) => console.error('[Bridge] daily summary error:', err));
     })
     .catch((err) => console.error('[MQTT] Insert error:', err));
 });

@@ -12,6 +12,12 @@ import {
 } from "../utils/settingsStorage";
 import { sendEventNotification } from "../services/emailService";
 import { DEFAULT_ALERT_LOGIC, getAlertLogic, saveAlertLogic } from "../utils/alertsData";
+import {
+  DEFAULT_DATA_COLLECTION,
+  FREQUENCY_MODES,
+  getEffectiveAcquisitionIntervalMinutes,
+  mergeDataCollection,
+} from "../utils/dataAcquisition";
 import "./Settings.css";
 
 const DEFAULT_THRESHOLDS = {
@@ -118,18 +124,16 @@ const CLASSIFICATION_STORAGE_KEY = "wqms_threshold_classification";
 const DEFAULT_CALIBRATION = {
   temperatureOffset: 0,
   pHOffset: 0,
-  turbidityOffset: 0,
-  dissolvedOxygenOffset: 0,
-  nh3Offset: 0,
-  flowRateOffset: 0,
 };
 
-const DEFAULT_DATA_COLLECTION = {
-  defaultIntervalMinutes: 15,
-  minIntervalMinutes: 1,
-  maxIntervalMinutes: 15,
-  readingsLimit: 500,
-};
+function sanitizeCalibration(raw) {
+  const t = parseFloat(raw?.temperatureOffset);
+  const p = parseFloat(raw?.pHOffset);
+  return {
+    temperatureOffset: Number.isFinite(t) ? t : 0,
+    pHOffset: Number.isFinite(p) ? p : 0,
+  };
+}
 
 const DEFAULT_NOTIFICATIONS = {
   emailEnabled: false,
@@ -155,14 +159,12 @@ export default function Settings() {
       ...(preset || stored),
     };
   });
-  const [calibration, setCalibration] = useState(() => ({
-    ...DEFAULT_CALIBRATION,
-    ...loadFromStorage("wqms_calibration", {}),
-  }));
-  const [dataCollection, setDataCollection] = useState(() => ({
-    ...DEFAULT_DATA_COLLECTION,
-    ...loadFromStorage("wqms_data_collection", {}),
-  }));
+  const [calibration, setCalibration] = useState(() =>
+    sanitizeCalibration({ ...DEFAULT_CALIBRATION, ...loadFromStorage("wqms_calibration", {}) })
+  );
+  const [dataCollection, setDataCollection] = useState(() =>
+    mergeDataCollection(loadFromStorage("wqms_data_collection", {}))
+  );
   const [wqiWeights, setWqiWeights] = useState(() => ({
     ...DEFAULT_WQI_WEIGHTS,
     ...loadFromStorage(WQI_WEIGHTS_KEY, {}),
@@ -190,8 +192,8 @@ export default function Settings() {
         const preset = validCls !== "Custom" ? THRESHOLD_CLASSIFICATIONS[validCls] : null;
         setThresholdClassification(validCls);
         setThresholds((t) => ({ ...t, ...(preset || stored) }));
-        setCalibration((c) => ({ ...c, ...loadFromStorage("wqms_calibration", {}) }));
-        setDataCollection((d) => ({ ...d, ...loadFromStorage("wqms_data_collection", {}) }));
+        setCalibration(sanitizeCalibration({ ...DEFAULT_CALIBRATION, ...loadFromStorage("wqms_calibration", {}) }));
+        setDataCollection(mergeDataCollection(loadFromStorage("wqms_data_collection", {})));
         setWqiWeights((w) => ({ ...w, ...loadFromStorage(WQI_WEIGHTS_KEY, {}) }));
         setNotifications((n) => ({ ...n, ...loadFromStorage(NOTIFICATIONS_KEY, {}) }));
         setMaintenance((m) => ({ ...m, ...loadFromStorage(SETTINGS_KEYS.maintenance, {}) }));
@@ -200,6 +202,15 @@ export default function Settings() {
   }, []);
 
   const isCustomClassification = thresholdClassification === "Custom";
+
+  const isAutoAdaptMode =
+    (dataCollection.frequencyMode ?? FREQUENCY_MODES.USER_SELECTED) === FREQUENCY_MODES.AUTO_ADAPT;
+  const effectiveAutoAcquisitionMinutes = isAutoAdaptMode
+    ? getEffectiveAcquisitionIntervalMinutes(dataCollection)
+    : null;
+  const flowMappingInvalid =
+    isAutoAdaptMode &&
+    Number(dataCollection.flowRateAtFastCondition) <= Number(dataCollection.flowRateAtSlowCondition);
 
   const updateThreshold = (key, value) => {
     if (!isCustomClassification) return;
@@ -235,6 +246,21 @@ export default function Settings() {
   const updateDataCollection = (key, value) => {
     const n = parseInt(value, 10);
     if (!isNaN(n) && n >= 0) {
+      const next = { ...dataCollection, [key]: n };
+      setDataCollection(next);
+      saveToStorage("wqms_data_collection", next);
+    }
+  };
+
+  const updateDataCollectionEnum = (key, value) => {
+    const next = { ...dataCollection, [key]: value };
+    setDataCollection(next);
+    saveToStorage("wqms_data_collection", next);
+  };
+
+  const updateDataCollectionFloat = (key, value) => {
+    const n = parseFloat(value);
+    if (!Number.isNaN(n) && n >= 0) {
       const next = { ...dataCollection, [key]: n };
       setDataCollection(next);
       saveToStorage("wqms_data_collection", next);
@@ -282,7 +308,7 @@ export default function Settings() {
     const settingsByKey = {
       wqms_thresholds: thresholds,
       wqms_threshold_classification: thresholdClassification,
-      wqms_calibration: calibration,
+      wqms_calibration: sanitizeCalibration(calibration),
       wqms_data_collection: dataCollection,
       [WQI_WEIGHTS_KEY]: wqiWeights,
       [NOTIFICATIONS_KEY]: notifications,
@@ -350,7 +376,7 @@ export default function Settings() {
           <div className="card__header">
             <h2 className="card__title">
               Calibration
-              <InfoTooltip text="Fine-tune each sensor by adding a small correction value. Use this if a sensor consistently reads slightly too high or too low." label="Calibration help" />
+              <InfoTooltip text="Adjust temperature and pH with a small offset if readings are consistently high or low. Turbidity, DO, NH₃, and flow use lab/backend correction only." label="Calibration help" />
             </h2>
           </div>
           <div className="card__body">
@@ -375,50 +401,6 @@ export default function Settings() {
                   value={calibration.pHOffset}
                   onChange={(e) => updateCalibration("pHOffset", e.target.value)}
                   aria-label="pH calibration offset"
-                />
-              </label>
-              <label className="settings-label">
-                <span>Turbidity offset (NTU)</span>
-                <input
-                  type="number"
-                  step="0.1"
-                  className="settings-input"
-                  value={calibration.turbidityOffset}
-                  onChange={(e) => updateCalibration("turbidityOffset", e.target.value)}
-                  aria-label="Turbidity calibration offset"
-                />
-              </label>
-              <label className="settings-label">
-                <span>Dissolved O₂ offset (mg/L)</span>
-                <input
-                  type="number"
-                  step="0.1"
-                  className="settings-input"
-                  value={calibration.dissolvedOxygenOffset ?? 0}
-                  onChange={(e) => updateCalibration("dissolvedOxygenOffset", e.target.value)}
-                  aria-label="Dissolved oxygen calibration offset"
-                />
-              </label>
-              <label className="settings-label">
-                <span>NH₃ offset (mg/L)</span>
-                <input
-                  type="number"
-                  step="0.01"
-                  className="settings-input"
-                  value={calibration.nh3Offset ?? 0}
-                  onChange={(e) => updateCalibration("nh3Offset", e.target.value)}
-                  aria-label="NH3 calibration offset"
-                />
-              </label>
-              <label className="settings-label">
-                <span>Flow rate offset (L/min)</span>
-                <input
-                  type="number"
-                  step="0.1"
-                  className="settings-input"
-                  value={calibration.flowRateOffset ?? 0}
-                  onChange={(e) => updateCalibration("flowRateOffset", e.target.value)}
-                  aria-label="Flow rate calibration offset"
                 />
               </label>
             </div>
@@ -700,42 +682,141 @@ export default function Settings() {
           </div>
           <div className="card__body">
             <div className="settings-grid">
-              <label className="settings-label">
-                <span>Default interval (minutes) <InfoTooltip text="1–120 min" label="Default interval range" /></span>
-                <input
-                  type="number"
-                  min={1}
-                  max={120}
+              <label className="settings-label settings-label--full">
+                <span>
+                  Sampling mode{" "}
+                  <InfoTooltip
+                    text="User-selected keeps a fixed interval you set. Auto-adapt computes interval from river flow (1–15 min): slower flow → longer interval, faster flow → shorter. Flow is simulated until a sensor is connected."
+                    label="Sampling mode help"
+                  />
+                </span>
+                <select
                   className="settings-input"
-                  value={dataCollection.defaultIntervalMinutes ?? 15}
-                  onChange={(e) => updateDataCollection("defaultIntervalMinutes", e.target.value)}
-                  aria-label="Default data collection interval in minutes"
-                />
+                  value={dataCollection.frequencyMode ?? FREQUENCY_MODES.USER_SELECTED}
+                  onChange={(e) => updateDataCollectionEnum("frequencyMode", e.target.value)}
+                  aria-label="Data acquisition sampling mode"
+                >
+                  <option value={FREQUENCY_MODES.USER_SELECTED}>User-selected interval</option>
+                  <option value={FREQUENCY_MODES.AUTO_ADAPT}>Auto-adapt from flow rate</option>
+                </select>
               </label>
-              <label className="settings-label">
-                <span>Minimum interval (minutes) <InfoTooltip text="Must be ≤ max interval" label="Min interval help" /></span>
-                <input
-                  type="number"
-                  min={1}
-                  max={120}
-                  className="settings-input"
-                  value={dataCollection.minIntervalMinutes ?? 1}
-                  onChange={(e) => updateDataCollection("minIntervalMinutes", e.target.value)}
-                  aria-label="Minimum sampling interval in minutes"
-                />
-              </label>
-              <label className="settings-label">
-                <span>Maximum interval (minutes) <InfoTooltip text="Must be ≥ min interval" label="Max interval help" /></span>
-                <input
-                  type="number"
-                  min={1}
-                  max={120}
-                  className="settings-input"
-                  value={dataCollection.maxIntervalMinutes ?? 15}
-                  onChange={(e) => updateDataCollection("maxIntervalMinutes", e.target.value)}
-                  aria-label="Maximum sampling interval in minutes"
-                />
-              </label>
+
+              {!isAutoAdaptMode && (
+                <>
+                  <label className="settings-label">
+                    <span>
+                      Acquisition interval (minutes){" "}
+                      <InfoTooltip
+                        text="Fixed minutes between readings while this mode is active. If unset, 15 minutes is used (typical for steady or slow flow)."
+                        label="User interval help"
+                      />
+                    </span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={120}
+                      className="settings-input"
+                      value={dataCollection.defaultIntervalMinutes ?? 15}
+                      onChange={(e) => updateDataCollection("defaultIntervalMinutes", e.target.value)}
+                      aria-label="User-selected data collection interval in minutes"
+                    />
+                  </label>
+                  <label className="settings-label">
+                    <span>Minimum interval (minutes) <InfoTooltip text="Must be ≤ max interval" label="Min interval help" /></span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={120}
+                      className="settings-input"
+                      value={dataCollection.minIntervalMinutes ?? 1}
+                      onChange={(e) => updateDataCollection("minIntervalMinutes", e.target.value)}
+                      aria-label="Minimum sampling interval in minutes"
+                    />
+                  </label>
+                  <label className="settings-label">
+                    <span>Maximum interval (minutes) <InfoTooltip text="Must be ≥ min interval" label="Max interval help" /></span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={120}
+                      className="settings-input"
+                      value={dataCollection.maxIntervalMinutes ?? 15}
+                      onChange={(e) => updateDataCollection("maxIntervalMinutes", e.target.value)}
+                      aria-label="Maximum sampling interval in minutes"
+                    />
+                  </label>
+                </>
+              )}
+
+              {isAutoAdaptMode && (
+                <>
+                  <label className="settings-label">
+                    <span>
+                      Simulated flow rate{" "}
+                      <InfoTooltip
+                        text="Hard-coded flow value for testing until a physical flow sensor is available. Use the same units as the slow/fast reference values below (e.g. m³/s)."
+                        label="Simulated flow help"
+                      />
+                    </span>
+                    <input
+                      type="number"
+                      min={0}
+                      step="0.01"
+                      className="settings-input"
+                      value={dataCollection.simulatedFlowRate ?? DEFAULT_DATA_COLLECTION.simulatedFlowRate}
+                      onChange={(e) => updateDataCollectionFloat("simulatedFlowRate", e.target.value)}
+                      aria-label="Simulated river flow rate for auto-adapt"
+                    />
+                  </label>
+                  <label className="settings-label">
+                    <span>
+                      Flow at slow condition (→ 15 min){" "}
+                      <InfoTooltip
+                        text="At or below this flow, acquisition uses the longest interval (15 minutes)."
+                        label="Slow flow mapping help"
+                      />
+                    </span>
+                    <input
+                      type="number"
+                      min={0}
+                      step="0.01"
+                      className="settings-input"
+                      value={dataCollection.flowRateAtSlowCondition ?? DEFAULT_DATA_COLLECTION.flowRateAtSlowCondition}
+                      onChange={(e) => updateDataCollectionFloat("flowRateAtSlowCondition", e.target.value)}
+                      aria-label="Flow rate mapped to 15 minute interval"
+                    />
+                  </label>
+                  <label className="settings-label">
+                    <span>
+                      Flow at fast condition (→ 1 min){" "}
+                      <InfoTooltip
+                        text="At or above this flow, acquisition uses the shortest interval (1 minute). Must be greater than the slow-condition value."
+                        label="Fast flow mapping help"
+                      />
+                    </span>
+                    <input
+                      type="number"
+                      min={0}
+                      step="0.01"
+                      className="settings-input"
+                      value={dataCollection.flowRateAtFastCondition ?? DEFAULT_DATA_COLLECTION.flowRateAtFastCondition}
+                      onChange={(e) => updateDataCollectionFloat("flowRateAtFastCondition", e.target.value)}
+                      aria-label="Flow rate mapped to 1 minute interval"
+                    />
+                  </label>
+                  <p className="settings-acquisition-preview" role="status">
+                    <strong>Effective acquisition interval:</strong>{" "}
+                    {effectiveAutoAcquisitionMinutes} minute{effectiveAutoAcquisitionMinutes === 1 ? "" : "s"}
+                    {flowMappingInvalid ? (
+                      <span className="settings-acquisition-preview__warn">
+                        {" "}
+                        — set fast condition &gt; slow condition for linear mapping.
+                      </span>
+                    ) : null}
+                  </p>
+                </>
+              )}
+
               <label className="settings-label">
                 <span>Max readings to load <InfoTooltip text="How many recent readings to fetch at once (100–2000). Higher values show more history but may load slower." label="Readings limit help" /></span>
                 <input

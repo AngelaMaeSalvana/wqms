@@ -148,7 +148,7 @@ const SCENARIOS = {
     label: 'All-clear — well within limits (resets persistence counters)',
     expectedAlerts: 'none',
     payloads: () => [basePayload({
-      temperature:      24,
+      temperature:      27,
       turbidity:        3,
       ph:               7.2,
       dissolved_oxygen: 8.0,

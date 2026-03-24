@@ -10,6 +10,7 @@
  */
 
 import { calculateNH3FromTAN } from './nh3Calculator';
+import { loadFromStorage } from './settingsStorage';
 
 const WQI_WEIGHTS_KEY = 'wqms_wqi_weights';
 
@@ -28,8 +29,7 @@ export const DEFAULT_WQI_WEIGHTS = {
  */
 export function getWQIWeights() {
   try {
-    const s = localStorage.getItem(WQI_WEIGHTS_KEY);
-    const stored = s ? JSON.parse(s) : null;
+    const stored = loadFromStorage(WQI_WEIGHTS_KEY, {});
     if (!stored || typeof stored !== 'object') return { ...DEFAULT_WQI_WEIGHTS };
     const merged = {
       dissolvedOxygen: parseFloat(stored.dissolvedOxygen),

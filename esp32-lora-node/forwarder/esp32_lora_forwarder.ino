@@ -557,7 +557,7 @@ static bool validateRequiredFields(JsonDocument &doc, const char *rawJson) {
 //
 // Returns true on success; writes topic, payload, nodeId (optional), and *seqOut.
 // Use static doc to avoid large stack allocation (prevents stack overflow on ESP32).
-static StaticJsonDocument<768> jsonDoc;
+static StaticJsonDocument<1024> jsonDoc;
 static bool parseAndPreparePayload(const char *json, uint64_t t_fwd_rx,
                                    int16_t rssi, int8_t snr,
                                    char *topicOut, size_t topicLen,

@@ -10,6 +10,7 @@ const http = require('http');
 const WebSocket = require('ws');
 const mqtt = require('mqtt');
 const db = require('./db');
+const { mqttToSensorRow } = require('./utils/mqttToSensorRow');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -185,8 +186,8 @@ function aboveMax(threshold, pct) {
   return +(threshold * (1 + pct / 100)).toFixed(3);
 }
 
-function buildScenarioPayloads(scenario, nodeId, testRunId, seqBase) {
-  const T = {
+function buildScenarioPayloads(scenario, nodeId, testRunId, seqBase, clientThresholds) {
+  const DEFAULT_T = {
     temperatureMin: 18,
     temperatureMax: 30,
     pHMin: 6.5,
@@ -195,6 +196,7 @@ function buildScenarioPayloads(scenario, nodeId, testRunId, seqBase) {
     dissolvedOxygenMin: 4,
     nh3Max: 0.5,
   };
+  const T = { ...DEFAULT_T, ...(clientThresholds || {}) };
 
   // Fixed in-range defaults so one-parameter scenarios do not randomly breach *other*
   // parameters under stricter client Settings (e.g. temperature min 26°C).
@@ -232,7 +234,7 @@ function buildScenarioPayloads(scenario, nodeId, testRunId, seqBase) {
 
   const scenarios = {
     normal: () => [basePayload()],
-    'all-clear': () => [basePayload({ temperature: 24, turbidity: 3, ph: 7.2, dissolved_oxygen: 8.0 })],
+    'all-clear': () => [basePayload({ temperature: 27, turbidity: 3, ph: 7.2, dissolved_oxygen: 8.0 })],
     'low-do': () => [basePayload({ dissolved_oxygen: belowMin(T.dissolvedOxygenMin, 3) })],
     'medium-do': () => [basePayload({ dissolved_oxygen: belowMin(T.dissolvedOxygenMin, 7) })],
     'high-do': () => [basePayload({ dissolved_oxygen: belowMin(T.dissolvedOxygenMin, 15) })],
@@ -291,10 +293,9 @@ async function expireTestRun(id) {
 async function handleMQTTMessage(topic, data, t_be_rx) {
   if (topic.includes('water-quality') || topic.includes('sensor-data')) {
     const reading = data.sensorReading || data;
-    const rawId = reading.nodeId || reading.node || extractNodeIdFromTopic(topic);
+    const rawId = reading.nodeId || reading.node || reading.node_id || extractNodeIdFromTopic(topic);
     const nodeId = normalizeNodeId(rawId);
 
-    // Accept both seq and seq_id field names from the forwarder
     const seqRaw = reading.seq ?? reading.seq_id ?? data.seq ?? data.seq_id;
     if (seqRaw == null) {
       console.warn(`⚠️  Telemetry from ${nodeId} missing seq/seq_id — message discarded`);
@@ -306,17 +307,11 @@ async function handleMQTTMessage(topic, data, t_be_rx) {
       return;
     }
 
-    // t_fwd_rx is the PRIMARY latency start timestamp (forwarder epoch ms when LoRa packet arrived).
-    // Sensor nodes may not have reliable NTP so t_node can be 0/null — always prefer t_fwd_rx.
-    // t_be_rx is stamped at the top of this handler (= Date.now()) and must never be overwritten.
     const t_fwd_rx_val = (reading.t_fwd_rx ?? data.t_fwd_rx) != null
       ? parseInt(reading.t_fwd_rx ?? data.t_fwd_rx, 10) : null;
     if (t_fwd_rx_val == null) {
       console.warn(`⚠️  Telemetry from ${nodeId} seq=${seq} missing t_fwd_rx — latency metrics will be degraded`);
     }
-
-    // Forwarder adds timestamp (ISO); use it when present
-    const timestamp = reading.timestamp || data.timestamp || new Date().toISOString();
 
     const fwdToBeMs = t_fwd_rx_val != null ? t_be_rx - t_fwd_rx_val : null;
     console.log(
@@ -325,26 +320,15 @@ async function handleMQTTMessage(topic, data, t_be_rx) {
       fwdToBeMs != null ? `| fwd→be: ${fwdToBeMs}ms` : '',
     );
 
-    const row = {
-      node_id: nodeId,
-      temperature: reading.temperature,
-      turbidity: reading.turbidity,
-      ph: reading.pH ?? reading.ph,
-      dissolved_oxygen: reading.dissolvedOxygen ?? reading.do,
-      flow_rate: reading.flowRate ?? reading.flow_rate ?? null,
-      battery_voltage: reading.batteryVoltage ?? reading.battery_voltage ?? null,
-      battery_percentage: reading.batteryPercentage ?? reading.battery_percentage ?? null,
-      seq,
-      tx_millis: reading.tx_millis != null ? (typeof reading.tx_millis === 'number' ? reading.tx_millis : parseInt(reading.tx_millis, 10)) : null,
-      rx_millis: reading.rx_millis != null ? (typeof reading.rx_millis === 'number' ? reading.rx_millis : parseInt(reading.rx_millis, 10)) : null,
-      timestamp,
-      t_node:    (reading.t_node    ?? data.t_node)    != null ? parseInt(reading.t_node    ?? data.t_node,    10) : null,
-      t_fwd_rx:  t_fwd_rx_val,
-      t_fwd_pub: (reading.t_fwd_pub ?? data.t_fwd_pub) != null ? parseInt(reading.t_fwd_pub ?? data.t_fwd_pub, 10) : null,
-      t_be_rx,
-    };
+    const payload = { ...data, ...reading };
+    let row;
+    try {
+      row = await mqttToSensorRow(topic, payload, t_be_rx, { activeTestRunContext: null });
+    } catch (err) {
+      console.error('⚠️  Telemetry row build failed:', err.message);
+      return;
+    }
 
-    // Forward telemetry to all dashboard clients (DB write is handled exclusively by bridge.js)
     wsBroadcast('telemetry', row);
 
   } else if (topic.includes('alert')) {
@@ -504,11 +488,11 @@ app.post('/api/test-scenario/publish', async (req, res) => {
     if (!mqttClient?.connected) {
       return res.status(503).json({ error: 'MQTT not connected' });
     }
-    const { scenario, nodeId, test_run_id } = req.body || {};
+    const { scenario, nodeId, test_run_id, thresholds } = req.body || {};
     if (!scenario) return res.status(400).json({ error: 'scenario is required' });
     if (!nodeId) return res.status(400).json({ error: 'nodeId is required' });
     const seqBase = Date.now() % 1000000000;
-    const payloads = buildScenarioPayloads(scenario, nodeId, test_run_id || null, seqBase);
+    const payloads = buildScenarioPayloads(scenario, nodeId, test_run_id || null, seqBase, thresholds);
     if (!payloads) return res.status(400).json({ error: `Unknown scenario: ${scenario}` });
 
     payloads.forEach((p) => publishTestReadingToMQTT(nodeId, p));

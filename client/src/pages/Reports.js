@@ -11,6 +11,7 @@ import { getWQIClass, calculateWQI } from "../utils/wqiCalculator";
 import { getNH3FromReading, calculateNH3FromTAN } from "../utils/nh3Calculator";
 import { getNodes, loadNodes } from "../utils/nodesStorage";
 import api from "../services/api";
+import { displayReadings } from "../utils/calibration";
 import { PageLoader } from "../components/LoadingSkeleton";
 import "./Reports.css";
 
@@ -930,7 +931,7 @@ function SystemTab({ reportRangeStart, reportRangeEnd, nodes, onSwitchToWater })
       api.getSensorReadings({ startDate: start, endDate: end, limit: null }),
       api.getTimestampLogs({ startDate: start, endDate: end, limit: 200 }).catch(() => []),
     ]).then(([r, t]) => {
-      setReadings(Array.isArray(r) ? r : []);
+      setReadings(displayReadings(Array.isArray(r) ? r : []));
       setTimestampLogs(Array.isArray(t) ? t : []);
     }).catch(() => {}).finally(() => setLoading(false));
   }, [reportRangeStart, reportRangeEnd]);
@@ -1078,7 +1079,7 @@ function SystemTab({ reportRangeStart, reportRangeEnd, nodes, onSwitchToWater })
  * @param {object[]} [nodes] - Optional list of nodes { id, location } to resolve location by node_id.
  */
 function aggregateReadingsToDailySummaries(readings, nodes = []) {
-  const list = Array.isArray(readings) ? readings : [];
+  const list = displayReadings(Array.isArray(readings) ? readings : []);
   if (list.length === 0) return [];
   const nodesById = {};
   (nodes || []).forEach((n) => { nodesById[n.id] = n; });

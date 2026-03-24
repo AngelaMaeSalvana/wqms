@@ -21,7 +21,7 @@ import { useNodeStatus } from "../hooks/useNodeStatus";
 import { useRealtimeReadings } from "../hooks/useRealtimeReadings";
 import { useAlertEmailNotifications } from "../hooks/useAlertEmailNotifications";
 import { supabase } from "../lib/supabaseClient";
-import { applyCalibrationToReadings } from "../utils/calibration";
+import { displayReadings } from "../utils/calibration";
 import { PageLoader } from "../components/LoadingSkeleton";
 import "../pages/Map.css";
 import "./Dashboard.css";
@@ -218,7 +218,7 @@ export default function Dashboard() {
     const today = toDateStr(new Date());
     api.getReadings({ startDate: today, endDate: today, monitoringOnly: true, limit: 2000 })
       .then((rows) => {
-        const list = applyCalibrationToReadings(Array.isArray(rows) ? rows : []);
+        const list = displayReadings(Array.isArray(rows) ? rows : []);
         setTodayReadings(list);
         const byNode = {};
         const prevByNode = {};
@@ -285,7 +285,7 @@ export default function Dashboard() {
     );
   }, [builtAlerts, sensorTestAlerts]);
 
-  useAlertEmailNotifications(alerts, readingsByNode);
+  useAlertEmailNotifications(alerts, readingsByNode, nodeStatuses);
 
   const { toasts, showToast, removeToast } = useToast();
   const seenAlertIdsRef = useRef(new Set());

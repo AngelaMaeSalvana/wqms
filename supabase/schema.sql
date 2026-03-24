@@ -30,7 +30,13 @@ CREATE TABLE IF NOT EXISTS sensor_readings (
   -- LoRa link quality (captured by forwarder on packet reception)
   rssi smallint,
   snr  smallint,
-  wqi integer
+  wqi integer,
+  temperature_corrected real,
+  ph_corrected real,
+  turbidity_corrected real,
+  dissolved_oxygen_corrected real,
+  flow_rate_corrected real,
+  nh3_corrected real
 );
 
 CREATE INDEX IF NOT EXISTS idx_sensor_readings_node_id ON sensor_readings (node_id);
@@ -113,6 +119,7 @@ CREATE TABLE IF NOT EXISTS nodes (
   last_maintenance timestamptz,
   last_sensor_test_at timestamptz,
   last_sensor_test_status text,
+  active boolean NOT NULL DEFAULT true,
   created_at timestamptz DEFAULT now(),
   updated_at timestamptz DEFAULT now()
 );

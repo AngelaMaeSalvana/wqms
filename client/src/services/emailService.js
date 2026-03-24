@@ -30,6 +30,14 @@ export function isEmailJsConfigured() {
   return !!(String(PUBLIC_KEY || '').trim() && String(SERVICE_ID || '').trim() && String(TEMPLATE_ID || '').trim());
 }
 
+/**
+ * Only LOW (early warning) and HIGH (critical) trigger notification emails — not MEDIUM.
+ */
+export function shouldSendAlertEmailBySeverity(alert) {
+  const s = String(alert?.severity || 'info').toLowerCase();
+  return s === 'low' || s === 'high';
+}
+
 function getThresholds() {
   const t = loadFromStorage('wqms_thresholds', {});
   return { ...DEFAULT_THRESHOLDS, ...t };
@@ -38,6 +46,7 @@ function getThresholds() {
 function formatSeverity(severity) {
   const s = (severity || 'info').toLowerCase();
   if (s === 'high') return 'Critical';
+  if (s === 'low') return 'Warning';
   if (s === 'medium') return 'Warning';
   return 'Info';
 }

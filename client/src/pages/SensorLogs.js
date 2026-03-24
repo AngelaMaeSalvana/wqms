@@ -9,7 +9,7 @@ import BatteryIndicator, { batteryPropsFromReading } from "../components/Battery
 import { calculateWQI } from "../utils/wqiCalculator";
 import { getNodes, loadNodes } from "../utils/nodesStorage";
 import api from "../services/api";
-import { applyCalibrationToReadings } from "../utils/calibration";
+import { displayReadings } from "../utils/calibration";
 import { PageLoader } from "../components/LoadingSkeleton";
 import "./SensorLogs.css";
 
@@ -181,7 +181,7 @@ export default function SensorLogs() {
     const start = tableDateRange.start.getFullYear() + "-" + String(tableDateRange.start.getMonth() + 1).padStart(2, "0") + "-" + String(tableDateRange.start.getDate()).padStart(2, "0");
     const end = tableDateRange.end.getFullYear() + "-" + String(tableDateRange.end.getMonth() + 1).padStart(2, "0") + "-" + String(tableDateRange.end.getDate()).padStart(2, "0");
     api.getSensorReadings({ startDate: start, endDate: end, limit: 5000 })
-      .then((rows) => setSensorReadings(applyCalibrationToReadings(Array.isArray(rows) ? rows : [])))
+      .then((rows) => setSensorReadings(displayReadings(Array.isArray(rows) ? rows : [])))
       .catch(() => setSensorReadings([]));
   }, [tableDateRange?.start?.getTime(), tableDateRange?.end?.getTime(), refreshTrigger]);
 

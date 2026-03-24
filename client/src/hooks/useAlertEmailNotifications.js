@@ -5,7 +5,7 @@
  */
 import { useEffect, useRef } from 'react';
 import { loadFromStorage } from '../utils/settingsStorage';
-import { sendAlertEmail, isEmailJsConfigured } from '../services/emailService';
+import { sendAlertEmail, isEmailJsConfigured, shouldSendAlertEmailBySeverity } from '../services/emailService';
 import { isSupabaseEnabled } from '../lib/supabaseClient';
 import api from '../services/api';
 
@@ -45,7 +45,14 @@ function dedupeKeyForAlert(alert) {
   if (alert?.db_id != null) return `db:${alert.db_id}`;
   if (alert?.id != null && (typeof alert.id === 'number' || /^\d+$/.test(String(alert.id)))) return `id:${alert.id}`;
 
-  // For computed alerts, include timestamp so repeated occurrences can email again.
+  // Persistent-state alerts (node offline, maintenance, low battery) use stable keys so we email once, not per re-render.
+  const t = (alert?.type || '').toLowerCase();
+  if (t === 'node' || t === 'maintenance' || t === 'battery') {
+    const base = alert?.id || `${alert?.nodeId ?? alert?.node_id ?? ''}|${alert?.type ?? ''}`;
+    return base ? `state:${base}` : null;
+  }
+
+  // For point-in-time alerts (threshold breaches), include timestamp so repeated occurrences can email again.
   const base = alert?.id || `${alert?.nodeId ?? alert?.node_id ?? ''}|${alert?.type ?? ''}|${alert?.parameter ?? ''}`;
   const ts = alert?.timestamp ?? alert?.createdAt ?? '';
   return `${base}|${ts}`;
@@ -54,8 +61,10 @@ function dedupeKeyForAlert(alert) {
 /**
  * @param {Array} alerts - List of alert objects with id, title, detail, nodeId, etc.
  * @param {Object} [readingsByNode] - Optional { [nodeId]: readings } for latest sensor values in the email
+ * @param {Object} [nodeStatuses] - Optional { [nodeId]: 'online'|'offline' } — when provided, clears node-offline
+ *   email key for online nodes so we re-email on next offline transition
  */
-export function useAlertEmailNotifications(alerts, readingsByNode = {}) {
+export function useAlertEmailNotifications(alerts, readingsByNode = {}, nodeStatuses = {}) {
   const emailedIdsRef = useRef(loadIds(EMAILED_ALERTS_KEY));
   const savedIdsRef = useRef(loadIds(SAVED_ALERTS_KEY));
 
@@ -70,6 +79,15 @@ export function useAlertEmailNotifications(alerts, readingsByNode = {}) {
 
     const emailedIds = emailedIdsRef.current;
     const savedIds = savedIdsRef.current;
+
+    const currentlyOfflineNodeIds = Object.keys(nodeStatuses).length > 0
+      ? new Set(Object.entries(nodeStatuses).filter(([, s]) => s === 'offline').map(([id]) => id))
+      : new Set(
+          alerts
+            .filter((a) => (a?.type || '').toLowerCase() === 'node')
+            .map((a) => a.nodeId ?? a.node_id)
+            .filter(Boolean)
+        );
 
     for (const alert of alerts) {
       const key = dedupeKeyForAlert(alert);
@@ -88,8 +106,8 @@ export function useAlertEmailNotifications(alerts, readingsByNode = {}) {
         });
       }
 
-      // Send email (when configured)
-      if (sendEmail && toEmail && !emailedIds.has(key)) {
+      // Email only for LOW (warning) and HIGH (critical), not MEDIUM
+      if (sendEmail && toEmail && shouldSendAlertEmailBySeverity(alert) && !emailedIds.has(key)) {
         sendAlertEmail(alert, toEmail, readingsByNode).then((res) => {
           if (res.success) {
             emailedIds.add(key);
@@ -100,6 +118,19 @@ export function useAlertEmailNotifications(alerts, readingsByNode = {}) {
       }
     }
 
+    // When a node comes back online, clear its node-offline key so we email again on next offline transition.
+    let emailedChanged = false;
+    for (const key of emailedIds) {
+      if (typeof key === 'string' && key.startsWith('state:node-offline-')) {
+        const nodeId = key.replace('state:node-offline-', '');
+        if (nodeId && !currentlyOfflineNodeIds.has(nodeId)) {
+          emailedIds.delete(key);
+          emailedChanged = true;
+        }
+      }
+    }
+    if (emailedChanged) saveIds(EMAILED_ALERTS_KEY, emailedIds);
+
     saveIds(SAVED_ALERTS_KEY, savedIds);
-  }, [alerts, readingsByNode]);
+  }, [alerts, readingsByNode, nodeStatuses]);
 }

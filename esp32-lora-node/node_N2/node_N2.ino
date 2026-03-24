@@ -1,7 +1,8 @@
 /*
  * WQMS Sensor Node (Sender)
- * Heltec LoRa32 V3 - Simulates water quality sensors for testing
- * Sends: dissolvedOxygen, turbidity, pH, flowRate, temperature
+ * Heltec LoRa32 V3 - DS18B20 + SEN0189 turbidity (10k:10k -> GPIO34) + DO (GPIO2) + pH (ADC1)
+ * Sends: dissolvedOxygen, turbidity, pH, flowRate, temperature, plus compact raw fields for backend:
+ *   turRawV, doRawV (volts), turRaw, doRaw (ADC). Bridge corrects NTU/DO from turRaw/doRaw; pH/temp offsets in JS.
  * Field names match wqms dashboard - JSON structure constant; null when sensor disconnected
  * Listens for remote diagnostics commands (overrides send interval)
  *
@@ -31,6 +32,10 @@
 #include "HT_SSD1306Wire.h"
 #include <WiFi.h>
 #include <time.h>
+#include <OneWire.h>
+#include <DallasTemperature.h>
+
+#define DS18B20_PIN 4
 
 // -------------------- Stringify helper (for OLED slot display) --------------------
 #define STRINGIFY_INNER(x) #x
@@ -78,7 +83,7 @@
 
 // -------------------- Buffers --------------------
 #define RX_BUF_SIZE 128  // For ACK (may include CMD:test:start...) and CMD:diag:<node_id>
-#define TX_BUF_SIZE 300
+#define TX_BUF_SIZE 380
 
 static char rxBuf[RX_BUF_SIZE];
 static char txBuf[TX_BUF_SIZE];
@@ -87,17 +92,29 @@ static int16_t lastRssi = 0;
 static int8_t  lastSnr  = 0;
 static uint16_t rxSize  = 0;
 
-// -------------------- Sample / test data (set to 0 when sensors are ready) --------------------
-#define USE_SAMPLE_SENSOR_DATA  1
+// -------------------- Sample / test data (set to 1 for random test values; 0 = hardware below) --------------------
+#define USE_SAMPLE_SENSOR_DATA  0
 
-// -------------------- Sensor connectivity (for testing: set false = null in JSON) --------------------
-// Real sensors: set true when connected; read failure -> use null. Structure always constant.
+// -------------------- Dissolved oxygen (analog module -> ADC) --------------------
+#define DO_PIN        2
+static const float DO_CALIB_K = 0.00472f;  // mg/L per ADC count (calibrated)
+
+// -------------------- pH (analog module -> ADC1) --------------------
+// Standalone sketch used "pin 1" (often Uno A1). GPIO1 is UART TX on ESP32, not ADC — use ADC1 GPIO (e.g. 32–39).
+#define PH_ADC_PIN    32
+#define PH_ARRAY_LEN  40
+static float PH_SLOPE     = -0.005119f;
+static float PH_INTERCEPT = 15.33f;
+static int   s_phReadings[PH_ARRAY_LEN];
+static int   s_phBufIndex = 0;
+
+// -------------------- Sensor connectivity (false = null in JSON when not USE_SAMPLE) --------------------
 static const bool SENSOR_CONNECTED[] = {
-  true,   // temperature
-  true,   // turbidity
+  true,   // temperature (DS18B20)
+  true,   // turbidity (SEN0189, 10k:10k -> GPIO34)
   true,   // pH
   true,   // dissolvedOxygen
-  false   // flowRate - disconnected for dashboard testing
+  false   // flowRate
 };
 
 // -------------------- Node ID - must match wqms nodes (e.g. node_01, node_02) --------------------
@@ -309,11 +326,133 @@ static uint64_t epochMillis() {
   return (uint64_t)secs * 1000ULL + ms_in_sec;
 }
 
+// -------------------- DS18B20 --------------------
+OneWire oneWire(DS18B20_PIN);
+DallasTemperature ds18b20(&oneWire);
+
+static bool dsConversionInProgress = false;
+static unsigned long dsRequestTime  = 0;
+static float dsLatestTempC          = NAN;
+
+static void initTempSensor() {
+  pinMode(DS18B20_PIN, INPUT_PULLUP);
+  ds18b20.begin();
+  ds18b20.setWaitForConversion(false);
+}
+
+// Call every loop(); updates dsLatestTempC (non-blocking).
+static float updateTempSensor() {
+  unsigned long now = millis();
+
+  if (!dsConversionInProgress) {
+    ds18b20.requestTemperatures();
+    dsRequestTime          = now;
+    dsConversionInProgress = true;
+  }
+
+  if (dsConversionInProgress && (now - dsRequestTime >= 800)) {
+    float t = ds18b20.getTempCByIndex(0);
+    if (t > -100.0f && t < 150.0f) {
+      dsLatestTempC = t;
+    } else {
+      dsLatestTempC = NAN;
+    }
+    dsConversionInProgress = false;
+  }
+
+  return dsLatestTempC;
+}
+
+// -------------------- Turbidity (SEN0189, 10k:10k divider midpoint -> GPIO34) --------------------
+#define TURB_ADC_PIN 34
+static const float TURB_ADC_VREF        = 3.3f;
+static const float TURB_ADC_MAX_COUNTS  = 4095.0f;
+static const float TURB_DIVIDER_GAIN    = 2.0f;
+static const int   TURB_SAMPLES         = 30;
+static const int   TURB_SAMPLE_DELAYMS  = 5;
+static float s_turbV_smooth = 0.0f;
+
+static float readTurbidityRawAvg() {
+  uint32_t sum = 0;
+  for (int i = 0; i < TURB_SAMPLES; i++) {
+    sum += analogRead(TURB_ADC_PIN);
+    delay(TURB_SAMPLE_DELAYMS);
+  }
+  return (float)sum / (float)TURB_SAMPLES;
+}
+
+static float turbidityVoltageToNTU(float v_sensor) {
+  if (v_sensor > 2.5f) return 0.0f;
+  float ntu = -1120.4f * v_sensor * v_sensor + 5742.3f * v_sensor - 4352.9f;
+  if (ntu < 0.0f) ntu = 0.0f;
+  return ntu;
+}
+
+static float turbiditySmoothVoltage(float v_sensor) {
+  if (s_turbV_smooth < 0.1f) s_turbV_smooth = v_sensor;
+  s_turbV_smooth = 0.85f * s_turbV_smooth + 0.15f * v_sensor;
+  return s_turbV_smooth;
+}
+
+static void initTurbiditySensor() {
+  analogSetPinAttenuation(TURB_ADC_PIN, ADC_11db);
+}
+
+// Last turbidity sample (for LoRa raw fields; backend applies NTU = -0.3881*Raw + 822.39 on turRaw)
+static float s_lastTurbidityRawAdc        = NAN;
+static float s_lastTurbiditySensorVoltage = NAN;
+
+static float readTurbidityNTU() {
+  float rawAvg   = readTurbidityRawAvg();
+  s_lastTurbidityRawAdc = rawAvg;
+  float v_mid    = rawAvg * (TURB_ADC_VREF / TURB_ADC_MAX_COUNTS);
+  float v_sensor = v_mid * TURB_DIVIDER_GAIN;
+  s_lastTurbiditySensorVoltage = v_sensor;
+  float v_filt   = turbiditySmoothVoltage(v_sensor);
+  return turbidityVoltageToNTU(v_filt);
+}
+
+// -------------------- Dissolved oxygen & pH --------------------
+static double averagePhArray(const int* arr, int n) {
+  long sum = 0;
+  for (int i = 0; i < n; i++) sum += arr[i];
+  return (double)sum / (double)n;
+}
+
+static void initDoPhAdc() {
+  analogSetPinAttenuation(DO_PIN, ADC_11db);
+  analogSetPinAttenuation(PH_ADC_PIN, ADC_11db);
+  int v = analogRead(PH_ADC_PIN);
+  for (int i = 0; i < PH_ARRAY_LEN; i++) s_phReadings[i] = v;
+  s_phBufIndex = 0;
+}
+
+static int   s_lastDoRawAdc     = -1;
+static float s_lastDoPinVoltage = NAN;
+
+static float readDissolvedOxygenMgL() {
+  int raw = analogRead(DO_PIN);
+  s_lastDoRawAdc     = raw;
+  s_lastDoPinVoltage = (float)raw * (ESP32_VOLTAGE_REF / (float)ADC_MAX_VALUE);
+  return DO_CALIB_K * (float)raw;
+}
+
+static float readPh() {
+  s_phReadings[s_phBufIndex++] = analogRead(PH_ADC_PIN);
+  if (s_phBufIndex >= PH_ARRAY_LEN) s_phBufIndex = 0;
+  double avgRaw = averagePhArray(s_phReadings, PH_ARRAY_LEN);
+  return (float)(PH_SLOPE * avgRaw + PH_INTERCEPT);
+}
+
 // -------------------- Sensor reading --------------------
 // When USE_SAMPLE_SENSOR_DATA is 1, node sends randomized plausible values (no sensors yet).
 #if USE_SAMPLE_SENSOR_DATA
 static void readSensors(float &do_val, float &turbidity, float &ph,
                         float &flow, float &temp) {
+  s_lastTurbidityRawAdc        = NAN;
+  s_lastTurbiditySensorVoltage = NAN;
+  s_lastDoRawAdc               = -1;
+  s_lastDoPinVoltage           = NAN;
   temp      = random(2000, 2801) / 100.0f;   // 20.0–28.0 °C
   turbidity = random(5, 61) / 10.0f;         // 0.5–6.0 NTU
   ph        = random(66, 79) / 10.0f;        // 6.6–7.8
@@ -323,7 +462,11 @@ static void readSensors(float &do_val, float &turbidity, float &ph,
 #else
 static void readSensors(float &do_val, float &turbidity, float &ph,
                         float &flow, float &temp) {
-  do_val = NAN; turbidity = NAN; ph = NAN; flow = NAN; temp = NAN;
+  temp      = dsLatestTempC;
+  turbidity = readTurbidityNTU();
+  do_val    = readDissolvedOxygenMgL();
+  ph        = readPh();
+  flow      = NAN;
 }
 #endif
 
@@ -373,7 +516,8 @@ static void fmtOrNullInt(char *out, size_t outLen, const char *key, int val, boo
 //   node_id      - fixed node identifier
 //   seq_id       - monotonically increasing sequence counter
 //   t_node       - NTP epoch timestamp in ms at the moment the reading was generated (0 = unsynced)
-//   sensor fields (location is in dashboard nodes table, keyed by node_id) (temperature, turbidity, pH, dissolvedOxygen, flowRate)
+//   sensor fields (temperature, turbidity, pH, dissolvedOxygen, flowRate)
+//   turRawV, doRawV — raw voltages (V); turRaw, doRaw — ADC counts for backend linear correction
 //   diagResult   (optional, only when diagnostics were requested)
 //   test_run_id  (optional, only when test evaluation mode is active)
 //
@@ -401,33 +545,56 @@ static void buildPayload(char *buf, size_t bufLen,
   int battery_pct = voltageToPercentage(battery_voltage);
   fmtOrNullInt(s_battery_pct, sizeof(s_battery_pct), "batteryPercentage", battery_pct, battery_pct < 0);
 
+  char s_rawExtra[192];
+#if USE_SAMPLE_SENSOR_DATA
+  snprintf(s_rawExtra, sizeof(s_rawExtra),
+           "\"turRawV\":null,\"doRawV\":null,\"turRaw\":null,\"doRaw\":null");
+#else
+  char turV[40], turR[28], doV[40], doR[28];
+  if (useNullTurb || isnan(s_lastTurbiditySensorVoltage) || isnan(s_lastTurbidityRawAdc)) {
+    snprintf(turV, sizeof(turV), "\"turRawV\":null");
+    snprintf(turR, sizeof(turR), "\"turRaw\":null");
+  } else {
+    snprintf(turV, sizeof(turV), "\"turRawV\":%.2f", s_lastTurbiditySensorVoltage);
+    snprintf(turR, sizeof(turR), "\"turRaw\":%d", (int)(s_lastTurbidityRawAdc + 0.5f));
+  }
+  if (useNullDo || s_lastDoRawAdc < 0) {
+    snprintf(doV, sizeof(doV), "\"doRawV\":null");
+    snprintf(doR, sizeof(doR), "\"doRaw\":null");
+  } else {
+    snprintf(doV, sizeof(doV), "\"doRawV\":%.2f", s_lastDoPinVoltage);
+    snprintf(doR, sizeof(doR), "\"doRaw\":%d", s_lastDoRawAdc);
+  }
+  snprintf(s_rawExtra, sizeof(s_rawExtra), "%s,%s,%s,%s", turV, turR, doV, doR);
+#endif
+
   bool hasDiag = diagResult && diagResult[0];
   bool hasTest = testRunId  && testRunId[0];
 
   if (hasDiag && hasTest) {
     snprintf(buf, bufLen,
              "{\"node_id\":\"%s\",\"seq_id\":%lu,\"t_node\":%llu,"
-             "%s,%s,%s,%s,%s,%s,%s,\"diagResult\":\"%s\",\"test_run_id\":\"%s\"}",
+             "%s,%s,%s,%s,%s,%s,%s,%s,\"diagResult\":\"%s\",\"test_run_id\":\"%s\"}",
              NODE_ID, (unsigned long)seq_id, (unsigned long long)t_node,
-             s_temp, s_turb, s_ph, s_do, s_flow, s_battery, s_battery_pct, diagResult, testRunId);
+             s_temp, s_turb, s_ph, s_do, s_flow, s_battery, s_battery_pct, s_rawExtra, diagResult, testRunId);
   } else if (hasDiag) {
     snprintf(buf, bufLen,
              "{\"node_id\":\"%s\",\"seq_id\":%lu,\"t_node\":%llu,"
-             "%s,%s,%s,%s,%s,%s,%s,\"diagResult\":\"%s\"}",
+             "%s,%s,%s,%s,%s,%s,%s,%s,\"diagResult\":\"%s\"}",
              NODE_ID, (unsigned long)seq_id, (unsigned long long)t_node,
-             s_temp, s_turb, s_ph, s_do, s_flow, s_battery, s_battery_pct, diagResult);
+             s_temp, s_turb, s_ph, s_do, s_flow, s_battery, s_battery_pct, s_rawExtra, diagResult);
   } else if (hasTest) {
     snprintf(buf, bufLen,
              "{\"node_id\":\"%s\",\"seq_id\":%lu,\"t_node\":%llu,"
-             "%s,%s,%s,%s,%s,%s,%s,\"test_run_id\":\"%s\"}",
+             "%s,%s,%s,%s,%s,%s,%s,%s,\"test_run_id\":\"%s\"}",
              NODE_ID, (unsigned long)seq_id, (unsigned long long)t_node,
-             s_temp, s_turb, s_ph, s_do, s_flow, s_battery, s_battery_pct, testRunId);
+             s_temp, s_turb, s_ph, s_do, s_flow, s_battery, s_battery_pct, s_rawExtra, testRunId);
   } else {
     snprintf(buf, bufLen,
              "{\"node_id\":\"%s\",\"seq_id\":%lu,\"t_node\":%llu,"
-             "%s,%s,%s,%s,%s,%s,%s}",
+             "%s,%s,%s,%s,%s,%s,%s,%s}",
              NODE_ID, (unsigned long)seq_id, (unsigned long long)t_node,
-             s_temp, s_turb, s_ph, s_do, s_flow, s_battery, s_battery_pct);
+             s_temp, s_turb, s_ph, s_do, s_flow, s_battery, s_battery_pct, s_rawExtra);
   }
 }
 
@@ -719,9 +886,8 @@ static bool sendWithAck(uint32_t seq_id, const char* payload, uint8_t retries, u
   return false;
 }
 
-// Simple self-check for diagnostics (simulated sensors - always OK for test)
 static const char* runDiagnostics() {
-  return "OK";  // In real sensors: validate readings, return "OK" or error string
+  return "OK";
 }
 
 // -------------------- TDMA state --------------------
@@ -779,6 +945,16 @@ void setup() {
   oledShowLines("BOOT", "Init radio 915...");
   configureRadio();
 
+#if !USE_SAMPLE_SENSOR_DATA
+  analogReadResolution(12);
+  initTempSensor();
+  initTurbiditySensor();
+  initDoPhAdc();
+  Serial.printf("[DS18B20] Devices found: %d\n", ds18b20.getDeviceCount());
+  Serial.printf("[Sensors] Turbidity GPIO%d (10k:10k) | DO GPIO%d | pH GPIO%d\n",
+                TURB_ADC_PIN, DO_PIN, PH_ADC_PIN);
+#endif
+
   oledShowLines("MONITORING MODE", "Sender " NODE_ID,
                 s_timeSynced ? "NTP: synced" : "NTP: unsynced",
                 "TDMA slot " STRINGIFY(NODE_SLOT), "");
@@ -787,6 +963,10 @@ void setup() {
 
 void loop() {
   Radio.IrqProcess();
+
+#if !USE_SAMPLE_SENSOR_DATA
+  updateTempSensor();
+#endif
 
   uint32_t now = millis();
 

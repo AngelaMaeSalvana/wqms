@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import api from "../services/api";
+import { displayReadings } from "../utils/calibration";
 
 /**
  * Fetches the most recent readings and returns the latest reading per node.
@@ -15,7 +16,7 @@ export function useLatestReadingsByNode() {
     api
       .getReadings({ monitoringOnly: true, limit: 200 })
       .then((rows) => {
-        if (!cancelled && Array.isArray(rows)) setReadings(rows);
+        if (!cancelled && Array.isArray(rows)) setReadings(displayReadings(rows));
       })
       .catch(() => {
         if (!cancelled) setReadings([]);

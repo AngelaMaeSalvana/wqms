@@ -1,6 +1,6 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { supabase } from '../lib/supabaseClient';
-import { applyCalibrationToReadings } from '../utils/calibration';
+import { displayReadings } from '../utils/calibration';
 import { getNH3FromReading } from '../utils/nh3Calculator';
 
 /**
@@ -37,7 +37,7 @@ export function useRealtimeReadings({ nodeId = null, date = null, onNewReading }
     if (nodeId && raw.node_id !== nodeId) return;
 
     // Apply calibration and enrich with computed aliases.
-    const [calibrated] = applyCalibrationToReadings([raw]);
+    const [calibrated] = displayReadings([raw]);
     const enriched = {
       ...calibrated,
       pH: calibrated.ph,

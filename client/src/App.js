@@ -1,8 +1,10 @@
-import React, { useEffect } from "react";
+import React, { useEffect, useState } from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 
 import Layout from "./components/Layout.js";
 import { syncSettingsFromSupabase } from "./utils/settingsStorage";
+import { isSupabaseEnabled } from "./services/supabaseService";
+import { PageLoader } from "./components/LoadingSkeleton";
 import ErrorBoundary from "./components/ErrorBoundary.js";
 import { TestRunProvider } from "./contexts/TestRunContext";
 import TestRunToast from "./components/TestRunToast";
@@ -23,8 +25,17 @@ import { sendEventNotification } from "./services/emailService";
 const APP_VERSION_KEY = "wqms_last_notified_version";
 
 export default function App() {
+  const [settingsReady, setSettingsReady] = useState(() => !isSupabaseEnabled());
+
   useEffect(() => {
-    syncSettingsFromSupabase();
+    if (!isSupabaseEnabled()) return undefined;
+    let cancelled = false;
+    syncSettingsFromSupabase().then(() => {
+      if (!cancelled) setSettingsReady(true);
+    });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -36,6 +47,14 @@ export default function App() {
       localStorage.setItem(APP_VERSION_KEY, version);
     }
   }, []);
+
+  if (!settingsReady) {
+    return (
+      <div className="app-settings-loading" style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <PageLoader />
+      </div>
+    );
+  }
 
   return (
     <ErrorBoundary>
