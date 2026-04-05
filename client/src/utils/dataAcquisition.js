@@ -12,9 +12,8 @@ export const FREQUENCY_MODES = {
 
 export const DEFAULT_DATA_COLLECTION = {
   frequencyMode: FREQUENCY_MODES.USER_SELECTED,
+  /** User interval (1–120 min); merged when key missing from storage so Save/MQTT always has a valid value */
   defaultIntervalMinutes: 15,
-  minIntervalMinutes: 1,
-  maxIntervalMinutes: 15,
   readingsLimit: 500,
   /** Simulated river flow (same unit as slow/fast mapping); editable until hardware exists */
   simulatedFlowRate: 1.5,
@@ -64,8 +63,9 @@ export function computeAutoAdaptIntervalMinutes(flow, flowSlow, flowFast) {
 
 /**
  * Effective interval for the next acquisition cycle (minutes).
- * User mode: user-defined minutes, default 15 if missing/invalid.
+ * User mode: minutes from settings only; null if unset or invalid.
  * Auto mode: linear map from simulated flow to [1, 15] minutes.
+ * @returns {number|null}
  */
 export function getEffectiveAcquisitionIntervalMinutes(partial) {
   const dc = partial !== undefined ? mergeDataCollection(partial) : getDataCollectionSettings();
@@ -76,8 +76,8 @@ export function getEffectiveAcquisitionIntervalMinutes(partial) {
 
   if (mode === FREQUENCY_MODES.USER_SELECTED) {
     const v = parseInt(String(dc.defaultIntervalMinutes), 10);
-    if (Number.isFinite(v) && v >= 1) return Math.min(120, v);
-    return 15;
+    if (Number.isFinite(v) && v >= 1 && v <= 120) return v;
+    return null;
   }
 
   return computeAutoAdaptIntervalMinutes(
@@ -85,4 +85,48 @@ export function getEffectiveAcquisitionIntervalMinutes(partial) {
     dc.flowRateAtSlowCondition,
     dc.flowRateAtFastCondition
   );
+}
+
+const ACQ_PUBLISH_FP_KEY = "wqms_acq_publish_fp";
+
+/**
+ * Body for POST /api/acquisition-config — derived from saved data collection (same rules as Settings Save).
+ * @param {Record<string, unknown>} [partial]
+ * @returns {{ frequency_mode: 'user_selected' | 'auto_adapt', interval_minutes: number } | null} null if user mode and interval not set in settings
+ */
+export function getAcquisitionPublishPayload(partial) {
+  const dc = mergeDataCollection(partial);
+  const fm =
+    (dc.frequencyMode ?? FREQUENCY_MODES.USER_SELECTED) === FREQUENCY_MODES.AUTO_ADAPT
+      ? "auto_adapt"
+      : "user_selected";
+  if (fm === "auto_adapt") {
+    return {
+      frequency_mode: "auto_adapt",
+      interval_minutes: getEffectiveAcquisitionIntervalMinutes(dc),
+    };
+  }
+  const v = parseInt(String(dc.defaultIntervalMinutes), 10);
+  if (!Number.isFinite(v) || v < 1 || v > 120) return null;
+  return { frequency_mode: "user_selected", interval_minutes: v };
+}
+
+/** Call after a successful publish so hydrate-on-load does not duplicate the same MQTT message. */
+export function rememberAcquisitionPublishFingerprint(payload) {
+  if (typeof window === "undefined") return;
+  try {
+    sessionStorage.setItem(ACQ_PUBLISH_FP_KEY, JSON.stringify(payload));
+  } catch {
+    /* ignore */
+  }
+}
+
+/** @returns {boolean} true if payload matches last remembered publish (same tab session). */
+export function isAcquisitionPublishFingerprintUnchanged(payload) {
+  if (typeof window === "undefined") return false;
+  try {
+    return sessionStorage.getItem(ACQ_PUBLISH_FP_KEY) === JSON.stringify(payload);
+  } catch {
+    return false;
+  }
 }

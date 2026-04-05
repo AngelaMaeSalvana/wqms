@@ -2,7 +2,6 @@ import { useState, useCallback } from "react";
 import api from "../services/api";
 import { updateNodeLastSensorTest, isSupabaseEnabled } from "../services/supabaseService";
 import { displayReading } from "../utils/calibration";
-import { getNH3FromReading, formatNH3 } from "../utils/nh3Calculator";
 
 /**
  * A reading is considered "live" if it arrived within this window.
@@ -39,14 +38,12 @@ function buildSensorStatusFromReading(nodeId, reading) {
   const turb  = r.turbidity ?? null;
   const ph    = r.pH ?? r.ph ?? null;
   const doVal = r.dissolved_oxygen ?? r.dissolvedOxygen ?? r.do ?? r.DO ?? null;
-  const nh3   = getNH3FromReading(r);
 
   const sensorDefs = [
     { name: "Temperature Sensor",      raw: temp,  fmt: (v) => `${Number(v).toFixed(1)}°C` },
     { name: "Turbidity Sensor",        raw: turb,  fmt: (v) => `${Number(v).toFixed(1)} NTU` },
     { name: "pH Sensor",               raw: ph,    fmt: (v) => `${Number(v).toFixed(1)}` },
     { name: "Dissolved Oxygen Sensor", raw: doVal, fmt: (v) => `${Number(v).toFixed(1)} mg/L` },
-    { name: "NH₃ Sensor",              raw: nh3,   fmt: (v) => `${formatNH3(v)} mg/L` },
   ];
 
   const sensors = sensorDefs.map(({ name, raw, fmt }) => {
@@ -148,7 +145,6 @@ export function useSensorTest() {
           "Turbidity Sensor",
           "pH Sensor",
           "Dissolved Oxygen Sensor",
-          "NH₃ Sensor",
         ].map((name) => ({ name, status: "stale", value: "—", responseTime: "No recent data" })),
       };
       setResults(result);

@@ -175,6 +175,17 @@ class ApiService {
       body: JSON.stringify({ scenario, nodeId, test_run_id: testRunId, thresholds }),
     });
   }
+
+  /**
+   * Broadcast acquisition settings to LoRa sensor nodes (MQTT → forwarder).
+   * Firmware applies after the current sampling period ends.
+   */
+  async publishAcquisitionConfig({ frequency_mode, interval_minutes }) {
+    return this.request('/acquisition-config', {
+      method: 'POST',
+      body: JSON.stringify({ frequency_mode, interval_minutes }),
+    });
+  }
 }
 
 export default new ApiService();

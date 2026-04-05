@@ -186,6 +186,14 @@
   grid-column: 1 / -1;
 }
 
+.settings-acquisition-hint {
+  grid-column: 1 / -1;
+  margin: 0 0 1rem;
+  font-size: 0.88rem;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
 .settings-acquisition-preview {
   grid-column: 1 / -1;
   margin: 0;

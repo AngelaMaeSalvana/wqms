@@ -11,12 +11,16 @@ import {
   SETTINGS_KEYS,
 } from "../utils/settingsStorage";
 import { sendEventNotification } from "../services/emailService";
+import api from "../services/api";
 import { DEFAULT_ALERT_LOGIC, getAlertLogic, saveAlertLogic } from "../utils/alertsData";
 import {
   DEFAULT_DATA_COLLECTION,
   FREQUENCY_MODES,
+  getAcquisitionPublishPayload,
   getEffectiveAcquisitionIntervalMinutes,
+  isAcquisitionPublishFingerprintUnchanged,
   mergeDataCollection,
+  rememberAcquisitionPublishFingerprint,
 } from "../utils/dataAcquisition";
 import "./Settings.css";
 
@@ -193,10 +197,29 @@ export default function Settings() {
         setThresholdClassification(validCls);
         setThresholds((t) => ({ ...t, ...(preset || stored) }));
         setCalibration(sanitizeCalibration({ ...DEFAULT_CALIBRATION, ...loadFromStorage("wqms_calibration", {}) }));
-        setDataCollection(mergeDataCollection(loadFromStorage("wqms_data_collection", {})));
+        const dc = mergeDataCollection(loadFromStorage(SETTINGS_KEYS.dataCollection, {}));
+        setDataCollection(dc);
         setWqiWeights((w) => ({ ...w, ...loadFromStorage(WQI_WEIGHTS_KEY, {}) }));
         setNotifications((n) => ({ ...n, ...loadFromStorage(NOTIFICATIONS_KEY, {}) }));
         setMaintenance((m) => ({ ...m, ...loadFromStorage(SETTINGS_KEYS.maintenance, {}) }));
+
+        const acqPayload = getAcquisitionPublishPayload(dc);
+        if (
+          acqPayload &&
+          !isAcquisitionPublishFingerprintUnchanged(acqPayload)
+        ) {
+          api
+            .publishAcquisitionConfig(acqPayload)
+            .then(() => {
+              rememberAcquisitionPublishFingerprint(acqPayload);
+            })
+            .catch((e) => {
+              console.warn(
+                "Saved acquisition settings could not be pushed to field nodes (is the API server running?)",
+                e
+              );
+            });
+        }
       })
       .finally(() => setSettingsLoaded(true));
   }, []);
@@ -244,6 +267,23 @@ export default function Settings() {
   };
 
   const updateDataCollection = (key, value) => {
+    if (key === "defaultIntervalMinutes") {
+      const s = String(value).trim();
+      if (s === "") {
+        const next = { ...dataCollection };
+        delete next.defaultIntervalMinutes;
+        setDataCollection(next);
+        saveToStorage("wqms_data_collection", next);
+        return;
+      }
+      const n = parseInt(s, 10);
+      if (!isNaN(n) && n >= 1 && n <= 120) {
+        const next = { ...dataCollection, defaultIntervalMinutes: n };
+        setDataCollection(next);
+        saveToStorage("wqms_data_collection", next);
+      }
+      return;
+    }
     const n = parseInt(value, 10);
     if (!isNaN(n) && n >= 0) {
       const next = { ...dataCollection, [key]: n };
@@ -320,6 +360,15 @@ export default function Settings() {
         sendEventNotification("threshold_update", { previous: prevThresholds, current: thresholds });
       }
       saveToStorage("wqms_last_synced_thresholds", thresholds);
+      try {
+        const acqPayload = getAcquisitionPublishPayload(dataCollection);
+        if (acqPayload) {
+          await api.publishAcquisitionConfig(acqPayload);
+          rememberAcquisitionPublishFingerprint(acqPayload);
+        }
+      } catch (e) {
+        console.warn("Acquisition settings could not be sent to field nodes (is the API server running?)", e);
+      }
       setSaveFeedback("Saved");
     } catch (e) {
       setSaveFeedback("Error saving");
@@ -681,6 +730,11 @@ export default function Settings() {
             </h2>
           </div>
           <div className="card__body">
+            <p className="settings-acquisition-hint">
+              LoRa sensor nodes use these sampling settings. After you click Save, nodes switch to the new mode
+              or interval only after they finish their current acquisition period (they do not interrupt a
+              cycle in progress).
+            </p>
             <div className="settings-grid">
               <label className="settings-label settings-label--full">
                 <span>
@@ -707,7 +761,7 @@ export default function Settings() {
                     <span>
                       Acquisition interval (minutes){" "}
                       <InfoTooltip
-                        text="Fixed minutes between readings while this mode is active. If unset, 15 minutes is used (typical for steady or slow flow)."
+                        text="Fixed minutes between readings (1–120). Stored in your settings; field nodes only receive an update after Save when this is set."
                         label="User interval help"
                       />
                     </span>
@@ -716,33 +770,14 @@ export default function Settings() {
                       min={1}
                       max={120}
                       className="settings-input"
-                      value={dataCollection.defaultIntervalMinutes ?? 15}
+                      value={
+                        dataCollection.defaultIntervalMinutes === undefined ||
+                        dataCollection.defaultIntervalMinutes === null
+                          ? ""
+                          : dataCollection.defaultIntervalMinutes
+                      }
                       onChange={(e) => updateDataCollection("defaultIntervalMinutes", e.target.value)}
                       aria-label="User-selected data collection interval in minutes"
-                    />
-                  </label>
-                  <label className="settings-label">
-                    <span>Minimum interval (minutes) <InfoTooltip text="Must be ≤ max interval" label="Min interval help" /></span>
-                    <input
-                      type="number"
-                      min={1}
-                      max={120}
-                      className="settings-input"
-                      value={dataCollection.minIntervalMinutes ?? 1}
-                      onChange={(e) => updateDataCollection("minIntervalMinutes", e.target.value)}
-                      aria-label="Minimum sampling interval in minutes"
-                    />
-                  </label>
-                  <label className="settings-label">
-                    <span>Maximum interval (minutes) <InfoTooltip text="Must be ≥ min interval" label="Max interval help" /></span>
-                    <input
-                      type="number"
-                      min={1}
-                      max={120}
-                      className="settings-input"
-                      value={dataCollection.maxIntervalMinutes ?? 15}
-                      onChange={(e) => updateDataCollection("maxIntervalMinutes", e.target.value)}
-                      aria-label="Maximum sampling interval in minutes"
                     />
                   </label>
                 </>

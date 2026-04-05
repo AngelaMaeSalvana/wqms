@@ -10,6 +10,19 @@
 
 #include "config.h"
 #include <Arduino.h>
+#include <OneWire.h>
+#include <DallasTemperature.h>
+
+static OneWire s_oneWire(DS18B20_PIN);
+static DallasTemperature s_ds18b20(&s_oneWire);
+
+/** Call once from setup() before readAllSensors(). */
+void initSensors() {
+  analogReadResolution(12);
+  s_ds18b20.begin();
+  analogSetPinAttenuation(TURBIDITY_SENSOR_PIN, ADC_11db);
+  analogSetPinAttenuation(PH_SENSOR_PIN, ADC_11db);
+}
 
 // ============================================
 // Helper Functions
@@ -80,64 +93,58 @@ float readBatteryVoltage() {
 // ============================================
 
 /**
- * Read temperature sensor
- * @return Temperature in Celsius, or SENSOR_ERROR_VALUE on error
+ * DS18B20 temperature after requestTemperatures() has been called.
+ * @return °C or SENSOR_ERROR_VALUE on disconnect only (no narrow °C clamp)
  */
-float readTemperature() {
-  int rawValue = readAnalogAverage(TEMP_SENSOR_PIN);
-  float voltage = adcToVoltage(rawValue);
-  
-  // Convert voltage to temperature using linear interpolation
-  float temperature = linearInterpolate(
-    voltage,
-    TEMP_MIN_VOLTAGE, TEMP_MAX_VOLTAGE,
-    TEMP_MIN_VALUE, TEMP_MAX_VALUE
-  );
-  
-  // Validate reading
-  if (temperature < MIN_VALID_TEMP || temperature > MAX_VALID_TEMP) {
+static float readDs18b20TempC() {
+  float tempC = s_ds18b20.getTempCByIndex(0);
+  if (tempC == DEVICE_DISCONNECTED_C || isnan(tempC)) {
     if (DEBUG_MODE) {
-      Serial.print("⚠️ Invalid temperature reading: ");
-      Serial.println(temperature);
+      Serial.print("⚠️ DS18B20 invalid: ");
+      Serial.println(tempC);
     }
     return SENSOR_ERROR_VALUE;
   }
-  
   if (DEBUG_MODE) {
     Serial.print("🌡️ Temperature: ");
-    Serial.print(temperature);
+    Serial.print(tempC);
     Serial.println(" °C");
   }
-  
-  return temperature;
+  return tempC;
+}
+
+/** Averaged raw ADC (0–4095) on turbidity pin. */
+static float readTurbidityRawAverage() {
+  uint32_t sum = 0;
+  for (int i = 0; i < TURBIDITY_ADC_SAMPLES; i++) {
+    sum += analogRead(TURBIDITY_SENSOR_PIN);
+    delay(TURBIDITY_SAMPLE_DELAY_MS);
+  }
+  return (float)sum / (float)TURBIDITY_ADC_SAMPLES;
 }
 
 /**
- * Read turbidity sensor
- * @return Turbidity in NTU, or SENSOR_ERROR_VALUE on error
+ * Read turbidity (NTU) from linear calibration on raw ADC counts.
+ * @return NTU or SENSOR_ERROR_VALUE on disconnect / error
  */
 float readTurbidity() {
-  int rawValue = readAnalogAverage(TURBIDITY_SENSOR_PIN);
-  float voltage = adcToVoltage(rawValue);
-  
-  // Convert voltage to turbidity (NTU)
-  float turbidity = linearInterpolate(
-    voltage,
-    TURBIDITY_MIN_VOLTAGE, TURBIDITY_MAX_VOLTAGE,
-    TURBIDITY_MIN_VALUE, TURBIDITY_MAX_VALUE
-  );
-  
-  // Turbidity should be non-negative
-  if (turbidity < 0) {
-    turbidity = 0;
+  float rawAvg = readTurbidityRawAverage();
+  if (rawAvg < (float)TURBIDITY_RAW_MIN_VALID) {
+    if (DEBUG_MODE) {
+      Serial.println("⚠️ Turbidity: disconnected or invalid (raw < threshold)");
+    }
+    return SENSOR_ERROR_VALUE;
   }
-  
+  float turbidity = TURBIDITY_NTU_K * rawAvg + TURBIDITY_NTU_B;
+  if (turbidity < 0.0f) turbidity = 0.0f;
+  if (turbidity > TURBIDITY_MAX_VALID_NTU) turbidity = TURBIDITY_MAX_VALID_NTU;
   if (DEBUG_MODE) {
     Serial.print("💧 Turbidity: ");
     Serial.print(turbidity);
-    Serial.println(" NTU");
+    Serial.print(" NTU (raw ");
+    Serial.print(rawAvg, 1);
+    Serial.println(")");
   }
-  
   return turbidity;
 }
 
@@ -261,13 +268,13 @@ SensorReadings readAllSensors() {
   if (DEBUG_MODE) {
     Serial.println("\n📊 Reading all sensors...");
   }
-  
-  // Read each sensor with error handling
-  readings.temperature = readTemperature();
+
+  s_ds18b20.requestTemperatures();
+  readings.temperature = readDs18b20TempC();
   if (readings.temperature == SENSOR_ERROR_VALUE) {
     readings.hasErrors = true;
   }
-  
+
   readings.turbidity = readTurbidity();
   if (readings.turbidity == SENSOR_ERROR_VALUE) {
     readings.hasErrors = true;

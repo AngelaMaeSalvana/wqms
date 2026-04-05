@@ -4,6 +4,9 @@
  * pH / temperature: fixed offsets on measured values.
  */
 
+/** Minimum valid turbidity ADC counts (same as Heltec lab sketch; below = fault / disconnected). */
+const TURB_RAW_MIN_VALID = 1500;
+
 function parseNum(v) {
   if (v == null) return null;
   const n = typeof v === 'number' ? v : parseFloat(v);
@@ -17,9 +20,16 @@ function parseNum(v) {
 function applySensorCorrections(reading) {
   const r = { ...reading };
 
+  // Same as firmware: raw < 1500 → invalid; else NTU = -0.3881*raw + 822.39 (clamp ≥ 0).
   const turbRaw = parseNum(r.turRaw ?? r.turbidityRaw);
   if (turbRaw != null) {
-    r.turbidity = -0.3881 * turbRaw + 822.39;
+    if (turbRaw < TURB_RAW_MIN_VALID) {
+      r.turbidity = null;
+    } else {
+      let ntu = -0.3881 * turbRaw + 822.39;
+      if (ntu < 0) ntu = 0;
+      r.turbidity = ntu;
+    }
   }
 
   const doRaw = parseNum(r.doRaw ?? r.dissolvedOxygenRaw);

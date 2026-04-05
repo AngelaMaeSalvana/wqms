@@ -1,6 +1,6 @@
 /*
  * WQMS Sensor Node (Sender)
- * Heltec LoRa32 V3 - DS18B20 temperature; SEN0189 turbidity (10k:10k -> GPIO34); others null until hardware added
+ * Heltec LoRa32 V3 - DS18B20 temperature; SEN0189 turbidity (10k:10k -> GPIO5); others null until hardware added
  * Sends: dissolvedOxygen, turbidity, pH, flowRate, temperature
  * Field names match wqms dashboard - JSON structure constant; null when sensor disconnected
  * Listens for remote diagnostics commands (overrides send interval)
@@ -52,8 +52,8 @@
 #define STRINGIFY(x)       STRINGIFY_INNER(x)
 
 // -------------------- WiFi (for NTP time sync) --------------------
-#define WIFI_SSID     "GlobeAtHome_ea960_2.4"
-#define WIFI_PASSWORD "yXf3bjYZ"
+#define WIFI_SSID     "Chikoy2.4_LongAsHenk"
+#define WIFI_PASSWORD "FmAZvn3f"
 
 // -------------------- NTP --------------------
 #define NTP_SERVER_1      "pool.ntp.org"
@@ -134,7 +134,7 @@ static void initTempSensor() {
   ds18b20.setWaitForConversion(false);  // Non-blocking mode
 }
 
-// Call every loop(); returns latest valid temperature or NAN if offline/invalid.
+// Only disconnect / NaN invalid — no narrow °C band (avoids spurious JSON null).
 static float updateTempSensor() {
   unsigned long now = millis();
 
@@ -146,7 +146,9 @@ static float updateTempSensor() {
 
   if (dsConversionInProgress && (now - dsRequestTime >= 800)) {
     float t = ds18b20.getTempCByIndex(0);
-    if (t > -100.0f && t < 150.0f) {
+    if (t == DEVICE_DISCONNECTED_C || isnan(t)) {
+      dsLatestTempC = NAN;
+    } else {
       dsLatestTempC = t;
     }
     dsConversionInProgress = false;
@@ -180,15 +182,14 @@ static int voltageToPercentage(float voltage) {
   return pct;
 }
 
-// -------------------- Turbidity (SEN0189 style, 10k:10k divider -> GPIO34) --------------------
-//   Module A0 -> 10k -> (MIDPOINT) -> 10k -> GND; MIDPOINT -> GPIO34
-#define TURB_ADC_PIN 34
-static const float TURB_ADC_VREF       = 3.3f;
-static const float TURB_ADC_MAX_COUNTS = 4095.0f;
-static const float TURB_DIVIDER_GAIN   = 2.0f;  // 10k:10k
+// -------------------- Turbidity (GPIO5) — lab sketch: raw < 1500 fault; else NTU = -0.3881*raw + 822.39 --------------------
+#define TURB_ADC_PIN 5
 static const int   TURB_SAMPLES        = 30;
 static const int   TURB_SAMPLE_DELAYMS = 5;
-static float s_turbV_smooth = 0.0f;
+static const int   TURB_RAW_MIN_VALID  = 1500;
+static const float TURB_NTU_K          = -0.3881f;
+static const float TURB_NTU_B          = 822.39f;
+static const float TURBIDITY_MAX_VALID_NTU = 4000.0f;
 
 static float readTurbidityRawAvg() {
   uint32_t sum = 0;
@@ -199,38 +200,17 @@ static float readTurbidityRawAvg() {
   return (float)sum / (float)TURB_SAMPLES;
 }
 
-static float turbidityAdcToVoltage(float rawAvg) {
-  return rawAvg * (TURB_ADC_VREF / TURB_ADC_MAX_COUNTS);
-}
-
-static float turbidityDividerToSensorVoltage(float v_mid) {
-  return v_mid * TURB_DIVIDER_GAIN;
-}
-
-static float turbiditySmoothVoltage(float v_sensor) {
-  if (s_turbV_smooth < 0.1f) s_turbV_smooth = v_sensor;
-  s_turbV_smooth = 0.85f * s_turbV_smooth + 0.15f * v_sensor;
-  return s_turbV_smooth;
-}
-
-// Voltage -> NTU; >2.5V treated as clear water (0 NTU)
-static float turbidityVoltageToNTU(float v_sensor) {
-  if (v_sensor > 2.5f) return 0.0f;
-  float ntu = -1120.4f * v_sensor * v_sensor + 5742.3f * v_sensor - 4352.9f;
-  if (ntu < 0.0f) ntu = 0.0f;
-  return ntu;
-}
-
 static void initTurbiditySensor() {
   analogSetPinAttenuation(TURB_ADC_PIN, ADC_11db);
 }
 
 static float readTurbidityNTU() {
-  float rawAvg   = readTurbidityRawAvg();
-  float v_mid    = turbidityAdcToVoltage(rawAvg);
-  float v_sensor = turbidityDividerToSensorVoltage(v_mid);
-  float v_filt   = turbiditySmoothVoltage(v_sensor);
-  return turbidityVoltageToNTU(v_filt);
+  float rawAvg = readTurbidityRawAvg();
+  if (rawAvg < (float)TURB_RAW_MIN_VALID) return NAN;
+  float ntu = TURB_NTU_K * rawAvg + TURB_NTU_B;
+  if (ntu < 0.0f) ntu = 0.0f;
+  if (ntu > TURBIDITY_MAX_VALID_NTU) ntu = TURBIDITY_MAX_VALID_NTU;
+  return ntu;
 }
 
 // -------------------- Buffers --------------------
@@ -249,7 +229,7 @@ static uint16_t rxSize  = 0;
 // Only temperature has real hardware (DS18B20); others emit null until sensors are added.
 static const bool SENSOR_CONNECTED[] = {
   true,   // temperature (DS18B20)
-  true,   // turbidity  (SEN0189, 10k:10k divider -> GPIO34)
+  true,   // turbidity  (SEN0189, 10k:10k divider -> GPIO5)
   false,  // pH         - no hardware yet
   false,  // dissolvedOxygen - no hardware yet
   false   // flowRate   - no hardware yet
@@ -332,6 +312,11 @@ static bool isReadOrDiagCommand(const char* cmd) {
 static bool isTestCommand(const char* cmd) {
   if (!cmd) return false;
   return (strncmp(cmd, "test:", 5) == 0);
+}
+
+static bool isAcqCommand(const char* cmd) {
+  if (!cmd) return false;
+  return (strncmp(cmd, "acq:", 4) == 0);
 }
 
 // Parse standalone CMD:diag:node_01 (from proactive TX) - returns true if for us
@@ -493,7 +478,7 @@ static void readSensors(float &do_val, float &turbidity, float &ph,
   // Temperature - DS18B20 real reading; NAN if offline or invalid
   temp = updateTempSensor();
 
-  // Turbidity - SEN0189 (10k:10k divider -> GPIO34), NTU
+  // Turbidity - SEN0189 (10k:10k divider -> GPIO5), NTU
   turbidity = readTurbidityNTU();
 
   // No hardware yet for these - emit null (sensor offline)
@@ -666,9 +651,13 @@ static void deactivateTestMode() {
 }
 
 // -------------------- Adaptive Acquisition State --------------------
-static uint8_t  s_acqMode         = ACQ_MODE_DEFAULT;
-static uint32_t s_acqIntervalMs   = USER_ACQ_INTERVAL_MS;
-static uint32_t s_lastAcqMs       = 0;   // millis() of last acquisition
+static uint8_t  s_acqMode           = ACQ_MODE_DEFAULT;
+static uint32_t s_userAcqIntervalMs = USER_ACQ_INTERVAL_MS; // USER mode: set from dashboard via LoRa
+static uint32_t s_acqIntervalMs     = USER_ACQ_INTERVAL_MS; // effective interval for current timer
+static uint32_t s_lastAcqMs         = 0;   // millis() of last acquisition
+static bool     s_pendingAcqPending = false;
+static uint8_t  s_pendingAcqMode    = ACQ_MODE_USER;
+static uint32_t s_pendingUserIntervalMs = USER_ACQ_INTERVAL_MS;
 static int8_t   s_flowThresholdIdx = -1; // 0=15m 1=10m 2=5m 3=1m (current)
 static int8_t   s_candidateIdx     = -1; // New threshold being considered
 static uint8_t  s_candidateCount   = 0;  // Consecutive checks in candidate threshold
@@ -693,16 +682,52 @@ static uint32_t thresholdIdxToIntervalMs(int8_t idx) {
 
 // Returns acquisition interval in minutes (for OLED display)
 static uint32_t getAcqIntervalMinutes() {
-  if (s_acqIntervalMs >= ACQ_INTERVAL_15MIN_MS) return 15;
-  if (s_acqIntervalMs >= ACQ_INTERVAL_10MIN_MS) return 10;
-  if (s_acqIntervalMs >= ACQ_INTERVAL_5MIN_MS)  return 5;
-  return 1;
+  uint32_t m = (uint32_t)((s_acqIntervalMs + 30000UL) / 60000UL);
+  if (m < 1) m = 1;
+  if (m > 120) m = 120;
+  return m;
+}
+
+static void queueAcquisitionConfig(uint8_t mode, uint32_t userIntervalMs) {
+  s_pendingAcqPending     = true;
+  s_pendingAcqMode        = mode;
+  s_pendingUserIntervalMs = userIntervalMs;
+  s_lastOledActivityMs    = 0;  // bypass refreshIdleOled throttle so pending line shows immediately
+  Serial.printf("[ACQ] Config queued — applies after current interval (mode=%u userMs=%lu)\n",
+                (unsigned)mode, (unsigned long)userIntervalMs);
+}
+
+/** Parse acq:auto or acq:user:<minutes> (minutes 1–120). */
+static bool parseAcqCommand(const char* cmd, uint8_t* modeOut, uint32_t* userIntervalMsOut) {
+  if (!cmd || !modeOut || !userIntervalMsOut) return false;
+  if (strncmp(cmd, "acq:auto", 8) == 0 && (cmd[8] == '\0' || cmd[8] == ':')) {
+    *modeOut = ACQ_MODE_AUTO;
+    *userIntervalMsOut = USER_ACQ_INTERVAL_MS;
+    return true;
+  }
+  if (strncmp(cmd, "acq:user:", 9) == 0) {
+    unsigned long m = strtoul(cmd + 9, nullptr, 10);
+    if (m >= 1 && m <= 120) {
+      *modeOut = ACQ_MODE_USER;
+      *userIntervalMsOut = (uint32_t)(m * 60UL * 1000UL);
+      return true;
+    }
+  }
+  return false;
+}
+
+static bool handleAcqCommand(const char* cmd) {
+  uint8_t mode;
+  uint32_t userMs;
+  if (!parseAcqCommand(cmd, &mode, &userMs)) return false;
+  queueAcquisitionConfig(mode, userMs);
+  return true;
 }
 
 // Update acquisition interval (User-Selected: fixed; Auto-Adapt: flow thresholds + stability)
 static void updateAcquisitionInterval() {
   if (s_acqMode == ACQ_MODE_USER) {
-    s_acqIntervalMs = USER_ACQ_INTERVAL_MS;
+    s_acqIntervalMs = s_userAcqIntervalMs;
     return;
   }
   // Auto-Adapt: use hard-coded flow rate until sensor available
@@ -923,6 +948,8 @@ static bool sendWithAck(uint32_t seq_id, const char* payload, uint8_t retries, u
             if (isReadOrDiagCommand(cmd)) {
               runDiagNext = true;
               Serial.println("[CMD] Read/diag requested for next TX");
+            } else if (isAcqCommand(cmd)) {
+              handleAcqCommand(cmd);
             } else if (isTestCommand(cmd)) {
               handleTestCommand(cmd);
             }
@@ -1027,7 +1054,7 @@ void setup() {
   initTempSensor();
   initTurbiditySensor();
   Serial.printf("[DS18B20] Devices found: %d\n", ds18b20.getDeviceCount());
-  Serial.println("[Turbidity] SEN0189 init on GPIO34 (10k:10k divider)");
+  Serial.println("[Turbidity] SEN0189 init on GPIO5 (10k:10k divider)");
 
   // Initialize adaptive acquisition (mode, interval, initial buffer)
   updateAcquisitionInterval();
@@ -1058,6 +1085,15 @@ void loop() {
   // Adaptive acquisition: run on timer when NOT in test mode
   if (!inTest) {
     if (now - s_lastAcqMs >= s_acqIntervalMs) {
+      if (s_pendingAcqPending) {
+        s_pendingAcqPending = false;
+        s_acqMode = s_pendingAcqMode;
+        if (s_acqMode == ACQ_MODE_USER) {
+          s_userAcqIntervalMs = s_pendingUserIntervalMs;
+        }
+        s_lastOledActivityMs = 0;  // show applied acquisition line without throttle delay
+        Serial.printf("[ACQ] Pending settings applied (mode=%u)\n", (unsigned)s_acqMode);
+      }
       updateAcquisitionInterval();
       acquireAndBuffer();
       s_lastAcqMs = now;
@@ -1190,6 +1226,34 @@ void loop() {
             }
           }
 
+          if (strncmp(cmd, "acq:", 4) == 0) {
+            const char* last = strrchr(cmd, ':');
+            if (last && last > cmd + 4) {
+              if (strcmp(last + 1, NODE_ID) == 0) {
+                size_t n = (size_t)(last - cmd);
+                if (n >= sizeof(s_cmdTrim)) n = sizeof(s_cmdTrim) - 1;
+                memcpy(s_cmdTrim, cmd, n);
+                s_cmdTrim[n] = '\0';
+                cmdToHandle = s_cmdTrim;
+              } else {
+                bool minutesOnly = true;
+                for (const char* p = last + 1; *p; p++) {
+                  if (*p < '0' || *p > '9') { minutesOnly = false; break; }
+                }
+                if (!minutesOnly) {
+                  if (strncmp(last + 1, "node_", 5) == 0 ||
+                      (last[1] == 'N' && (last[2] >= '0' && last[2] <= '9'))) {
+                    cmdToHandle = nullptr;
+                  }
+                }
+              }
+            }
+          }
+
+          if (cmdToHandle && isAcqCommand(cmdToHandle) && handleAcqCommand(cmdToHandle)) {
+            Serial.println("[CMD] Proactive acq cmd handled");
+            break;
+          }
           if (cmdToHandle && isTestCommand(cmdToHandle) && handleTestCommand(cmdToHandle)) {
             Serial.println("[CMD] Proactive test cmd handled");
             break;

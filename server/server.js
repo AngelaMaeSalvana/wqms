@@ -159,6 +159,26 @@ function publishTestCommand(type, payload) {
   console.log(`📤 Test command [${type}] published to ${topic}${raw ? ' (json+raw)' : ''}`);
 }
 
+/**
+ * Push data-acquisition settings to LoRa nodes (via forwarder → broadcast CMD).
+ * Nodes apply after the current acquisition period ends (firmware queues the change).
+ */
+function publishAcquisitionConfig(payload) {
+  if (!mqttClient?.connected) return;
+  const topic = 'water-quality/command';
+  mqttClient.publish(topic, JSON.stringify({ type: 'acq_config', ...payload }), { qos: 1 });
+  let raw = null;
+  if (payload.frequency_mode === 'auto_adapt') {
+    raw = 'acq:auto';
+  } else if (payload.interval_minutes >= 1 && payload.interval_minutes <= 120) {
+    raw = `acq:user:${payload.interval_minutes}`;
+  }
+  if (raw) {
+    mqttClient.publish(topic, raw, { qos: 1 });
+  }
+  console.log(`📤 Acquisition config published to ${topic}${raw ? ' (json+raw)' : ''}`);
+}
+
 // Publish a crafted telemetry reading to MQTT (used by Scenario Evaluator).
 function publishTestReadingToMQTT(nodeId, payload) {
   if (!mqttClient?.connected) return false;
@@ -577,6 +597,31 @@ if (ENABLE_SAMPLE_DATA) {
     console.log(`📊 Sample data auto-interval started (ENABLE_SAMPLE_DATA): every ${ms}ms`);
   }
 }
+
+/**
+ * POST /api/acquisition-config
+ * Body: { frequency_mode: 'user_selected' | 'auto_adapt', interval_minutes?: number }
+ * Broadcasts MQTT so the forwarder can relay acq commands to sensor nodes.
+ */
+app.post('/api/acquisition-config', (req, res) => {
+  try {
+    const { frequency_mode, interval_minutes } = req.body || {};
+    const fm = frequency_mode === 'auto_adapt' ? 'auto_adapt' : 'user_selected';
+    let iv = parseInt(interval_minutes, 10);
+    if (fm === 'user_selected') {
+      if (!Number.isFinite(iv) || iv < 1 || iv > 120) {
+        return res.status(400).json({ error: 'interval_minutes must be 1–120 for user_selected mode' });
+      }
+    } else {
+      iv = Number.isFinite(iv) && iv >= 1 ? iv : 15;
+    }
+    publishAcquisitionConfig({ frequency_mode: fm, interval_minutes: iv });
+    res.json({ ok: true, frequency_mode: fm, interval_minutes: iv });
+  } catch (err) {
+    console.error('❌ acquisition-config:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // ─── Test Run endpoints ───────────────────────────────────────────────────────
 

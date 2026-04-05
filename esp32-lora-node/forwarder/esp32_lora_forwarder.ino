@@ -3,7 +3,7 @@
  * Heltec LoRa32 V3
  *
  * Receives sensor JSON from sender -> sends ACK -> forwards to HiveMQ -> WQMS dashboard
- * Matches sender_sensor_node.ino; publishes to water-quality/{node_id} for wqms
+ * Matches LoRa sender sketches node_N1/node_N2 (not legacy sender_sensor_node); publishes to water-quality/{node_id} for wqms
  *
  * Latency instrumentation fields added by this forwarder:
  *   t_fwd_rx  - NTP epoch ms captured in OnRxDone() the instant the LoRa packet arrives
@@ -12,6 +12,9 @@
  *
  * Upstream fields preserved exactly as received (never overwritten):
  *   node_id, seq_id, t_node, all sensor values, and test_run_id (when present)
+ *
+ * Sensor values may already be aggregated on the node (e.g. median of a 1 Hz window);
+ * this forwarder does not re-filter them — it only relays JSON and adds link/timing fields.
  *
  * TDMA awareness:
  *   It logs the TDMA slot of each received packet so you can verify nodes are
@@ -30,8 +33,8 @@
 #include <time.h>
 
 // -------------------- Config (EDIT THESE before upload) --------------------
-#define WIFI_SSID          "GFiber_940ED_2.4"
-#define WIFI_PASSWORD      "Chikoy201***"
+#define WIFI_SSID          "Chikoy2.4_LongAsHenk"
+#define WIFI_PASSWORD      "FmAZvn3f"
 #define MQTT_HOST          "c085e007016c498f841249078237ab48.s1.eu.hivemq.cloud"
 #define MQTT_PORT          8883
 #define MQTT_USER          "WaterQuality"
@@ -76,6 +79,7 @@ static uint8_t tdmaSlotOf(uint64_t epochMs) {
 // Pending commands per node (multi-node support)
 typedef struct { char nodeId[16]; char command[CMD_BUF_SIZE]; bool inUse; } PendingCmd;
 static PendingCmd pendingCommands[MAX_NODES];
+
 static char rxBuf[RX_BUF_SIZE];
 static char ackBuf[ACK_BUF_SIZE];
 static char mqttPayload[TX_MQTT_BUF];
@@ -96,7 +100,11 @@ static volatile bool s_broadcastCmdTxOnce = false; // triggers first proactive L
 // until every known node has acknowledged it (via an incoming packet with test_run_id set).
 // This covers the case where the one-shot broadcast lands outside the node's 400ms listen window.
 #define BROADCAST_RETRY_INTERVAL_MS 1500UL
+// acq:* retries slower than test:* — frequent LoRa TX here was preempting RX and colliding with node uplinks.
+#define BROADCAST_ACQ_RETRY_INTERVAL_MS  8000UL
 #define BROADCAST_STOP_TIMEOUT_MS   30000UL  // test:stop is never "confirmed" by nodes; stop retrying after 30s
+// acq:* must outlive median-cycle spacing (e.g. 2 min); 30s was too short and ACK often had no CMD.
+#define BROADCAST_ACQ_TIMEOUT_MS    (25UL * 60 * 1000)  // 25 min safety cap if a node never TXs
 static uint32_t s_broadcastLastRetryMs = 0;
 static uint32_t s_broadcastSetMs = 0;        // when current broadcast was queued (for test:stop timeout)
 
@@ -475,13 +483,20 @@ static void mqttCallback(char *topic, byte *payload, unsigned int length) {
       if (runId && runId[0]) {
         snprintf(outCmd, sizeof(outCmd), "test:stop:%s", runId);
       }
+    } else if (type && strcmp(type, "acq_config") == 0) {
+      const char *fm = cmdDoc["frequency_mode"] | "";
+      uint32_t intervalMin = cmdDoc["interval_minutes"] | 0;
+      if (fm[0] && strcmp(fm, "auto_adapt") == 0) {
+        snprintf(outCmd, sizeof(outCmd), "acq:auto");
+      } else if (intervalMin >= 1 && intervalMin <= 120) {
+        snprintf(outCmd, sizeof(outCmd), "acq:user:%lu", (unsigned long)intervalMin);
+      }
     }
 
     if (outCmd[0]) {
       if (nodeToQueue && nodeToQueue[0] && strcmp(nodeToQueue, "all") != 0) {
         queueCommand(nodeToQueue, outCmd, strlen(outCmd));
       } else {
-        // Broadcast test command (no specific node) — will be embedded in ACK once per node.
         setBroadcastCmd(outCmd);
       }
       return;
@@ -497,7 +512,8 @@ static void mqttCallback(char *topic, byte *payload, unsigned int length) {
     queueCommand(nodeIdFromTopic, inBuf, strlen(inBuf));
   } else {
     // Accept firmware-friendly raw broadcast commands (e.g. test:start:...).
-    if (strncmp(inBuf, "test:", 5) == 0 || strstr(inBuf, "diag") != nullptr || strstr(inBuf, "read") != nullptr) {
+    if (strncmp(inBuf, "test:", 5) == 0 || strncmp(inBuf, "acq:", 4) == 0 ||
+        strstr(inBuf, "diag") != nullptr || strstr(inBuf, "read") != nullptr) {
       setBroadcastCmd(inBuf);
     } else {
       Serial.printf("[CMD] DROP raw cmd on broadcast topic: %s\n", inBuf);
@@ -547,61 +563,45 @@ static bool validateRequiredFields(JsonDocument &doc, const char *rawJson) {
 }
 
 // -------------------- Parse JSON, add forwarder timestamps, build topic + payload --------------------
-// Preserves all upstream fields (node_id, seq_id, t_node, sensor values) exactly as received.
-// Appends:
-//   t_fwd_rx  - epoch ms at LoRa packet arrival (captured in OnRxDone)
-//   t_fwd_pub - epoch ms immediately before mqtt.publish() (set by caller just before publishing)
-//   timestamp - ISO 8601 wall-clock string for dashboard display
-//   rssi      - LoRa RSSI (dBm) of the received packet
-//   snr       - LoRa SNR (dB) of the received packet
-//
-// Returns true on success; writes topic, payload, nodeId (optional), and *seqOut.
-// Use static doc to avoid large stack allocation (prevents stack overflow on ESP32).
+// jsonDoc holds the validated upstream object between loadIncomingJson and buildMqttPayloadFromJsonDoc.
+// ACK must be sent immediately after validate+extract — the node opens RX right after TX; doing
+// full serializeJson before sendAck added tens of ms and caused ACK timeouts / WAIT ACK failures.
 static StaticJsonDocument<1024> jsonDoc;
-static bool parseAndPreparePayload(const char *json, uint64_t t_fwd_rx,
-                                   int16_t rssi, int8_t snr,
-                                   char *topicOut, size_t topicLen,
-                                   char *payloadOut, size_t payloadLen,
-                                   uint32_t *seqOut,
-                                   char *nodeIdOut, size_t nodeIdLen) {
+
+static bool loadIncomingJson(const char *json, uint32_t *seqOut, char *nodeIdOut, size_t nodeIdLen) {
   jsonDoc.clear();
   DeserializationError err = deserializeJson(jsonDoc, json);
-
   if (err) {
     Serial.printf("[JSON] Parse error: %s | raw=%s\n", err.c_str(), json);
     return false;
   }
-
   if (!validateRequiredFields(jsonDoc, json)) {
     return false;
   }
-
-  uint32_t    seq_id  = jsonDoc["seq_id"] | 0;
-  const char *node_id = jsonDoc["node_id"] | "unknown";
-
-  if (seqOut) *seqOut = seq_id;
+  if (seqOut) {
+    *seqOut = (uint32_t)(jsonDoc["seq_id"] | 0);
+  }
   if (nodeIdOut && nodeIdLen > 0) {
-    strncpy(nodeIdOut, node_id, nodeIdLen - 1);
+    const char *nid = jsonDoc["node_id"] | "";
+    strncpy(nodeIdOut, nid, nodeIdLen - 1);
     nodeIdOut[nodeIdLen - 1] = '\0';
   }
+  return true;
+}
 
-  // Append t_fwd_rx (LoRa arrival epoch ms) - upstream fields are untouched
+static bool buildMqttPayloadFromJsonDoc(uint64_t t_fwd_rx, int16_t rssi, int8_t snr,
+                                        char *topicOut, size_t topicLen,
+                                        char *payloadOut, size_t payloadLen) {
+  const char *node_id = jsonDoc["node_id"] | "unknown";
+
   jsonDoc["t_fwd_rx"] = (uint64_t)t_fwd_rx;
-
-  // t_fwd_pub is set by the caller just before mqtt.publish(); placeholder 0 here
   jsonDoc["t_fwd_pub"] = (uint64_t)0;
-
-  // LoRa link quality metrics from the received packet
-  jsonDoc["rssi"] = rssi;
-  jsonDoc["snr"]  = snr;
-
-  // TDMA slot at time of reception (for timing verification; 255 = NTP unsynced)
+  jsonDoc["rssi"]     = rssi;
+  jsonDoc["snr"]      = snr;
   jsonDoc["tdma_slot"] = tdmaSlotOf(t_fwd_rx);
 
-  // Build MQTT topic: water-quality/node_01
   snprintf(topicOut, topicLen, "%s/%s", MQTT_TOPIC_PREFIX, node_id);
 
-  // ISO 8601 timestamp for dashboard display
   time_t now = time(nullptr);
   if (now > 0) {
     struct tm *t = gmtime(&now);
@@ -649,11 +649,14 @@ static void stampTFwdPub(char *buf, size_t bufLen, uint64_t t_fwd_pub) {
 // -------------------- Send ACK to sender (with optional embedded command) --------------------
 static void sendAck(uint32_t seq_id, const char *nodeId) {
   int n;
+  bool cmdFromBroadcast = false;
   const char *cmd = nodeId ? getAndClearCommand(nodeId) : nullptr;
   if ((!cmd || !cmd[0]) && nodeId) {
     cmd = getBroadcastCmdForNode(nodeId);
     if (cmd && cmd[0]) {
-      broadcastMarkDelivered(nodeId);
+      cmdFromBroadcast = true;
+      /* Do NOT broadcastMarkDelivered here — if ACK TX fails, node retries; marking early
+         caused empty ACKs on retry so acq:auto / acq:user never arrived (WAIT ACK timeout). */
     }
   }
   bool hasCmd = (cmd != nullptr && cmd[0]);
@@ -673,7 +676,17 @@ static void sendAck(uint32_t seq_id, const char *nodeId) {
     delay(1);
   }
 
-  Serial.printf("[LoRa] %s sent: %s\n", hasCmd ? "ACK+CMD" : "ACK", ackBuf);
+  if (txDoneFlag && cmdFromBroadcast && nodeId && nodeId[0]) {
+    broadcastMarkDelivered(nodeId);
+  } else if (cmdFromBroadcast && !txDoneFlag) {
+    Serial.println("[LoRa] WARN ACK+CMD TX timeout — will retry CMD on next node packet");
+  }
+
+  if (txDoneFlag) {
+    Serial.printf("[LoRa] %s sent: %s\n", hasCmd ? "ACK+CMD" : "ACK", ackBuf);
+  } else {
+    Serial.printf("[LoRa] FAIL TX (no TxDone): %s\n", ackBuf);
+  }
 }
 
 // -------------------- Proactive command TX --------------------
@@ -770,24 +783,8 @@ void loop() {
   if (!mqtt.connected()) reconnectMQTT();
   mqtt.loop();
 
-  // Proactive broadcast for CMD:test:* — fires immediately on receipt, then retries every
-  // BROADCAST_RETRY_INTERVAL_MS until every known node has confirmed (sent a packet with
-  // test_run_id set), or for test:stop until BROADCAST_STOP_TIMEOUT_MS (nodes don't confirm stop).
-  if (s_broadcastCmd[0] && strncmp(s_broadcastCmd, "test:", 5) == 0) {
-    uint32_t nowMs = millis();
-    bool isStop = (strncmp(s_broadcastCmd, "test:stop:", 10) == 0);
-    if (isStop && (nowMs - s_broadcastSetMs >= BROADCAST_STOP_TIMEOUT_MS)) {
-      s_broadcastCmd[0] = '\0';
-      Serial.println("[CMD] test:stop broadcast timeout - cleared");
-    } else if (!broadcastFullyDelivered()) {
-      if (s_broadcastCmdTxOnce || (nowMs - s_broadcastLastRetryMs >= BROADCAST_RETRY_INTERVAL_MS)) {
-        sendProactiveBroadcastCmd(s_broadcastCmd);
-        s_broadcastCmdTxOnce = false;
-        s_broadcastLastRetryMs = nowMs;
-      }
-    }
-  }
-
+  // Process node uplinks BEFORE any proactive LoRa TX. Half-duplex: broadcasting acq every 1.5s
+  // before RX caused collisions — node packets were missed and ACKs failed.
   if (rxDoneFlag) {
     rxDoneFlag = false;
 
@@ -814,26 +811,27 @@ void loop() {
     char     topic[64];
     char     nodeId[16] = "";
 
-    // 1) Parse, validate required fields, and prepare MQTT payload
-    bool parsed = parseAndPreparePayload(rxBuf, t_fwd_rx,
-                                         lastRssi, lastSnr,
-                                         topic, sizeof(topic),
-                                         mqttPayload, sizeof(mqttPayload),
-                                         &seq_id, nodeId, sizeof(nodeId));
-
+    // 1) Validate JSON and extract seq/node — then ACK before heavy serialize (node waits in RX).
+    if (!loadIncomingJson(rxBuf, &seq_id, nodeId, sizeof(nodeId))) {
+      Serial.printf("[FWD] Bad JSON — no ACK (node will retry)\n");
+      oledHoldUpdate("LoRa RX (bad JSON)", String("RSSI: ") + lastRssi,
+                     String("len: ") + rxSize, "Parse fail", "");
+      startRx();
+    } else {
     // Remember this node so we can target broadcast commands proactively.
     if (nodeId[0]) rememberKnownNode(nodeId);
 
-    // If this packet carries a test_run_id, the node has confirmed it received the broadcast.
-    // Stop retrying the broadcast for this node.
     if (nodeId[0] && jsonDoc.containsKey("test_run_id")) {
       broadcastConfirmedByNode(nodeId);
     }
 
-    // 2) Send ACK immediately (sender is waiting); include queued command if any
     sendAck(seq_id, nodeId);
 
-    // 3) Forward to HiveMQ
+    bool parsed = buildMqttPayloadFromJsonDoc(t_fwd_rx, lastRssi, lastSnr,
+                                              topic, sizeof(topic),
+                                              mqttPayload, sizeof(mqttPayload));
+
+    // 2) Forward to HiveMQ
     if (parsed) {
       if (mqtt.connected()) {
         // Stamp t_fwd_pub immediately before publish - this is the forwarder queuing/processing end
@@ -865,13 +863,43 @@ void loop() {
                        String("seq_id: ") + seq_id, "MQTT disconnected", "");
       }
     } else {
-      Serial.printf("[FWD] Invalid packet len=%u raw=%s\n", rxSize, rxBuf);
+      Serial.printf("[FWD] Serialize fail len=%u\n", rxSize);
       oledHoldUpdate("LoRa RX (invalid)", String("RSSI: ") + lastRssi,
                      String("len: ") + rxSize, "Bad/missing fields", "");
     }
 
     startRx();
-    }  // end else (packet long enough to parse)
+    }  // loadIncomingJson OK
+    }  // rxSize >= MIN_SENSOR_JSON_LEN
+  }
+
+  // Proactive broadcast for CMD:test:* — after RX so we don't collide with node uplinks.
+  if (s_broadcastCmd[0] && strncmp(s_broadcastCmd, "test:", 5) == 0) {
+    uint32_t nowMs = millis();
+    bool isStop = (strncmp(s_broadcastCmd, "test:stop:", 10) == 0);
+    if (isStop && (nowMs - s_broadcastSetMs >= BROADCAST_STOP_TIMEOUT_MS)) {
+      s_broadcastCmd[0] = '\0';
+      Serial.println("[CMD] test:stop broadcast timeout - cleared");
+    } else if (!broadcastFullyDelivered()) {
+      if (s_broadcastCmdTxOnce || (nowMs - s_broadcastLastRetryMs >= BROADCAST_RETRY_INTERVAL_MS)) {
+        sendProactiveBroadcastCmd(s_broadcastCmd);
+        s_broadcastCmdTxOnce = false;
+        s_broadcastLastRetryMs = nowMs;
+      }
+    }
+  } else if (s_broadcastCmd[0] && strncmp(s_broadcastCmd, "acq:", 4) == 0) {
+    uint32_t nowMs = millis();
+    if (broadcastFullyDelivered()) {
+      s_broadcastCmd[0] = '\0';
+      Serial.println("[CMD] acq broadcast delivered to all known nodes - cleared");
+    } else if (nowMs - s_broadcastSetMs >= BROADCAST_ACQ_TIMEOUT_MS) {
+      s_broadcastCmd[0] = '\0';
+      Serial.println("[CMD] acq broadcast max wait elapsed - cleared");
+    } else if (s_broadcastCmdTxOnce || (nowMs - s_broadcastLastRetryMs >= BROADCAST_ACQ_RETRY_INTERVAL_MS)) {
+      sendProactiveBroadcastCmd(s_broadcastCmd);
+      s_broadcastCmdTxOnce = false;
+      s_broadcastLastRetryMs = nowMs;
+    }
   }
 
   // Proactive command TX: send queued commands quickly (without waiting for next ACK cycle)
