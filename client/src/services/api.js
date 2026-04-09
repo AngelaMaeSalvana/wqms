@@ -234,10 +234,14 @@ class ApiService {
     });
   }
 
-  async signup({ username, password }) {
+  async signup({ username, email, password }) {
     const result = await this.request('/auth/signup', {
       method: 'POST',
-      body: JSON.stringify({ username, password }),
+      body: JSON.stringify({
+        username,
+        email: typeof email === 'string' ? email.trim().toLowerCase() : '',
+        password,
+      }),
     });
     if (result?.token) this.setStoredToken(result.token);
     return result;
@@ -250,6 +254,25 @@ class ApiService {
     });
     if (result?.token) this.setStoredToken(result.token);
     return result;
+  }
+
+  async requestForgotPassword({ emailOrUsername }) {
+    return this.request('/auth/forgot-password', {
+      method: 'POST',
+      body: JSON.stringify({
+        emailOrUsername: typeof emailOrUsername === 'string' ? emailOrUsername.trim() : '',
+      }),
+    });
+  }
+
+  async resetPassword({ token, password }) {
+    return this.request('/auth/reset-password', {
+      method: 'POST',
+      body: JSON.stringify({
+        token: typeof token === 'string' ? token.trim() : '',
+        password,
+      }),
+    });
   }
 
   logout() {

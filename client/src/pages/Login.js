@@ -41,6 +41,9 @@ export default function Login() {
           </button>
         </form>
         {error ? <p className="auth-error">{error}</p> : null}
+        <p className="auth-footer" style={{ marginTop: 10 }}>
+          <Link to="/forgot-password">Forgot password?</Link>
+        </p>
         <p className="auth-footer">No account yet? <Link to="/signup">Create one</Link></p>
       </div>
     </div>

@@ -470,6 +470,65 @@ async function updateUserAccount({ id, username, email, password_hash }) {
   return sqliteGet('SELECT id, username, email, role, created_at, updated_at FROM users WHERE id = ?', [id]);
 }
 
+// --- Password reset tokens (hashed; raw token never stored) ---
+async function deletePasswordResetTokensForUser(userId) {
+  if (useSupabase) {
+    const { error } = await supabase.from('password_reset_tokens').delete().eq('user_id', userId);
+    if (error) throw error;
+    return;
+  }
+  await sqliteRun('DELETE FROM password_reset_tokens WHERE user_id = ?', [userId]);
+}
+
+async function deleteExpiredPasswordResetTokens() {
+  const nowIso = new Date().toISOString();
+  if (useSupabase) {
+    const { error } = await supabase.from('password_reset_tokens').delete().lt('expires_at', nowIso);
+    if (error) throw error;
+    return;
+  }
+  await sqliteRun('DELETE FROM password_reset_tokens WHERE expires_at < ?', [nowIso]);
+}
+
+async function insertPasswordResetToken({ id, user_id, token_hash, expires_at }) {
+  const exp = typeof expires_at === 'string' ? expires_at : new Date(expires_at).toISOString();
+  if (useSupabase) {
+    const { error } = await supabase.from('password_reset_tokens').insert({
+      user_id,
+      token_hash,
+      expires_at: exp,
+    });
+    if (error) throw error;
+    return;
+  }
+  await sqliteRun(
+    'INSERT INTO password_reset_tokens (id, user_id, token_hash, expires_at) VALUES (?, ?, ?, ?)',
+    [id, user_id, token_hash, exp]
+  );
+}
+
+async function getPasswordResetTokenRowByHash(token_hash) {
+  if (useSupabase) {
+    const { data, error } = await supabase
+      .from('password_reset_tokens')
+      .select('*')
+      .eq('token_hash', token_hash)
+      .maybeSingle();
+    if (error) throw error;
+    return data || null;
+  }
+  return sqliteGet('SELECT * FROM password_reset_tokens WHERE token_hash = ?', [token_hash]);
+}
+
+async function deletePasswordResetTokenById(tokenRowId) {
+  if (useSupabase) {
+    const { error } = await supabase.from('password_reset_tokens').delete().eq('id', tokenRowId);
+    if (error) throw error;
+    return;
+  }
+  await sqliteRun('DELETE FROM password_reset_tokens WHERE id = ?', [tokenRowId]);
+}
+
 // --- Timestamp / Latency Logs ---
 // Returns one row per seq_id with the full timestamp chain for pipeline latency analysis.
 async function getTimestampLogs({ startDate, endDate, nodeId, limit = 200 } = {}) {
@@ -614,6 +673,15 @@ function initializeSqlite() {
     )`),
     run(`ALTER TABLE users ADD COLUMN email TEXT`).catch(() => {}),
     run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email_unique ON users (email)`).catch(() => {}),
+    run(`CREATE TABLE IF NOT EXISTS password_reset_tokens (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      token_hash TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )`),
+    run(`CREATE INDEX IF NOT EXISTS idx_password_reset_token_hash ON password_reset_tokens (token_hash)`),
+    run(`CREATE INDEX IF NOT EXISTS idx_password_reset_user_id ON password_reset_tokens (user_id)`),
     // Migrate existing SQLite DBs: add columns if they don't exist yet (safe no-op if present)
     run(`ALTER TABLE sensor_readings ADD COLUMN t_node INTEGER`).catch(() => {}),
     run(`ALTER TABLE sensor_readings ADD COLUMN t_fwd_rx INTEGER`).catch(() => {}),
@@ -686,4 +754,9 @@ module.exports = {
   getUserByEmail,
   createUser,
   updateUserAccount,
+  deletePasswordResetTokensForUser,
+  deleteExpiredPasswordResetTokens,
+  insertPasswordResetToken,
+  getPasswordResetTokenRowByHash,
+  deletePasswordResetTokenById,
 };

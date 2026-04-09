@@ -56,6 +56,17 @@ CREATE TABLE IF NOT EXISTS users (
 ALTER TABLE users ADD COLUMN IF NOT EXISTS email citext;
 CREATE UNIQUE INDEX IF NOT EXISTS users_email_unique_idx ON users (email);
 
+-- One-time password reset links (server-only; accessed via service role).
+CREATE TABLE IF NOT EXISTS password_reset_tokens (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  token_hash text NOT NULL,
+  expires_at timestamptz NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS password_reset_tokens_token_hash_idx ON password_reset_tokens (token_hash);
+CREATE INDEX IF NOT EXISTS password_reset_tokens_user_id_idx ON password_reset_tokens (user_id);
+
 -- 1. Sensor readings (single table for all sensor/forwarder data; MQTT bridge + API write here)
 -- WQI calculated in backend (bridge) per reading when 3+ params available; stored here for reports/calendar.
 CREATE TABLE IF NOT EXISTS sensor_readings (
@@ -201,6 +212,7 @@ ALTER TABLE nodes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE node_last_sensor_tests ENABLE ROW LEVEL SECURITY;
 ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE users ENABLE ROW LEVEL SECURITY;
+ALTER TABLE password_reset_tokens ENABLE ROW LEVEL SECURITY;
 
 -- Policies: authenticated access defaults.
 -- Notes:

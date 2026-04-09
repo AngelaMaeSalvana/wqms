@@ -91,6 +91,7 @@
 }
 
 [data-theme="dark"] {
+  color-scheme: dark;
   --tooltip-bg: rgba(22, 21, 30, 0.95);
   --tooltip-border: rgba(255, 255, 255, 0.1);
   --grid-color: rgba(255, 255, 255, 0.05);
@@ -707,9 +708,15 @@ body,
   background-color: #e9ecef;
 }
 
-.metric-select option {
-  background: var(--panel);
+/* Native <select> listboxes often use a light OS popup while inheriting page text
+   color from the global * rule — fix contrast for all selects (dashboard node, reports, etc.). */
+select option {
+  background-color: var(--panel);
   color: var(--text);
+}
+
+select option:disabled {
+  color: var(--text-muted);
 }
 
 .date-input {

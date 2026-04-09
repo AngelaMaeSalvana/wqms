@@ -836,11 +836,6 @@ export default function Settings() {
             </h2>
           </div>
           <div className="card__body">
-            <p className="settings-acquisition-hint">
-              LoRa sensor nodes use these sampling settings. After you click Save, nodes switch to the new mode
-              or interval only after they finish their current acquisition period (they do not interrupt a
-              cycle in progress).
-            </p>
             <div className="settings-grid">
               <label className="settings-label settings-label--full">
                 <span>

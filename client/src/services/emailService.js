@@ -16,6 +16,16 @@ function maskToken(v) {
   return `${s.slice(0, 2)}***${s.slice(-2)}`;
 }
 
+/** Verbose EmailJS errors (incl. ids / masked key) — off by default; set localStorage wqms_debug_emailjs=1 or REACT_APP_DEBUG_EMAILJS=1 */
+function isEmailJsDebugLogging() {
+  try {
+    if (process.env.REACT_APP_DEBUG_EMAILJS === '1') return true;
+    return localStorage.getItem('wqms_debug_emailjs') === '1';
+  } catch {
+    return false;
+  }
+}
+
 const DEFAULT_THRESHOLDS = {
   temperatureMin: 18,
   temperatureMax: 30,
@@ -130,18 +140,20 @@ export async function sendAlertEmail(alert, toEmail, readingsByNode = {}) {
     await emailjs.send(SERVICE_ID, TEMPLATE_ID, params, { publicKey: PUBLIC_KEY });
     return { success: true };
   } catch (err) {
-    console.warn(
-      'EmailJS send failed:',
-      err,
-      '| debug:',
-      {
-        status: err?.status,
-        text: err?.text || err?.message,
-        publicKey: maskToken(PUBLIC_KEY),
-        serviceId: SERVICE_ID || 'missing',
-        templateId: TEMPLATE_ID || 'missing',
-      }
-    );
+    if (isEmailJsDebugLogging()) {
+      console.warn(
+        'EmailJS send failed:',
+        err,
+        '| debug:',
+        {
+          status: err?.status,
+          text: err?.text || err?.message,
+          publicKey: maskToken(PUBLIC_KEY),
+          serviceId: SERVICE_ID || 'missing',
+          templateId: TEMPLATE_ID || 'missing',
+        }
+      );
+    }
     return { success: false, error: err?.text || err?.message || 'Send failed' };
   }
 }

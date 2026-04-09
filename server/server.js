@@ -11,6 +11,7 @@ const WebSocket = require('ws');
 const mqtt = require('mqtt');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const { randomUUID, createHash, randomBytes } = require('crypto');
 const db = require('./db');
 const { mqttToSensorRow } = require('./utils/mqttToSensorRow');
 const { requireAuth } = require('./middleware/auth');
@@ -20,6 +21,52 @@ const PORT = process.env.PORT || 5000;
 const JWT_SECRET = process.env.JWT_SECRET || 'wqms-dev-secret';
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7d';
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const PASSWORD_RESET_TTL_MS = parseInt(process.env.PASSWORD_RESET_TTL_MS || '', 10) || 60 * 60 * 1000;
+const APP_ORIGIN = String(process.env.APP_ORIGIN || process.env.CLIENT_URL || process.env.REACT_APP_DASHBOARD_URL || 'http://localhost:3000').replace(/\/$/, '');
+
+function hashPasswordResetToken(raw) {
+  return createHash('sha256').update(String(raw), 'utf8').digest('hex');
+}
+
+function generatePasswordResetRawToken() {
+  return randomBytes(32).toString('hex');
+}
+
+async function sendPasswordResetEmail(toEmail, resetUrl) {
+  const serviceId = process.env.EMAILJS_SERVICE_ID;
+  const templateId = process.env.EMAILJS_RESET_TEMPLATE_ID || process.env.EMAILJS_TEMPLATE_ID;
+  const publicKey = process.env.EMAILJS_PUBLIC_KEY;
+  const privateKey = process.env.EMAILJS_PRIVATE_KEY;
+
+  if (!serviceId || !templateId || !publicKey || !privateKey) {
+    console.warn('⚠️ Password reset email not sent: set EMAILJS_SERVICE_ID, EMAILJS_RESET_TEMPLATE_ID (or EMAILJS_TEMPLATE_ID), EMAILJS_PUBLIC_KEY, EMAILJS_PRIVATE_KEY');
+    console.warn('   Reset link:', resetUrl);
+    return { sent: false };
+  }
+
+  const res = await fetch('https://api.emailjs.com/api/v1.0/email/send', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      service_id: serviceId,
+      template_id: templateId,
+      user_id: publicKey,
+      accessToken: privateKey,
+      template_params: {
+        to_email: toEmail,
+        reset_link: resetUrl,
+        message: `Reset your AQUALENS password using this link (expires in one hour): ${resetUrl}`,
+        site_name: 'AQUALENS',
+      },
+    }),
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`EmailJS error ${res.status}: ${text}`);
+  }
+  return { sent: true };
+}
 
 async function requireAdmin(req, res, next) {
   try {
@@ -155,8 +202,6 @@ function normalizeNodeId(id) {
   if (m) return 'N' + String(parseInt(m[1], 10));
   return s;
 }
-
-const { randomUUID } = require('crypto');
 
 // ─── Active test run (in-memory; single concurrent run) ───────────────────────
 let activeTestRun = null; // { id, nodeId, endsAt, intervalMs, timer }
@@ -422,11 +467,19 @@ app.post('/api/auth/signup', async (req, res) => {
   try {
     const usernameRaw = req.body?.username;
     const passwordRaw = req.body?.password;
+    const emailRaw = req.body?.email;
     const username = typeof usernameRaw === 'string' ? usernameRaw.trim() : '';
     const password = typeof passwordRaw === 'string' ? passwordRaw : '';
+    const email = typeof emailRaw === 'string' ? emailRaw.trim().toLowerCase() : '';
 
     if (!/^[a-zA-Z0-9_]{3,32}$/.test(username)) {
       return res.status(400).json({ error: 'username must be 3-32 chars and use letters, numbers, underscore' });
+    }
+    if (!email) {
+      return res.status(400).json({ error: 'email is required' });
+    }
+    if (!EMAIL_REGEX.test(email)) {
+      return res.status(400).json({ error: 'invalid email format' });
     }
     if (password.length < 8) {
       return res.status(400).json({ error: 'password must be at least 8 characters' });
@@ -436,12 +489,16 @@ app.post('/api/auth/signup', async (req, res) => {
     if (existing) {
       return res.status(409).json({ error: 'username already exists' });
     }
+    const existingEmail = await db.getUserByEmail(email);
+    if (existingEmail) {
+      return res.status(409).json({ error: 'email already registered' });
+    }
 
     const password_hash = await bcrypt.hash(password, 12);
     const user = await db.createUser({
       id: randomUUID(),
       username,
-      email: null,
+      email,
       password_hash,
       role: 'guest',
     });
@@ -483,6 +540,97 @@ app.post('/api/auth/login', async (req, res) => {
       user: { id: user.id, username: user.username, email: user.email || null, role: user.role || 'guest' },
     });
   } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/** Request reset link by email or username (email must be on file). Always 200 with same message if identifier looks valid. */
+app.post('/api/auth/forgot-password', async (req, res) => {
+  const generic = {
+    ok: true,
+    message: 'If an account matches that information and has an email on file, a reset link has been sent.',
+  };
+  try {
+    const raw = typeof req.body?.emailOrUsername === 'string' ? req.body.emailOrUsername.trim() : '';
+    if (!raw) {
+      return res.status(400).json({ error: 'email or username is required' });
+    }
+
+    let user = null;
+    if (raw.includes('@')) {
+      const email = raw.toLowerCase();
+      if (!EMAIL_REGEX.test(email)) {
+        return res.status(400).json({ error: 'invalid email format' });
+      }
+      user = await db.getUserByEmail(email);
+    } else {
+      user = await db.getUserByUsername(raw);
+    }
+
+    if (!user || !user.email) {
+      return res.json(generic);
+    }
+
+    await db.deleteExpiredPasswordResetTokens();
+    await db.deletePasswordResetTokensForUser(user.id);
+
+    const rawToken = generatePasswordResetRawToken();
+    const token_hash = hashPasswordResetToken(rawToken);
+    const expires_at = new Date(Date.now() + PASSWORD_RESET_TTL_MS).toISOString();
+    await db.insertPasswordResetToken({
+      id: randomUUID(),
+      user_id: user.id,
+      token_hash,
+      expires_at,
+    });
+
+    const resetUrl = `${APP_ORIGIN}/reset-password?token=${encodeURIComponent(rawToken)}`;
+    try {
+      await sendPasswordResetEmail(user.email, resetUrl);
+    } catch (emailErr) {
+      console.error('❌ Password reset email failed:', emailErr.message || emailErr);
+      return res.status(500).json({ error: 'Could not send reset email. Try again later.' });
+    }
+
+    return res.json(generic);
+  } catch (err) {
+    const msg = String(err?.message || '');
+    if (msg.includes('password_reset_tokens') && (msg.includes('does not exist') || msg.includes('schema cache'))) {
+      console.error('❌ password_reset_tokens table missing — run supabase/schema.sql migration');
+      return res.status(503).json({ error: 'Password reset is not configured on the server.' });
+    }
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/auth/reset-password', async (req, res) => {
+  try {
+    const tokenRaw = typeof req.body?.token === 'string' ? req.body.token.trim() : '';
+    const passwordRaw = typeof req.body?.password === 'string' ? req.body.password : '';
+    if (!tokenRaw || !passwordRaw) {
+      return res.status(400).json({ error: 'token and password are required' });
+    }
+    if (passwordRaw.length < 8) {
+      return res.status(400).json({ error: 'password must be at least 8 characters' });
+    }
+
+    const token_hash = hashPasswordResetToken(tokenRaw);
+    const row = await db.getPasswordResetTokenRowByHash(token_hash);
+    if (!row || !row.expires_at || new Date(row.expires_at) <= new Date()) {
+      return res.status(400).json({ error: 'invalid or expired reset link' });
+    }
+
+    const password_hash = await bcrypt.hash(passwordRaw, 12);
+    await db.updateUserAccount({ id: row.user_id, password_hash });
+    await db.deletePasswordResetTokenById(row.id);
+    await db.deletePasswordResetTokensForUser(row.user_id);
+
+    res.json({ ok: true, message: 'Password updated. You can sign in with your new password.' });
+  } catch (err) {
+    const msg = String(err?.message || '');
+    if (msg.includes('password_reset_tokens') && (msg.includes('does not exist') || msg.includes('schema cache'))) {
+      return res.status(503).json({ error: 'Password reset is not configured on the server.' });
+    }
     res.status(500).json({ error: err.message });
   }
 });
