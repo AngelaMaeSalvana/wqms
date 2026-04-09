@@ -10,6 +10,7 @@ import { useNodeStatus } from "../hooks/useNodeStatus";
 import { getNodes, loadNodes } from "../utils/nodesStorage";
 import api from "../services/api";
 import { supabase } from "../lib/supabaseClient";
+import { useAuth } from "../contexts/AuthContext";
 import { displayReadings } from "../utils/calibration";
 import { exportToCSV, exportToExcel, formatAlertsForExport } from "../utils/exportData";
 import { PageLoader } from "../components/LoadingSkeleton";
@@ -88,6 +89,7 @@ function getRelativeTime(date) {
 }
 
 export default function Alerts() {
+  const { isAdmin } = useAuth();
   const lastUpdated = useRef(new Date()).current;
   const [nodes, setNodes] = useState([]);
   const { nodeStatuses } = useNodeStatus(nodes);
@@ -475,7 +477,7 @@ export default function Alerts() {
           </div>
 
           {/* Mark all as read */}
-          {filteredAlerts.some((a) => !readIds.has(a.id || a.timestamp)) && (
+          {isAdmin && filteredAlerts.some((a) => !readIds.has(a.id || a.timestamp)) && (
             <button
               type="button"
               className="alerts-toolbar-btn"
@@ -487,6 +489,7 @@ export default function Alerts() {
           )}
 
           {/* Export */}
+          {isAdmin && (
           <div className="alerts-export-dropdown" ref={exportDropdownRef}>
             <button
               type="button"
@@ -532,6 +535,7 @@ export default function Alerts() {
               </div>
             )}
           </div>
+          )}
         </div>
       </div>
 

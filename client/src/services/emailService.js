@@ -154,10 +154,21 @@ export async function sendAlertEmail(alert, toEmail, readingsByNode = {}) {
  */
 export async function sendEventNotification(eventType, eventData = {}) {
   const notifications = loadFromStorage('wqms_notifications', {});
-  if (!notifications.emailEnabled || !notifications.notificationEmail?.trim()) return;
+  if (!notifications.emailEnabled) return;
   if (!isEmailJsConfigured()) return;
 
-  const toEmail = notifications.notificationEmail.trim();
+  let toEmail = String(notifications.notificationEmail || '').trim();
+  if (!toEmail) {
+    try {
+      const raw = localStorage.getItem('wqms_current_user') || '{}';
+      const currentUser = JSON.parse(raw);
+      toEmail = String(currentUser?.email || '').trim();
+    } catch {
+      toEmail = '';
+    }
+  }
+  if (!toEmail) return;
+
   const now = Date.now();
   let alert = {};
 

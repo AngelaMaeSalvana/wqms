@@ -11,6 +11,7 @@ import { getWQIClass, calculateWQI } from "../utils/wqiCalculator";
 import { getNH3FromReading, calculateNH3FromTAN } from "../utils/nh3Calculator";
 import { getNodes, loadNodes } from "../utils/nodesStorage";
 import api from "../services/api";
+import { useAuth } from "../contexts/AuthContext";
 import { displayReadings } from "../utils/calibration";
 import { PageLoader } from "../components/LoadingSkeleton";
 import "./Reports.css";
@@ -1158,6 +1159,7 @@ function aggregateReadingsToDailySummaries(readings, nodes = []) {
 }
 
 export default function Reports() {
+  const { isAdmin } = useAuth();
   const lastUpdated = new Date();
   const [nodes, setNodes] = useState([]);
   const [nodesLoaded, setNodesLoaded] = useState(false);
@@ -1171,6 +1173,10 @@ export default function Reports() {
   const reportSummariesByNode = useMemo(
     () => Array.isArray(comparisonReadings) ? comparisonReadings : [],
     [comparisonReadings]
+  );
+  const visibleTabs = useMemo(
+    () => REPORT_TABS.filter((tab) => isAdmin || (tab.id !== "system" && tab.id !== "testing")),
+    [isAdmin]
   );
   const [activeTab, setActiveTab] = useState(REPORT_TABS[0].id);
   const [reportParameter, setReportParameter] = useState(PARAMETER_OPTIONS[0].id);
@@ -1426,6 +1432,12 @@ export default function Reports() {
     return () => document.removeEventListener("click", handleClickOutside);
   }, []);
 
+  useEffect(() => {
+    if (!visibleTabs.some((tab) => tab.id === activeTab)) {
+      setActiveTab(visibleTabs[0]?.id || "water");
+    }
+  }, [visibleTabs, activeTab]);
+
   if (!nodesLoaded) {
     return (
       <div className="reports-page">
@@ -1446,7 +1458,7 @@ export default function Reports() {
 
       <div className="reports-tabs-row">
         <nav className="reports-tabs" role="tablist" aria-label="Report sections">
-          {REPORT_TABS.map((tab) => (
+          {visibleTabs.map((tab) => (
             <button
               key={tab.id}
               type="button"

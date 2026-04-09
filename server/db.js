@@ -284,6 +284,192 @@ async function getTestRunsList({ limit = 50 } = {}) {
   return sqliteAll('SELECT * FROM test_runs ORDER BY started_at DESC LIMIT ?', [parseInt(limit)]);
 }
 
+// --- Users (app-managed auth) ---
+async function getUserById(userId) {
+  const isMissingEmailColumnError = (err) => {
+    const msg = String(err?.message || '').toLowerCase();
+    return (
+      msg.includes("users.email") ||
+      (msg.includes("column") && msg.includes("email") && msg.includes("users")) ||
+      (msg.includes("schema cache") && msg.includes("email") && msg.includes("users"))
+    );
+  };
+
+  if (useSupabase) {
+    const withEmail = await supabase
+      .from('users')
+      .select('id, username, email, password_hash, role, created_at, updated_at')
+      .eq('id', userId)
+      .maybeSingle();
+    if (!withEmail.error) return withEmail.data || null;
+    if (!isMissingEmailColumnError(withEmail.error)) {
+      throw withEmail.error;
+    }
+    const legacy = await supabase
+      .from('users')
+      .select('id, username, password_hash, role, created_at, updated_at')
+      .eq('id', userId)
+      .maybeSingle();
+    if (legacy.error) throw legacy.error;
+    return legacy.data ? { ...legacy.data, email: null } : null;
+  }
+  return sqliteGet('SELECT id, username, email, password_hash, role, created_at, updated_at FROM users WHERE id = ?', [userId]);
+}
+
+async function getUserByUsername(username) {
+  const isMissingEmailColumnError = (err) => {
+    const msg = String(err?.message || '').toLowerCase();
+    return (
+      msg.includes("users.email") ||
+      (msg.includes("column") && msg.includes("email") && msg.includes("users")) ||
+      (msg.includes("schema cache") && msg.includes("email") && msg.includes("users"))
+    );
+  };
+
+  if (useSupabase) {
+    const withEmail = await supabase
+      .from('users')
+      .select('id, username, email, password_hash, role, created_at, updated_at')
+      .eq('username', username)
+      .maybeSingle();
+    if (!withEmail.error) return withEmail.data || null;
+    if (!isMissingEmailColumnError(withEmail.error)) {
+      throw withEmail.error;
+    }
+    const legacy = await supabase
+      .from('users')
+      .select('id, username, password_hash, role, created_at, updated_at')
+      .eq('username', username)
+      .maybeSingle();
+    if (legacy.error) throw legacy.error;
+    return legacy.data ? { ...legacy.data, email: null } : null;
+  }
+  return sqliteGet('SELECT id, username, email, password_hash, role, created_at, updated_at FROM users WHERE username = ?', [username]);
+}
+
+async function getUserByEmail(email) {
+  const isMissingEmailColumnError = (err) => {
+    const msg = String(err?.message || '').toLowerCase();
+    return (
+      msg.includes("users.email") ||
+      (msg.includes("column") && msg.includes("email") && msg.includes("users")) ||
+      (msg.includes("schema cache") && msg.includes("email") && msg.includes("users"))
+    );
+  };
+
+  if (!email) return null;
+  if (useSupabase) {
+    const { data, error } = await supabase
+      .from('users')
+      .select('id, username, email, password_hash, role, created_at, updated_at')
+      .eq('email', email)
+      .maybeSingle();
+    if (error) {
+      if (isMissingEmailColumnError(error)) return null;
+      throw error;
+    }
+    return data || null;
+  }
+  return sqliteGet('SELECT id, username, email, password_hash, role, created_at, updated_at FROM users WHERE email = ?', [email]);
+}
+
+async function createUser({ id, username, email = null, password_hash, role = 'guest' }) {
+  const isMissingEmailColumnError = (err) => {
+    const msg = String(err?.message || '').toLowerCase();
+    return (
+      msg.includes("users.email") ||
+      (msg.includes("column") && msg.includes("email") && msg.includes("users")) ||
+      (msg.includes("schema cache") && msg.includes("email") && msg.includes("users"))
+    );
+  };
+
+  if (useSupabase) {
+    const payload = { id, username, email, password_hash, role, updated_at: new Date().toISOString() };
+    const withEmail = await supabase
+      .from('users')
+      .insert(payload)
+      .select('id, username, email, role, created_at, updated_at')
+      .single();
+    if (!withEmail.error) return withEmail.data;
+    if (!isMissingEmailColumnError(withEmail.error)) {
+      throw withEmail.error;
+    }
+
+    const legacyPayload = { id, username, password_hash, role, updated_at: new Date().toISOString() };
+    const legacy = await supabase
+      .from('users')
+      .insert(legacyPayload)
+      .select('id, username, role, created_at, updated_at')
+      .single();
+    if (legacy.error) throw legacy.error;
+    return { ...legacy.data, email: null };
+  }
+  await sqliteRun(
+    'INSERT INTO users (id, username, email, password_hash, role, created_at, updated_at) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)',
+    [id, username, email, password_hash, role]
+  );
+  return { id, username, email, role };
+}
+
+async function updateUserAccount({ id, username, email, password_hash }) {
+  const isMissingEmailColumnError = (err) => {
+    const msg = String(err?.message || '').toLowerCase();
+    return (
+      msg.includes("users.email") ||
+      (msg.includes("column") && msg.includes("email") && msg.includes("users")) ||
+      (msg.includes("schema cache") && msg.includes("email") && msg.includes("users"))
+    );
+  };
+
+  if (useSupabase) {
+    const payload = { updated_at: new Date().toISOString() };
+    if (username != null) payload.username = username;
+    if (email !== undefined) payload.email = email;
+    if (password_hash != null) payload.password_hash = password_hash;
+    const withEmail = await supabase
+      .from('users')
+      .update(payload)
+      .eq('id', id)
+      .select('id, username, email, role, created_at, updated_at')
+      .single();
+    if (!withEmail.error) return withEmail.data;
+    if (!isMissingEmailColumnError(withEmail.error)) {
+      throw withEmail.error;
+    }
+    const legacyPayload = { updated_at: new Date().toISOString() };
+    if (username != null) legacyPayload.username = username;
+    if (password_hash != null) legacyPayload.password_hash = password_hash;
+    const legacy = await supabase
+      .from('users')
+      .update(legacyPayload)
+      .eq('id', id)
+      .select('id, username, role, created_at, updated_at')
+      .single();
+    if (legacy.error) throw legacy.error;
+    return { ...legacy.data, email: null };
+  }
+
+  const fields = [];
+  const params = [];
+  if (username != null) {
+    fields.push('username = ?');
+    params.push(username);
+  }
+  if (email !== undefined) {
+    fields.push('email = ?');
+    params.push(email);
+  }
+  if (password_hash != null) {
+    fields.push('password_hash = ?');
+    params.push(password_hash);
+  }
+  if (fields.length > 0) {
+    fields.push('updated_at = CURRENT_TIMESTAMP');
+    await sqliteRun(`UPDATE users SET ${fields.join(', ')} WHERE id = ?`, [...params, id]);
+  }
+  return sqliteGet('SELECT id, username, email, role, created_at, updated_at FROM users WHERE id = ?', [id]);
+}
+
 // --- Timestamp / Latency Logs ---
 // Returns one row per seq_id with the full timestamp chain for pipeline latency analysis.
 async function getTimestampLogs({ startDate, endDate, nodeId, limit = 200 } = {}) {
@@ -417,6 +603,17 @@ function initializeSqlite() {
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       UNIQUE(date, node_id)
     )`),
+    run(`CREATE TABLE IF NOT EXISTS users (
+      id TEXT PRIMARY KEY,
+      username TEXT NOT NULL UNIQUE,
+      email TEXT UNIQUE,
+      password_hash TEXT NOT NULL,
+      role TEXT NOT NULL DEFAULT 'guest',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )`),
+    run(`ALTER TABLE users ADD COLUMN email TEXT`).catch(() => {}),
+    run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email_unique ON users (email)`).catch(() => {}),
     // Migrate existing SQLite DBs: add columns if they don't exist yet (safe no-op if present)
     run(`ALTER TABLE sensor_readings ADD COLUMN t_node INTEGER`).catch(() => {}),
     run(`ALTER TABLE sensor_readings ADD COLUMN t_fwd_rx INTEGER`).catch(() => {}),
@@ -484,4 +681,9 @@ module.exports = {
   closeTestRun,
   getTestRun,
   getTestRunsList,
+  getUserById,
+  getUserByUsername,
+  getUserByEmail,
+  createUser,
+  updateUserAccount,
 };

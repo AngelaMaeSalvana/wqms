@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { useTheme } from "../contexts/ThemeContext";
+import { useAuth } from "../contexts/AuthContext";
 import InfoTooltip from "../components/InfoTooltip";
 import { DEFAULT_WQI_WEIGHTS, getWQIWeights } from "../utils/wqiCalculator";
 import {
@@ -149,6 +150,7 @@ const NOTIFICATIONS_KEY = "wqms_notifications";
 
 export default function Settings() {
   const { theme, setTheme } = useTheme();
+  const { user, profile, refreshProfile, isAdmin } = useAuth();
   const [thresholdClassification, setThresholdClassification] = useState(() => {
     const stored = loadFromStorage(CLASSIFICATION_STORAGE_KEY, "Custom");
     return CLASSIFICATION_OPTIONS.includes(stored) ? stored : "Custom";
@@ -185,6 +187,14 @@ export default function Settings() {
   const [saveFeedback, setSaveFeedback] = useState(null);
   const [activeTab, setActiveTab] = useState("system"); // "system" | "preferences"
   const [settingsLoaded, setSettingsLoaded] = useState(false);
+  const [accountUsername, setAccountUsername] = useState("");
+  const [accountEmail, setAccountEmail] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const [passwordDraft, setPasswordDraft] = useState("");
+  const [confirmPasswordDraft, setConfirmPasswordDraft] = useState("");
+  const [accountFeedback, setAccountFeedback] = useState(null);
 
   // Load settings from Supabase on mount (when enabled)
   useEffect(() => {
@@ -223,6 +233,17 @@ export default function Settings() {
       })
       .finally(() => setSettingsLoaded(true));
   }, []);
+
+  useEffect(() => {
+    setAccountUsername(profile?.username || "");
+    setAccountEmail(profile?.email || "");
+  }, [profile?.username, profile?.email]);
+
+  useEffect(() => {
+    if (!isAdmin) {
+      setActiveTab("preferences");
+    }
+  }, [isAdmin]);
 
   const isCustomClassification = thresholdClassification === "Custom";
 
@@ -355,6 +376,61 @@ export default function Settings() {
       [SETTINGS_KEYS.maintenance]: maintenance,
     };
     try {
+      if (!user) {
+        setSaveFeedback("Please sign in to save settings");
+        setTimeout(() => setSaveFeedback(null), 2000);
+        return;
+      }
+
+      if (notifications.emailEnabled) {
+        const email = accountEmail.trim().toLowerCase();
+        if (!email) {
+          setSaveFeedback("Email is required when email notifications are enabled");
+          setTimeout(() => setSaveFeedback(null), 3000);
+          return;
+        }
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+          setSaveFeedback("Enter a valid email address");
+          setTimeout(() => setSaveFeedback(null), 3000);
+          return;
+        }
+      }
+
+      const username = accountUsername.trim();
+      if (username.length < 3 || username.length > 32) {
+        setSaveFeedback("Username must be 3-32 characters");
+        setTimeout(() => setSaveFeedback(null), 3000);
+        return;
+      }
+      if (newPassword) {
+        if (newPassword.length < 8) {
+          setSaveFeedback("Password must be at least 8 characters");
+          setTimeout(() => setSaveFeedback(null), 3000);
+          return;
+        }
+        if (newPassword !== confirmPassword) {
+          setSaveFeedback("Passwords do not match");
+          setTimeout(() => setSaveFeedback(null), 3000);
+          return;
+        }
+      }
+      await api.upsertProfile({
+        username,
+        email: notifications.emailEnabled ? (accountEmail.trim().toLowerCase() || null) : null,
+        password: newPassword || undefined,
+      });
+      await refreshProfile();
+      setNewPassword("");
+      setConfirmPassword("");
+
+      if (!isAdmin) {
+        const guestSettings = { [NOTIFICATIONS_KEY]: notifications };
+        await saveSettingsToSupabaseAndLocal(guestSettings).catch(() => {});
+        setSaveFeedback("Saved");
+        setTimeout(() => setSaveFeedback(null), 2000);
+        return;
+      }
+
       await saveSettingsToSupabaseAndLocal(settingsByKey);
       if (thresholdsChanged) {
         sendEventNotification("threshold_update", { previous: prevThresholds, current: thresholds });
@@ -377,6 +453,34 @@ export default function Settings() {
     setTimeout(() => setSaveFeedback(null), 2000);
   };
 
+  const openPasswordModal = () => {
+    setPasswordDraft(newPassword);
+    setConfirmPasswordDraft(confirmPassword);
+    setShowPasswordModal(true);
+  };
+
+  const closePasswordModal = () => {
+    setShowPasswordModal(false);
+    setPasswordDraft("");
+    setConfirmPasswordDraft("");
+  };
+
+  const confirmPasswordChange = () => {
+    if (passwordDraft && passwordDraft.length < 8) {
+      setAccountFeedback("Password must be at least 8 characters");
+      setTimeout(() => setAccountFeedback(null), 3000);
+      return;
+    }
+    if (passwordDraft !== confirmPasswordDraft) {
+      setAccountFeedback("Passwords do not match");
+      setTimeout(() => setAccountFeedback(null), 3000);
+      return;
+    }
+    setNewPassword(passwordDraft);
+    setConfirmPassword(confirmPasswordDraft);
+    closePasswordModal();
+  };
+
   return (
     <div className="settings-page">
       <header className="page-header">
@@ -387,17 +491,19 @@ export default function Settings() {
       </header>
 
       <div className="settings-tabs" role="tablist" aria-label="Settings categories">
-        <button
-          type="button"
-          role="tab"
-          aria-selected={activeTab === "system"}
-          aria-controls="settings-panel-system"
-          id="tab-system"
-          className={`settings-tab ${activeTab === "system" ? "settings-tab--active" : ""}`}
-          onClick={() => setActiveTab("system")}
-        >
-          Calibration, Threshold &amp; Data
-        </button>
+        {isAdmin && (
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === "system"}
+            aria-controls="settings-panel-system"
+            id="tab-system"
+            className={`settings-tab ${activeTab === "system" ? "settings-tab--active" : ""}`}
+            onClick={() => setActiveTab("system")}
+          >
+            Calibration, Threshold &amp; Data
+          </button>
+        )}
         <button
           type="button"
           role="tab"
@@ -417,7 +523,7 @@ export default function Settings() {
           id="settings-panel-system"
           role="tabpanel"
           aria-labelledby="tab-system"
-          hidden={activeTab !== "system"}
+          hidden={!isAdmin || activeTab !== "system"}
           className="settings-tab-panel"
         >
           {/* Calibration */}
@@ -873,6 +979,7 @@ export default function Settings() {
               type="button"
               className="settings-save-btn"
               onClick={handleSaveAll}
+                disabled={!isAdmin}
               aria-label="Save all settings"
             >
               Save settings
@@ -893,12 +1000,125 @@ export default function Settings() {
           hidden={activeTab !== "preferences"}
           className="settings-tab-panel"
         >
+        {/* User Account */}
+        <section className="settings-section card">
+          <div className="card__header">
+            <h2 className="card__title">
+              User Account
+              <InfoTooltip text="Update your username or password." label="Account settings help" />
+            </h2>
+          </div>
+          <div className="card__body">
+            {!user ? (
+              <p className="settings-helper">Sign in to manage your account details.</p>
+            ) : (
+              <>
+            <div className="settings-grid">
+              <label className="settings-label">
+                <span>Username</span>
+                <input
+                  type="text"
+                  minLength={3}
+                  maxLength={32}
+                  className="settings-input"
+                  value={accountUsername}
+                  onChange={(e) => setAccountUsername(e.target.value)}
+                  aria-label="Account username"
+                />
+              </label>
+              {notifications.emailEnabled && (
+                <label className="settings-label">
+                  <span>Email</span>
+                  <input
+                    type="email"
+                    className="settings-input"
+                    value={accountEmail}
+                    onChange={(e) => setAccountEmail(e.target.value)}
+                    placeholder="name@example.com"
+                    aria-label="Account email"
+                  />
+                </label>
+              )}
+            </div>
+            <div className="settings-actions" style={{ marginTop: "12px" }}>
+              <button
+                type="button"
+                className="settings-save-btn"
+                onClick={openPasswordModal}
+                aria-label="Change account password"
+              >
+                Change password
+              </button>
+              {newPassword ? (
+                <span className="settings-save-feedback" role="status">
+                  Password change queued. Click Save settings to apply.
+                </span>
+              ) : null}
+              {accountFeedback && (
+                <span className="settings-save-feedback" role="status">
+                  {accountFeedback}
+                </span>
+              )}
+            </div>
+
+            {showPasswordModal ? (
+              <div className="settings-modal-backdrop" role="presentation" onClick={closePasswordModal}>
+                <div
+                  className="settings-modal"
+                  role="dialog"
+                  aria-modal="true"
+                  aria-label="Change password"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <h3 className="settings-modal__title">Change password</h3>
+                  <div className="settings-grid">
+                    <label className="settings-label">
+                      <span>New password</span>
+                      <input
+                        type="password"
+                        minLength={8}
+                        className="settings-input"
+                        value={passwordDraft}
+                        onChange={(e) => setPasswordDraft(e.target.value)}
+                        placeholder="Enter new password"
+                        aria-label="New account password"
+                      />
+                    </label>
+                    <label className="settings-label">
+                      <span>Confirm new password</span>
+                      <input
+                        type="password"
+                        minLength={8}
+                        className="settings-input"
+                        value={confirmPasswordDraft}
+                        onChange={(e) => setConfirmPasswordDraft(e.target.value)}
+                        placeholder="Re-enter new password"
+                        aria-label="Confirm new account password"
+                      />
+                    </label>
+                  </div>
+                  <div className="settings-actions" style={{ marginTop: "12px" }}>
+                    <button type="button" className="settings-save-btn" onClick={confirmPasswordChange}>
+                      Confirm
+                    </button>
+                    <button type="button" className="settings-save-btn" onClick={closePasswordModal}>
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ) : null}
+              </>
+            )}
+          </div>
+        </section>
+
         {/* Email Notifications */}
         <section className="settings-section card">
           <div className="card__header">
             <h2 className="card__title">
               Email Notifications
-              <InfoTooltip text="Receive email notifications when alerts are triggered. Requires EmailJS to be configured in the system." label="Email notifications help" />
+              <InfoTooltip text="Enable or disable email notifications. Recipient uses the signed-in user's default email." label="Email notifications help" />
             </h2>
           </div>
           <div className="card__body">
@@ -914,78 +1134,67 @@ export default function Settings() {
                 <span className="settings-toggle" aria-hidden="true" />
               </label>
             </div>
-            {notifications.emailEnabled && (
-              <div className="settings-option-row" style={{ marginTop: "12px" }}>
-                <label className="settings-label" style={{ flex: 1, minWidth: 0 }}>
-                  <span>Default notification email</span>
-                  <input
-                    type="email"
-                    className="settings-input"
-                    value={notifications.notificationEmail ?? ""}
-                    onChange={(e) => updateNotifications("notificationEmail", e.target.value)}
-                    placeholder="alerts@example.com"
-                    aria-label="Email address for alerts and notifications"
-                  />
-                </label>
-              </div>
-            )}
           </div>
         </section>
 
-        {/* Maintenance Schedule */}
-        <section className="settings-section card">
-          <div className="card__header">
-            <h2 className="card__title">
-              Maintenance Schedule
-              <InfoTooltip text="Get a reminder alert when a monitoring node hasn't been physically serviced or inspected within the chosen time period." label="Maintenance help" />
-            </h2>
-          </div>
-          <div className="card__body">
-            <div className="settings-maintenance-options">
-              {[
-                { label: "2 Weeks", days: 14 },
-                { label: "1 Month", days: 30 },
-                { label: "2 Months", days: 60 },
-                { label: "3 Months", days: 90 },
-                { label: "6 Months", days: 180 },
-                { label: "Custom", days: null },
-              ].map((opt) => {
-                const isCustomOption = opt.days === null;
-                const isPreset = !isCustomOption;
-                const isActive = isPreset
-                  ? maintenance.intervalDays === opt.days
-                  : ![14, 30, 60, 90, 180].includes(maintenance.intervalDays);
-                return (
-                  <button
-                    key={opt.label}
-                    type="button"
-                    className={`settings-maintenance-chip${isActive ? " settings-maintenance-chip--active" : ""}`}
-                    onClick={() => {
-                      if (isPreset) updateMaintenance("intervalDays", opt.days);
-                    }}
-                    aria-pressed={isActive}
-                  >
-                    {opt.label}
-                  </button>
-                );
-              })}
-            </div>
-            <div className="settings-maintenance-custom">
-              <label className="settings-label" style={{ maxWidth: 260 }}>
-                <span>Custom interval (days)</span>
-                <input
-                  type="number"
-                  min={1}
-                  max={365}
-                  className="settings-input"
-                  value={maintenance.intervalDays}
-                  onChange={(e) => updateMaintenance("intervalDays", e.target.value)}
-                  aria-label="Maintenance interval in days"
-                />
-              </label>
-            </div>
-          </div>
-        </section>
+        {isAdmin && (
+          <>
+            {/* Maintenance Schedule */}
+            <section className="settings-section card">
+              <div className="card__header">
+                <h2 className="card__title">
+                  Maintenance Schedule
+                  <InfoTooltip text="Get a reminder alert when a monitoring node hasn't been physically serviced or inspected within the chosen time period." label="Maintenance help" />
+                </h2>
+              </div>
+              <div className="card__body">
+                <div className="settings-maintenance-options">
+                  {[
+                    { label: "2 Weeks", days: 14 },
+                    { label: "1 Month", days: 30 },
+                    { label: "2 Months", days: 60 },
+                    { label: "3 Months", days: 90 },
+                    { label: "6 Months", days: 180 },
+                    { label: "Custom", days: null },
+                  ].map((opt) => {
+                    const isCustomOption = opt.days === null;
+                    const isPreset = !isCustomOption;
+                    const isActive = isPreset
+                      ? maintenance.intervalDays === opt.days
+                      : ![14, 30, 60, 90, 180].includes(maintenance.intervalDays);
+                    return (
+                      <button
+                        key={opt.label}
+                        type="button"
+                        className={`settings-maintenance-chip${isActive ? " settings-maintenance-chip--active" : ""}`}
+                        onClick={() => {
+                          if (isPreset) updateMaintenance("intervalDays", opt.days);
+                        }}
+                        aria-pressed={isActive}
+                      >
+                        {opt.label}
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className="settings-maintenance-custom">
+                  <label className="settings-label" style={{ maxWidth: 260 }}>
+                    <span>Custom interval (days)</span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={365}
+                      className="settings-input"
+                      value={maintenance.intervalDays}
+                      onChange={(e) => updateMaintenance("intervalDays", e.target.value)}
+                      aria-label="Maintenance interval in days"
+                    />
+                  </label>
+                </div>
+              </div>
+            </section>
+          </>
+        )}
 
         {/* Theme */}
         <section className="settings-section card">

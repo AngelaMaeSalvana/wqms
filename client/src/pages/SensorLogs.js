@@ -9,6 +9,7 @@ import BatteryIndicator, { batteryPropsFromReading } from "../components/Battery
 import { calculateWQI } from "../utils/wqiCalculator";
 import { getNodes, loadNodes } from "../utils/nodesStorage";
 import api from "../services/api";
+import { useAuth } from "../contexts/AuthContext";
 import { displayReadings } from "../utils/calibration";
 import { PageLoader } from "../components/LoadingSkeleton";
 import "./SensorLogs.css";
@@ -93,6 +94,7 @@ function getDateKey(d) {
 }
 
 export default function SensorLogs() {
+  const { isAdmin } = useAuth();
   const navigate = useNavigate();
   const lastUpdated = new Date();
   const [search, setSearch] = useState("");
@@ -500,42 +502,46 @@ export default function SensorLogs() {
             </div>
           )}
         </div>
-        <div className="sensor-logs-export-wrap" ref={exportRef}>
-          <button
-            type="button"
-            className="ghost-btn sensor-logs-export-btn"
-            onClick={() => setExportOpen((o) => !o)}
-            aria-expanded={exportOpen}
-            aria-haspopup="true"
-            aria-label="Export options"
-          >
-            Export <span className="sensor-logs-export-caret" aria-hidden>▼</span>
-          </button>
-          {exportOpen && (
-            <div className="sensor-logs-export-menu" role="menu">
-              <button type="button" role="menuitem" onClick={() => handleExport("csv")}>
-                Export as CSV
-              </button>
-              <button type="button" role="menuitem" onClick={() => handleExport("pdf")}>
-                Export as PDF
-              </button>
-              <button type="button" role="menuitem" onClick={() => handleExport("text")}>
-                Export as Text
-              </button>
-              <button type="button" role="menuitem" onClick={() => handleExport("excel")}>
-                Export as Excel
-              </button>
-            </div>
+        <>
+          <div className="sensor-logs-export-wrap" ref={exportRef}>
+            <button
+              type="button"
+              className="ghost-btn sensor-logs-export-btn"
+              onClick={() => setExportOpen((o) => !o)}
+              aria-expanded={exportOpen}
+              aria-haspopup="true"
+              aria-label="Export options"
+            >
+              Export <span className="sensor-logs-export-caret" aria-hidden>▼</span>
+            </button>
+            {exportOpen && (
+              <div className="sensor-logs-export-menu" role="menu">
+                <button type="button" role="menuitem" onClick={() => handleExport("csv")}>
+                  Export as CSV
+                </button>
+                <button type="button" role="menuitem" onClick={() => handleExport("pdf")}>
+                  Export as PDF
+                </button>
+                <button type="button" role="menuitem" onClick={() => handleExport("text")}>
+                  Export as Text
+                </button>
+                <button type="button" role="menuitem" onClick={() => handleExport("excel")}>
+                  Export as Excel
+                </button>
+              </div>
+            )}
+          </div>
+          {isAdmin && (
+            <button
+              type="button"
+              className="ghost-btn sensor-logs-perf-btn"
+              onClick={() => navigate("/performance-test")}
+              aria-label="Performance Test"
+            >
+              Performance Test
+            </button>
           )}
-        </div>
-        <button
-          type="button"
-          className="ghost-btn sensor-logs-perf-btn"
-          onClick={() => navigate("/performance-test")}
-          aria-label="Performance Test"
-        >
-          Performance Test
-        </button>
+        </>
       </div>
 
       <section className="sensor-logs-table-card card">

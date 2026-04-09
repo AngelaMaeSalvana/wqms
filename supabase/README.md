@@ -5,11 +5,46 @@
 1. In [Supabase Dashboard](https://supabase.com/dashboard) → your project → **SQL Editor**.
 2. Run the full schema once:
    - Open **schema.sql** and run it. This creates:
+     - `profiles` (linked to `auth.users`, with unique `username`)
      - `sensor_readings` – single table for all sensor/forwarder data (bridge + API)
      - `alerts`
      - `daily_summaries`
      - `nodes` (with seed data)
      - RLS policies, indexes, `set_updated_at` trigger, and `refresh_daily_summaries` function.
+
+## Auth migration notes (important)
+
+`schema.sql` now assumes authenticated client access and no longer keeps open `Allow all` policies.
+
+Rollout order:
+
+1. Ensure Auth is configured in Supabase (email + OAuth providers, redirect URLs).
+2. Ensure backend writes use `SUPABASE_SERVICE_ROLE_KEY` (server-only).
+3. Update frontend to require user sign-in before data screens.
+4. Run updated `schema.sql` to add `profiles` and switch RLS policies to authenticated defaults.
+5. Verify:
+   - Authenticated user can read app data.
+   - Unauthenticated user is denied by RLS.
+   - Authenticated user can only read/update their own `profiles` row.
+
+For signup flows, create one `profiles` row per user (`profiles.id = auth.users.id`) and store the unique `username`.
+
+## Access levels
+
+The app now uses two roles in `profiles.role`:
+
+- `admin` - full access (settings changes, exports, write endpoints)
+- `guest` - view-only access
+
+New users default to `guest`. Promote a user to System Admin in SQL:
+
+```sql
+update profiles
+set role = 'admin'
+where id = '<auth_user_uuid>';
+```
+
+Role is also mirrored to `auth.users.raw_app_meta_data.role` so it appears in Supabase Auth user details.
 
 ## Existing database (migrations)
 

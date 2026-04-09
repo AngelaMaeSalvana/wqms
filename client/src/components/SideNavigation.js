@@ -1,5 +1,7 @@
 import React, { useState } from "react";
 import { NavLink, useLocation } from "react-router-dom";
+import { isSupabaseEnabled } from "../lib/supabaseClient";
+import { useAuth } from "../contexts/AuthContext";
 import "./side-nav.css";
 
 const IconDashboard = () => (
@@ -79,7 +81,9 @@ const pathToTitle = (pathname) => {
 export default function SideNavigation({ isMobileOpen = false, onToggle, onClose }) {
   const [collapsed, setCollapsed] = useState(false);
   const { pathname } = useLocation();
+  const { signOut, isAdmin, role } = useAuth();
   const pageTitle = pathToTitle(pathname);
+  const roleLabel = isAdmin ? "System Admin" : "Guest";
 
   const handleNavClick = () => {
     if (onClose) onClose();
@@ -104,6 +108,11 @@ export default function SideNavigation({ isMobileOpen = false, onToggle, onClose
             <img src="/logo.png" alt="" className="side-nav__mobile-logo-img" />
           </span>
           <span className="side-nav__mobile-title">AQUALENS</span>
+          {isSupabaseEnabled() && (
+            <span className={`side-nav__mobile-role side-nav__mobile-role--${role}`}>
+              {isAdmin ? "Admin" : "Guest"}
+            </span>
+          )}
           <span className="side-nav__breadcrumb">
             <span className="side-nav__breadcrumb-sep" aria-hidden="true"> / </span>
             {pageTitle}
@@ -120,7 +129,16 @@ export default function SideNavigation({ isMobileOpen = false, onToggle, onClose
           <span className="brand__logo">
             <img src="/logo.png" alt="AQUALENS" className="brand__logo-img" />
           </span>
-          {!collapsed && <span className="brand__text">AQUALENS</span>}
+          {!collapsed && (
+            <span className="brand__text-wrap">
+              <span className="brand__text">AQUALENS</span>
+              {isSupabaseEnabled() && (
+                <span className={`side-nav__role-badge side-nav__role-badge--${role}`}>
+                  {roleLabel}
+                </span>
+              )}
+            </span>
+          )}
         </div>
 
         <button
@@ -135,7 +153,9 @@ export default function SideNavigation({ isMobileOpen = false, onToggle, onClose
       </div>
 
       <nav className="side-nav__menu" aria-label="Main navigation">
-        {navItems.map(({ to, label, Icon }) => (
+        {navItems
+          .filter((item) => (item.to === "/nodes" ? isAdmin : true))
+          .map(({ to, label, Icon }) => (
           <NavLink
             key={to}
             to={to}
@@ -153,6 +173,14 @@ export default function SideNavigation({ isMobileOpen = false, onToggle, onClose
         ))}
       </nav>
 
+      {isSupabaseEnabled() && (
+        <div className="side-nav__logout">
+          <button type="button" className="side-nav__item" onClick={signOut} title={collapsed ? "Logout" : undefined}>
+            <span className="side-nav__icon" aria-hidden="true">⇦</span>
+            {!collapsed && <span className="side-nav__label">Logout</span>}
+          </button>
+        </div>
+      )}
       <div className="side-nav__bottom">
         {!collapsed && (
           <div className="side-nav__version">

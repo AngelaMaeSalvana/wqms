@@ -3,6 +3,58 @@
 
 -- Enable UUID extension (optional, for id columns)
 -- We use bigint serial IDs to match existing API.
+CREATE EXTENSION IF NOT EXISTS citext;
+
+-- 0. User profiles (hybrid auth support: email/password + OAuth)
+-- One app profile row per Supabase auth user.
+CREATE TABLE IF NOT EXISTS profiles (
+  id uuid PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+  username citext NOT NULL UNIQUE,
+  role text NOT NULL DEFAULT 'guest' CHECK (role IN ('guest', 'admin')),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+-- Role normalization for existing installs.
+ALTER TABLE profiles DROP CONSTRAINT IF EXISTS profiles_role_check;
+UPDATE profiles SET role = 'guest' WHERE role NOT IN ('guest', 'admin');
+ALTER TABLE profiles ADD CONSTRAINT profiles_role_check CHECK (role IN ('guest', 'admin'));
+
+-- Keep auth.users app metadata in sync so role is also visible in Auth user details.
+CREATE OR REPLACE FUNCTION sync_auth_user_role_from_profile()
+RETURNS TRIGGER AS $$
+BEGIN
+  UPDATE auth.users
+  SET raw_app_meta_data = COALESCE(raw_app_meta_data, '{}'::jsonb) || jsonb_build_object('role', NEW.role)
+  WHERE id = NEW.id;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+DROP TRIGGER IF EXISTS profiles_sync_auth_role ON profiles;
+CREATE TRIGGER profiles_sync_auth_role
+  AFTER INSERT OR UPDATE OF role ON profiles
+  FOR EACH ROW EXECUTE FUNCTION sync_auth_user_role_from_profile();
+
+-- Backfill current roles into auth metadata.
+UPDATE auth.users u
+SET raw_app_meta_data = COALESCE(u.raw_app_meta_data, '{}'::jsonb) || jsonb_build_object('role', p.role)
+FROM profiles p
+WHERE p.id = u.id;
+
+-- 0b. App users table (custom auth: username + password)
+-- This is the table intended for adding your own custom columns.
+CREATE TABLE IF NOT EXISTS users (
+  id uuid PRIMARY KEY,
+  username citext NOT NULL UNIQUE,
+  email citext UNIQUE,
+  password_hash text NOT NULL,
+  role text NOT NULL DEFAULT 'guest' CHECK (role IN ('guest', 'admin')),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+ALTER TABLE users ADD COLUMN IF NOT EXISTS email citext;
+CREATE UNIQUE INDEX IF NOT EXISTS users_email_unique_idx ON users (email);
 
 -- 1. Sensor readings (single table for all sensor/forwarder data; MQTT bridge + API write here)
 -- WQI calculated in backend (bridge) per reading when 3+ params available; stored here for reports/calendar.
@@ -130,9 +182,6 @@ CREATE TABLE IF NOT EXISTS node_last_sensor_tests (
   last_sensor_test_at timestamptz NOT NULL,
   last_sensor_test_status text
 );
-ALTER TABLE node_last_sensor_tests ENABLE ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS "Allow all on node_last_sensor_tests" ON node_last_sensor_tests;
-CREATE POLICY "Allow all on node_last_sensor_tests" ON node_last_sensor_tests FOR ALL USING (true) WITH CHECK (true);
 
 -- Seed default nodes (optional; run once)
 INSERT INTO nodes (id, name, location, status, lat, lng)
@@ -149,21 +198,101 @@ ALTER TABLE alerts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE daily_summaries ENABLE ROW LEVEL SECURITY;
 ALTER TABLE settings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE nodes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE node_last_sensor_tests ENABLE ROW LEVEL SECURITY;
+ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE users ENABLE ROW LEVEL SECURITY;
 
--- Policies: allow all for anon key (dashboard + serverless/backend use same DB)
+-- Policies: authenticated access defaults.
+-- Notes:
+-- - Service role can still access tables (server-side key).
+-- - Client access now requires authenticated users.
 -- Drop first so this script is re-runnable (avoids "policy already exists").
 DROP POLICY IF EXISTS "Allow all on sensor_readings" ON sensor_readings;
 DROP POLICY IF EXISTS "Allow service role full access on sensor_readings" ON sensor_readings;
 DROP POLICY IF EXISTS "Allow anon read on sensor_readings" ON sensor_readings;
-CREATE POLICY "Allow all on sensor_readings" ON sensor_readings FOR ALL USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS "Authenticated read sensor_readings" ON sensor_readings;
+DROP POLICY IF EXISTS "Authenticated write sensor_readings" ON sensor_readings;
+DROP POLICY IF EXISTS "Authenticated update sensor_readings" ON sensor_readings;
+CREATE POLICY "Authenticated read sensor_readings" ON sensor_readings
+  FOR SELECT TO authenticated USING (true);
+CREATE POLICY "Authenticated write sensor_readings" ON sensor_readings
+  FOR INSERT TO authenticated WITH CHECK (true);
+CREATE POLICY "Authenticated update sensor_readings" ON sensor_readings
+  FOR UPDATE TO authenticated USING (true) WITH CHECK (true);
+
 DROP POLICY IF EXISTS "Allow all on alerts" ON alerts;
-CREATE POLICY "Allow all on alerts" ON alerts FOR ALL USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS "Authenticated read alerts" ON alerts;
+DROP POLICY IF EXISTS "Authenticated write alerts" ON alerts;
+DROP POLICY IF EXISTS "Authenticated update alerts" ON alerts;
+CREATE POLICY "Authenticated read alerts" ON alerts
+  FOR SELECT TO authenticated USING (true);
+CREATE POLICY "Authenticated write alerts" ON alerts
+  FOR INSERT TO authenticated WITH CHECK (true);
+CREATE POLICY "Authenticated update alerts" ON alerts
+  FOR UPDATE TO authenticated USING (true) WITH CHECK (true);
+
 DROP POLICY IF EXISTS "Allow all on daily_summaries" ON daily_summaries;
-CREATE POLICY "Allow all on daily_summaries" ON daily_summaries FOR ALL USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS "Authenticated read daily_summaries" ON daily_summaries;
+DROP POLICY IF EXISTS "Authenticated write daily_summaries" ON daily_summaries;
+DROP POLICY IF EXISTS "Authenticated update daily_summaries" ON daily_summaries;
+CREATE POLICY "Authenticated read daily_summaries" ON daily_summaries
+  FOR SELECT TO authenticated USING (true);
+CREATE POLICY "Authenticated write daily_summaries" ON daily_summaries
+  FOR INSERT TO authenticated WITH CHECK (true);
+CREATE POLICY "Authenticated update daily_summaries" ON daily_summaries
+  FOR UPDATE TO authenticated USING (true) WITH CHECK (true);
+
 DROP POLICY IF EXISTS "Allow all on settings" ON settings;
-CREATE POLICY "Allow all on settings" ON settings FOR ALL USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS "Authenticated read settings" ON settings;
+DROP POLICY IF EXISTS "Authenticated write settings" ON settings;
+DROP POLICY IF EXISTS "Authenticated update settings" ON settings;
+CREATE POLICY "Authenticated read settings" ON settings
+  FOR SELECT TO authenticated USING (true);
+CREATE POLICY "Authenticated write settings" ON settings
+  FOR INSERT TO authenticated WITH CHECK (true);
+CREATE POLICY "Authenticated update settings" ON settings
+  FOR UPDATE TO authenticated USING (true) WITH CHECK (true);
+
 DROP POLICY IF EXISTS "Allow all on nodes" ON nodes;
-CREATE POLICY "Allow all on nodes" ON nodes FOR ALL USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS "Authenticated read nodes" ON nodes;
+DROP POLICY IF EXISTS "Authenticated write nodes" ON nodes;
+DROP POLICY IF EXISTS "Authenticated update nodes" ON nodes;
+CREATE POLICY "Authenticated read nodes" ON nodes
+  FOR SELECT TO authenticated USING (true);
+CREATE POLICY "Authenticated write nodes" ON nodes
+  FOR INSERT TO authenticated WITH CHECK (true);
+CREATE POLICY "Authenticated update nodes" ON nodes
+  FOR UPDATE TO authenticated USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Allow all on node_last_sensor_tests" ON node_last_sensor_tests;
+DROP POLICY IF EXISTS "Authenticated read node_last_sensor_tests" ON node_last_sensor_tests;
+DROP POLICY IF EXISTS "Authenticated write node_last_sensor_tests" ON node_last_sensor_tests;
+DROP POLICY IF EXISTS "Authenticated update node_last_sensor_tests" ON node_last_sensor_tests;
+CREATE POLICY "Authenticated read node_last_sensor_tests" ON node_last_sensor_tests
+  FOR SELECT TO authenticated USING (true);
+CREATE POLICY "Authenticated write node_last_sensor_tests" ON node_last_sensor_tests
+  FOR INSERT TO authenticated WITH CHECK (true);
+CREATE POLICY "Authenticated update node_last_sensor_tests" ON node_last_sensor_tests
+  FOR UPDATE TO authenticated USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Allow all on profiles" ON profiles;
+DROP POLICY IF EXISTS "Users read own profile" ON profiles;
+DROP POLICY IF EXISTS "Users insert own profile" ON profiles;
+DROP POLICY IF EXISTS "Users update own profile" ON profiles;
+CREATE POLICY "Users read own profile" ON profiles
+  FOR SELECT TO authenticated USING (auth.uid() = id);
+CREATE POLICY "Users insert own profile" ON profiles
+  FOR INSERT TO authenticated WITH CHECK (auth.uid() = id);
+CREATE POLICY "Users update own profile" ON profiles
+  FOR UPDATE TO authenticated USING (auth.uid() = id) WITH CHECK (auth.uid() = id);
+
+DROP POLICY IF EXISTS "Allow all on users" ON users;
+DROP POLICY IF EXISTS "Users read own user" ON users;
+DROP POLICY IF EXISTS "Users update own user" ON users;
+CREATE POLICY "Users read own user" ON users
+  FOR SELECT TO authenticated USING (auth.uid() = id);
+CREATE POLICY "Users update own user" ON users
+  FOR UPDATE TO authenticated USING (auth.uid() = id) WITH CHECK (auth.uid() = id);
 
 -- Optional: updated_at trigger for nodes
 CREATE OR REPLACE FUNCTION set_updated_at()
@@ -177,6 +306,16 @@ $$ LANGUAGE plpgsql;
 DROP TRIGGER IF EXISTS nodes_updated_at ON nodes;
 CREATE TRIGGER nodes_updated_at
   BEFORE UPDATE ON nodes
+  FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+DROP TRIGGER IF EXISTS profiles_updated_at ON profiles;
+CREATE TRIGGER profiles_updated_at
+  BEFORE UPDATE ON profiles
+  FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+DROP TRIGGER IF EXISTS users_updated_at ON users;
+CREATE TRIGGER users_updated_at
+  BEFORE UPDATE ON users
   FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
 -- Optional: refresh daily summaries from sensor_readings (call from app or cron)

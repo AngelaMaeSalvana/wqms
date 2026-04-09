@@ -9,11 +9,39 @@ const cors = require('cors');
 const http = require('http');
 const WebSocket = require('ws');
 const mqtt = require('mqtt');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
 const db = require('./db');
 const { mqttToSensorRow } = require('./utils/mqttToSensorRow');
+const { requireAuth } = require('./middleware/auth');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
+const JWT_SECRET = process.env.JWT_SECRET || 'wqms-dev-secret';
+const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7d';
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+async function requireAdmin(req, res, next) {
+  try {
+    const user = await db.getUserById(req.authUser.id);
+    const role = (user?.role || 'guest').toLowerCase();
+    if (role !== 'admin') {
+      return res.status(403).json({ error: 'System Admin access required' });
+    }
+    req.authProfile = user;
+    return next();
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+}
+
+function issueToken(user) {
+  return jwt.sign(
+    { id: user.id, username: user.username, role: user.role || 'guest' },
+    JWT_SECRET,
+    { expiresIn: JWT_EXPIRES_IN }
+  );
+}
 
 // HTTP server wrapping Express (needed for WebSocket upgrade)
 const httpServer = http.createServer(app);
@@ -390,6 +418,150 @@ app.get('/api/health', (req, res) => {
   });
 });
 
+app.post('/api/auth/signup', async (req, res) => {
+  try {
+    const usernameRaw = req.body?.username;
+    const passwordRaw = req.body?.password;
+    const username = typeof usernameRaw === 'string' ? usernameRaw.trim() : '';
+    const password = typeof passwordRaw === 'string' ? passwordRaw : '';
+
+    if (!/^[a-zA-Z0-9_]{3,32}$/.test(username)) {
+      return res.status(400).json({ error: 'username must be 3-32 chars and use letters, numbers, underscore' });
+    }
+    if (password.length < 8) {
+      return res.status(400).json({ error: 'password must be at least 8 characters' });
+    }
+
+    const existing = await db.getUserByUsername(username);
+    if (existing) {
+      return res.status(409).json({ error: 'username already exists' });
+    }
+
+    const password_hash = await bcrypt.hash(password, 12);
+    const user = await db.createUser({
+      id: randomUUID(),
+      username,
+      email: null,
+      password_hash,
+      role: 'guest',
+    });
+    const token = issueToken(user);
+
+    res.status(201).json({
+      token,
+      user: { id: user.id, username: user.username, email: user.email || null, role: user.role || 'guest' },
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/auth/login', async (req, res) => {
+  try {
+    const usernameRaw = req.body?.username;
+    const passwordRaw = req.body?.password;
+    const username = typeof usernameRaw === 'string' ? usernameRaw.trim() : '';
+    const password = typeof passwordRaw === 'string' ? passwordRaw : '';
+
+    if (!username || !password) {
+      return res.status(400).json({ error: 'username and password are required' });
+    }
+
+    const user = await db.getUserByUsername(username);
+    if (!user) {
+      return res.status(401).json({ error: 'invalid credentials' });
+    }
+
+    const ok = await bcrypt.compare(password, user.password_hash);
+    if (!ok) {
+      return res.status(401).json({ error: 'invalid credentials' });
+    }
+
+    const token = issueToken(user);
+    res.json({
+      token,
+      user: { id: user.id, username: user.username, email: user.email || null, role: user.role || 'guest' },
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/auth/me', requireAuth, async (req, res) => {
+  try {
+    const user = await db.getUserById(req.authUser.id);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    res.json({
+      user: {
+        id: user.id,
+        username: user.username,
+        email: user.email || null,
+        role: user.role || 'guest',
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/auth/profile', requireAuth, async (req, res) => {
+  try {
+    const usernameRaw = req.body?.username;
+    const username = typeof usernameRaw === 'string' ? usernameRaw.trim() : '';
+    const emailRaw = req.body?.email;
+    const email = typeof emailRaw === 'string' ? emailRaw.trim().toLowerCase() : '';
+    const passwordRaw = req.body?.password;
+    const password = typeof passwordRaw === 'string' ? passwordRaw : '';
+
+    const current = await db.getUserById(req.authUser.id);
+    if (!current) return res.status(404).json({ error: 'User not found' });
+
+    let nextUsername = null;
+    if (username && username !== current.username) {
+      if (!/^[a-zA-Z0-9_]{3,32}$/.test(username)) {
+        return res.status(400).json({ error: 'username must be 3-32 chars and use letters, numbers, underscore' });
+      }
+      const existing = await db.getUserByUsername(username);
+      if (existing && existing.id !== current.id) {
+        return res.status(409).json({ error: 'username is already taken' });
+      }
+      nextUsername = username;
+    }
+
+    let password_hash = null;
+    if (password) {
+      if (password.length < 8) return res.status(400).json({ error: 'password must be at least 8 characters' });
+      password_hash = await bcrypt.hash(password, 12);
+    }
+
+    let nextEmail;
+    if (emailRaw === undefined) {
+      nextEmail = undefined;
+    } else if (!email) {
+      nextEmail = null;
+    } else {
+      if (!EMAIL_REGEX.test(email)) {
+        return res.status(400).json({ error: 'invalid email format' });
+      }
+      const existingByEmail = await db.getUserByEmail(email);
+      if (existingByEmail && existingByEmail.id !== current.id) {
+        return res.status(409).json({ error: 'email is already taken' });
+      }
+      nextEmail = email;
+    }
+
+    const updated = await db.updateUserAccount({
+      id: current.id,
+      username: nextUsername,
+      email: nextEmail,
+      password_hash,
+    });
+    res.json({ user: { id: updated.id, username: updated.username, email: updated.email || null, role: updated.role || 'guest' } });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get('/api/readings/latest', async (req, res) => {
   try {
     const nodeId = req.query.nodeId || null;
@@ -448,7 +620,7 @@ app.get('/api/alerts', async (req, res) => {
   }
 });
 
-app.patch('/api/alerts/:id', async (req, res) => {
+app.patch('/api/alerts/:id', requireAuth, requireAdmin, async (req, res) => {
   try {
     const id = req.params.id;
     const { email_sent_at } = req.body || {};
@@ -459,7 +631,7 @@ app.patch('/api/alerts/:id', async (req, res) => {
   }
 });
 
-app.post('/api/readings', async (req, res) => {
+app.post('/api/readings', requireAuth, requireAdmin, async (req, res) => {
   try {
     const reading = req.body;
     const row = {
@@ -481,7 +653,7 @@ app.post('/api/readings', async (req, res) => {
   }
 });
 
-app.post('/api/alerts', async (req, res) => {
+app.post('/api/alerts', requireAuth, requireAdmin, async (req, res) => {
   try {
     const alert = req.body;
     const row = {
@@ -503,7 +675,7 @@ app.post('/api/alerts', async (req, res) => {
  * Body: { scenario, nodeId, test_run_id? }
  * Publishes crafted telemetry to MQTT (bridge will store to Supabase).
  */
-app.post('/api/test-scenario/publish', async (req, res) => {
+app.post('/api/test-scenario/publish', requireAuth, requireAdmin, async (req, res) => {
   try {
     if (!mqttClient?.connected) {
       return res.status(503).json({ error: 'MQTT not connected' });
@@ -537,7 +709,7 @@ if (ENABLE_SAMPLE_DATA) {
   const sampleData = require('./sampleDataGenerator');
 
   /** POST /api/sample-data/generate — insert one or more sample readings (body: count?, nodeIds?, startDate?, endDate?, intervalMinutes?) */
-  app.post('/api/sample-data/generate', async (req, res) => {
+  app.post('/api/sample-data/generate', requireAuth, requireAdmin, async (req, res) => {
     try {
       const { count = 1, nodeIds, startDate, endDate, intervalMinutes } = req.body || {};
       const n = Math.min(Math.max(1, parseInt(count, 10) || 1), 500);
@@ -554,7 +726,7 @@ if (ENABLE_SAMPLE_DATA) {
   });
 
   /** POST /api/sample-data/start-interval — start auto-inserting sample data every N ms (body: intervalMs?) */
-  app.post('/api/sample-data/start-interval', (req, res) => {
+  app.post('/api/sample-data/start-interval', requireAuth, requireAdmin, (req, res) => {
     if (sampleDataIntervalId) {
       return res.json({ success: true, message: 'Sample data interval already running', intervalMs: req.body?.intervalMs });
     }
@@ -573,7 +745,7 @@ if (ENABLE_SAMPLE_DATA) {
   });
 
   /** POST /api/sample-data/stop-interval — stop auto-insert */
-  app.post('/api/sample-data/stop-interval', (req, res) => {
+  app.post('/api/sample-data/stop-interval', requireAuth, requireAdmin, (req, res) => {
     if (sampleDataIntervalId) {
       clearInterval(sampleDataIntervalId);
       sampleDataIntervalId = null;
@@ -603,7 +775,7 @@ if (ENABLE_SAMPLE_DATA) {
  * Body: { frequency_mode: 'user_selected' | 'auto_adapt', interval_minutes?: number }
  * Broadcasts MQTT so the forwarder can relay acq commands to sensor nodes.
  */
-app.post('/api/acquisition-config', (req, res) => {
+app.post('/api/acquisition-config', requireAuth, requireAdmin, (req, res) => {
   try {
     const { frequency_mode, interval_minutes } = req.body || {};
     const fm = frequency_mode === 'auto_adapt' ? 'auto_adapt' : 'user_selected';
@@ -644,7 +816,7 @@ app.get('/api/test-run/active', (req, res) => {
  * Body: { durationMs, intervalMs, nodeId? }
  * Creates a test run, publishes test_start MQTT command to nodes.
  */
-app.post('/api/test-run/start', async (req, res) => {
+app.post('/api/test-run/start', requireAuth, requireAdmin, async (req, res) => {
   try {
     if (activeTestRun && Date.now() < activeTestRun.endsAt) {
       return res.status(409).json({ error: 'A test run is already active', test_run_id: activeTestRun.id });
@@ -685,7 +857,7 @@ app.post('/api/test-run/start', async (req, res) => {
  * Body: { test_run_id }
  * Manually stops an active test run.
  */
-app.post('/api/test-run/stop', async (req, res) => {
+app.post('/api/test-run/stop', requireAuth, requireAdmin, async (req, res) => {
   try {
     const { test_run_id } = req.body;
     if (!activeTestRun) return res.status(404).json({ error: 'No active test run' });

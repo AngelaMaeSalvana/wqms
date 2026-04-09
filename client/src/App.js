@@ -7,7 +7,10 @@ import { isSupabaseEnabled } from "./services/supabaseService";
 import { PageLoader } from "./components/LoadingSkeleton";
 import ErrorBoundary from "./components/ErrorBoundary.js";
 import { TestRunProvider } from "./contexts/TestRunContext";
+import { AuthProvider } from "./contexts/AuthContext";
 import TestRunToast from "./components/TestRunToast";
+import RequireAuth from "./components/RequireAuth";
+import RequireAdmin from "./components/RequireAdmin";
 
 import Dashboard from "./pages/Dashboard";
 import Reports from "./pages/Reports";
@@ -18,6 +21,9 @@ import Nodes from "./pages/Nodes";
 import InactiveNodes from "./pages/InactiveNodes";
 import Settings from "./pages/Settings";
 import PerformanceTest from "./pages/PerformanceTest";
+import Login from "./pages/Login";
+import Signup from "./pages/Signup";
+import CompleteProfile from "./pages/CompleteProfile";
 
 import "./App.css";
 import { sendEventNotification } from "./services/emailService";
@@ -59,25 +65,51 @@ export default function App() {
   return (
     <ErrorBoundary>
       <BrowserRouter>
-        <TestRunProvider>
-          <>
-            <Routes>
-              <Route element={<Layout />}>
-                <Route path="/" element={<Navigate to="/dashboard" replace />} />
-                <Route path="/dashboard" element={<Dashboard />} />
-                <Route path="/reports" element={<Reports />} />
-                <Route path="/sensor-logs" element={<SensorLogs />} />
-                <Route path="/map" element={<Map />} />
-                <Route path="/nodes" element={<Nodes />} />
-                <Route path="/nodes/inactive" element={<InactiveNodes />} />
-                <Route path="/alerts" element={<Alerts />} />
-                <Route path="/settings" element={<Settings />} />
-                <Route path="/performance-test" element={<PerformanceTest />} />
-              </Route>
-            </Routes>
-            <TestRunToast />
-          </>
-        </TestRunProvider>
+        <AuthProvider>
+          <TestRunProvider>
+            <>
+              <Routes>
+                <Route path="/login" element={<Login />} />
+                <Route path="/signup" element={<Signup />} />
+                <Route path="/complete-profile" element={<CompleteProfile />} />
+
+                <Route
+                  element={(
+                    <RequireAuth>
+                      <Layout />
+                    </RequireAuth>
+                  )}
+                >
+                  <Route path="/" element={<Navigate to="/dashboard" replace />} />
+                  <Route path="/dashboard" element={<Dashboard />} />
+                  <Route path="/reports" element={<Reports />} />
+                  <Route path="/sensor-logs" element={<SensorLogs />} />
+                  <Route path="/map" element={<Map />} />
+                  <Route
+                    path="/nodes"
+                    element={(
+                      <RequireAdmin>
+                        <Nodes />
+                      </RequireAdmin>
+                    )}
+                  />
+                  <Route
+                    path="/nodes/inactive"
+                    element={(
+                      <RequireAdmin>
+                        <InactiveNodes />
+                      </RequireAdmin>
+                    )}
+                  />
+                  <Route path="/alerts" element={<Alerts />} />
+                  <Route path="/settings" element={<Settings />} />
+                  <Route path="/performance-test" element={<PerformanceTest />} />
+                </Route>
+              </Routes>
+              <TestRunToast />
+            </>
+          </TestRunProvider>
+        </AuthProvider>
       </BrowserRouter>
     </ErrorBoundary>
   );

@@ -1,24 +1,60 @@
 // API service: uses Supabase when REACT_APP_SUPABASE_* are set, else backend API
-import { isSupabaseEnabled } from '../lib/supabaseClient';
+import { isSupabaseEnabled, supabase } from '../lib/supabaseClient';
 import * as supabaseService from './supabaseService';
 
 
 const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
+const AUTH_TOKEN_KEY = 'wqms_auth_token';
+const FORCE_BACKEND_API = true;
 
 class ApiService {
+  shouldUseSupabase() {
+    return !FORCE_BACKEND_API && isSupabaseEnabled();
+  }
+
+  getStoredToken() {
+    try {
+      return localStorage.getItem(AUTH_TOKEN_KEY) || '';
+    } catch {
+      return '';
+    }
+  }
+
+  setStoredToken(token) {
+    try {
+      if (token) localStorage.setItem(AUTH_TOKEN_KEY, token);
+      else localStorage.removeItem(AUTH_TOKEN_KEY);
+    } catch {}
+  }
+
+  async getAuthHeaders() {
+    const customToken = this.getStoredToken();
+    if (customToken) return { Authorization: `Bearer ${customToken}` };
+    if (!supabase) return {};
+    const { data } = await supabase.auth.getSession();
+    const token = data?.session?.access_token;
+    if (!token) return {};
+    return { Authorization: `Bearer ${token}` };
+  }
+
   async request(endpoint, options = {}) {
     const url = `${API_BASE_URL}${endpoint}`;
+    const authHeaders = await this.getAuthHeaders();
     const config = {
       headers: {
         'Content-Type': 'application/json',
+        ...authHeaders,
         ...options.headers,
       },
       ...options,
     };
     try {
       const response = await fetch(url, config);
-      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-      return await response.json();
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data?.error || `HTTP error! status: ${response.status}`);
+      }
+      return data;
     } catch (error) {
       console.error(`❌ API Error (${endpoint}):`, error);
       throw error;
@@ -26,13 +62,13 @@ class ApiService {
   }
 
   async getLatestReading(nodeId = null) {
-    if (isSupabaseEnabled()) return supabaseService.getLatestReading(nodeId);
+    if (this.shouldUseSupabase()) return supabaseService.getLatestReading(nodeId);
     const params = nodeId ? `?nodeId=${nodeId}` : '';
     return this.request(`/readings/latest${params}`);
   }
 
   async getReadings({ startDate, endDate, nodeId, testRunId, monitoringOnly, limit = 100 }) {
-    if (isSupabaseEnabled()) return supabaseService.getReadings({ startDate, endDate, nodeId, testRunId, monitoringOnly, limit });
+    if (this.shouldUseSupabase()) return supabaseService.getReadings({ startDate, endDate, nodeId, testRunId, monitoringOnly, limit });
     const params = new URLSearchParams();
     if (startDate) params.append('startDate', startDate);
     if (endDate) params.append('endDate', endDate);
@@ -47,14 +83,14 @@ class ApiService {
 
   /** Sensor readings: monitoring only (no test_run_id). Used by Sensor Logs, Reports (Water/Alerts/System). */
   async getSensorReadings({ startDate, endDate, nodeId, limit = 500 }) {
-    if (isSupabaseEnabled()) return supabaseService.getSensorReadings({ startDate, endDate, nodeId, limit });
+    if (this.shouldUseSupabase()) return supabaseService.getSensorReadings({ startDate, endDate, nodeId, limit });
     // If caller requests "all", use high cap for backend mode.
     const effectiveLimit = (limit == null || limit === 0 || limit === Infinity) ? 100000 : limit;
     return this.getReadings({ startDate, endDate, nodeId, monitoringOnly: true, limit: effectiveLimit });
   }
 
   async getDailySummaries({ startDate, endDate, nodeId }) {
-    if (isSupabaseEnabled()) return supabaseService.getDailySummaries({ startDate, endDate, nodeId });
+    if (this.shouldUseSupabase()) return supabaseService.getDailySummaries({ startDate, endDate, nodeId });
     const params = new URLSearchParams();
     if (startDate) params.append('startDate', startDate);
     if (endDate) params.append('endDate', endDate);
@@ -63,13 +99,13 @@ class ApiService {
   }
 
   async getReadingByDate(date, nodeId = null) {
-    if (isSupabaseEnabled()) return supabaseService.getReadingByDate(date, nodeId);
+    if (this.shouldUseSupabase()) return supabaseService.getReadingByDate(date, nodeId);
     const params = nodeId ? `?nodeId=${nodeId}` : '';
     return this.request(`/readings/date/${date}${params}`);
   }
 
   async getAlerts({ limit = 50, severity, startDate, endDate, nodeId } = {}) {
-    if (isSupabaseEnabled()) return supabaseService.getAlerts({ limit, severity, startDate, endDate, nodeId });
+    if (this.shouldUseSupabase()) return supabaseService.getAlerts({ limit, severity, startDate, endDate, nodeId });
     const params = new URLSearchParams();
     if (limit) params.append('limit', limit);
     if (severity) params.append('severity', severity);
@@ -89,39 +125,39 @@ class ApiService {
   }
 
   async getTestRunsList({ limit = 50 } = {}) {
-    if (isSupabaseEnabled()) return supabaseService.getTestRunsList({ limit });
+    if (this.shouldUseSupabase()) return supabaseService.getTestRunsList({ limit });
     const params = new URLSearchParams();
     params.append('limit', limit);
     return this.request(`/test-runs?${params.toString()}`);
   }
 
   async postReading(reading) {
-    if (isSupabaseEnabled()) return supabaseService.postReading(reading);
+    if (this.shouldUseSupabase()) return supabaseService.postReading(reading);
     return this.request('/readings', { method: 'POST', body: JSON.stringify(reading) });
   }
 
   async postAlert(alert) {
-    if (isSupabaseEnabled()) return supabaseService.postAlert(alert);
+    if (this.shouldUseSupabase()) return supabaseService.postAlert(alert);
     return this.request('/alerts', { method: 'POST', body: JSON.stringify(alert) });
   }
 
   async upsertAlerts(alertsList) {
-    if (isSupabaseEnabled()) return supabaseService.upsertAlerts(alertsList);
+    if (this.shouldUseSupabase()) return supabaseService.upsertAlerts(alertsList);
     return [];
   }
 
   async healthCheck() {
-    if (isSupabaseEnabled()) return { status: 'ok', database: 'supabase' };
+    if (this.shouldUseSupabase()) return { status: 'ok', database: 'supabase' };
     return this.request('/health');
   }
 
   async getPerformanceReadings({ startDate, endDate, nodeId, testRunId, limit = 1000 }) {
-    if (isSupabaseEnabled()) return supabaseService.getPerformanceReadings({ startDate, endDate, nodeId, testRunId, limit });
+    if (this.shouldUseSupabase()) return supabaseService.getPerformanceReadings({ startDate, endDate, nodeId, testRunId, limit });
     return this.getReadings({ startDate, endDate, nodeId, testRunId, limit });
   }
 
   async getPerformanceAlerts({ startDate, endDate, nodeId, limit = 200 }) {
-    if (isSupabaseEnabled()) return supabaseService.getPerformanceAlerts({ startDate, endDate, nodeId, limit });
+    if (this.shouldUseSupabase()) return supabaseService.getPerformanceAlerts({ startDate, endDate, nodeId, limit });
     return this.getAlerts({ limit, startDate, endDate, nodeId });
   }
 
@@ -131,7 +167,7 @@ class ApiService {
    * @param {string|number} [emailSentAt] - ISO string or epoch ms; defaults to now
    */
   async recordAlertEmailSent(alertId, emailSentAt) {
-    if (isSupabaseEnabled()) {
+    if (this.shouldUseSupabase()) {
       return supabaseService.patchAlertEmailSent(alertId, emailSentAt);
     }
     const body = emailSentAt
@@ -185,6 +221,39 @@ class ApiService {
       method: 'POST',
       body: JSON.stringify({ frequency_mode, interval_minutes }),
     });
+  }
+
+  async getAuthMe() {
+    return this.request('/auth/me');
+  }
+
+  async upsertProfile({ username, email, password }) {
+    return this.request('/auth/profile', {
+      method: 'PUT',
+      body: JSON.stringify({ username, email, password }),
+    });
+  }
+
+  async signup({ username, password }) {
+    const result = await this.request('/auth/signup', {
+      method: 'POST',
+      body: JSON.stringify({ username, password }),
+    });
+    if (result?.token) this.setStoredToken(result.token);
+    return result;
+  }
+
+  async login({ username, password }) {
+    const result = await this.request('/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ username, password }),
+    });
+    if (result?.token) this.setStoredToken(result.token);
+    return result;
+  }
+
+  logout() {
+    this.setStoredToken('');
   }
 }
 

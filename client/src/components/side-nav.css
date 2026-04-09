@@ -84,6 +84,37 @@
     white-space: nowrap;
   }
 
+.brand__text-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.side-nav__role-badge {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  border: 1px solid transparent;
+}
+
+.side-nav__role-badge--admin {
+  color: #2ec4a6;
+  background: rgba(46, 196, 166, 0.16);
+  border-color: rgba(46, 196, 166, 0.35);
+}
+
+.side-nav__role-badge--guest {
+  color: #7aa2ff;
+  background: rgba(122, 162, 255, 0.14);
+  border-color: rgba(122, 162, 255, 0.35);
+}
+
   /* =========================
      COLLAPSE BUTTON
   ========================= */
@@ -227,9 +258,13 @@
      BOTTOM / HINT
   ========================= */
   .side-nav__bottom {
-    margin-top: auto;
     padding-top: 10px;
-    border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.side-nav__logout {
+  margin-top: auto;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
   }
 
   .side-nav__version {
@@ -362,6 +397,28 @@
     flex-shrink: 0;
   }
 
+.side-nav__mobile-role {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  border: 1px solid transparent;
+}
+
+.side-nav__mobile-role--admin {
+  color: #2ec4a6;
+  background: rgba(46, 196, 166, 0.16);
+  border-color: rgba(46, 196, 166, 0.35);
+}
+
+.side-nav__mobile-role--guest {
+  color: #7aa2ff;
+  background: rgba(122, 162, 255, 0.14);
+  border-color: rgba(122, 162, 255, 0.35);
+}
+
   .side-nav__breadcrumb {
     font-size: 0.8125rem;
     font-weight: 500;
@@ -427,8 +484,8 @@
     .side-nav__collapse-btn {
       display: none;
     }
-    .side-nav__bottom,
-    .side-nav__hint {
+  .side-nav__bottom,
+  .side-nav__hint {
       display: none;
     }
   }
@@ -477,8 +534,8 @@
       display: none;
     }
 
-    .side-nav__bottom,
-    .side-nav__hint {
+  .side-nav__bottom,
+  .side-nav__hint {
       display: none;
     }
 
