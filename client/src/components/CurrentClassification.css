@@ -1,0 +1,27 @@
+.page-classification {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.page-classification__label {
+  font-size: 0.65rem;
+}
+
+.page-classification__value {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-weight: 600;
+  font-size: 0.7rem;
+  border: 1px solid var(--border);
+  background: var(--panel-dark);
+  color: var(--text);
+  text-transform: none;
+  letter-spacing: normal;
+}

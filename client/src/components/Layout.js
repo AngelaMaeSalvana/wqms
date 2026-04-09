@@ -1,32 +1,32 @@
-import React from "react";
-import { Outlet } from "react-router-dom";
+import React, { useState } from "react";
+import { Outlet, useLocation } from "react-router-dom";
 import SideNavigation from "./SideNavigation";
-import ConnectionStatus from "./ConnectionStatus";
-import DatabaseStatus from "./DatabaseStatus";
-import { useMQTTContext } from "../contexts/MQTTContext";
-import { config } from "../config/env";
 import "./layout.css";
 
 const Layout = () => {
-  const { isConnected, isConnecting, error, reconnect } = useMQTTContext();
-  const brokerUrl = config.mqtt?.url || "HiveMQ Cloud";
+  const location = useLocation();
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   return (
     <div className="layout-container">
-      <SideNavigation />
+      <div
+        role="presentation"
+        className={`layout-backdrop ${mobileMenuOpen ? "open" : ""}`}
+        onClick={() => setMobileMenuOpen(false)}
+        aria-hidden="true"
+      />
 
-      <main className="layout-main">
-        <div className="layout-main__header">
-          <DatabaseStatus />
-          <ConnectionStatus
-            isConnected={isConnected}
-            isConnecting={isConnecting}
-            error={error}
-            onReconnect={reconnect}
-            brokerUrl={brokerUrl}
-          />
+      <SideNavigation
+        isMobileOpen={mobileMenuOpen}
+        onToggle={() => setMobileMenuOpen((v) => !v)}
+        onClose={() => setMobileMenuOpen(false)}
+      />
+
+      {/* This is where Dashboard/Reports/Maps/Alerts/Settings will render */}
+      <main className={`layout-main${location.pathname === "/map" ? " layout-main--map" : ""}${location.pathname === "/dashboard" ? " layout-main--dashboard" : ""}${location.pathname === "/performance-test" ? " layout-main--performance-test" : ""}`}>
+        <div key={location.pathname} className="page-enter">
+          <Outlet />
         </div>
-        <Outlet />
       </main>
     </div>
   );

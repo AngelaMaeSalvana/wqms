@@ -6,7 +6,15 @@
   "scripts": {
     "start": "node server.js",
     "dev": "nodemon server.js",
-    "mqtt-broker": "node mqtt-broker-test.js"
+    "bridge": "node bridge.js",
+    "test": "node scripts/test.js",
+    "test-publish": "node scripts/test.js",
+    "scenarios": "node scripts/run-random-scenarios.js",
+    "scenarios:rest-of-day": "node scripts/run-random-scenarios.js --until-end-of-day",
+    "test-with-scenarios": "node scripts/run-test-with-scenarios.js",
+    "mqtt-broker": "node mqtt-broker-test.js",
+    "river-normal-24h": "node scripts/river-normal-24h.js",
+    "river-normal-24h:dry": "node scripts/river-normal-24h.js --dry-run"
   },
   "keywords": [
     "mqtt",
@@ -22,8 +30,11 @@
   "dependencies": {
     "@supabase/supabase-js": "^2.93.3",
     "aedes": "^0.50.0",
+    "bcryptjs": "^3.0.2",
     "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
     "express": "^4.18.2",
+    "jsonwebtoken": "^9.0.2",
     "mqtt": "^5.3.1",
     "sqlite3": "^5.1.6",
     "ws": "^8.16.0"

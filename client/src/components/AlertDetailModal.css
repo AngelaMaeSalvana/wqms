@@ -1,7 +1,8 @@
 .alert-detail-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.6);
+  background: rgba(0, 0, 0, 0.75);
+  backdrop-filter: brightness(0.6);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -9,12 +10,13 @@
   padding: 16px;
 }
 
-.alert-detail-modal {
+.alert-detail-overlay .alert-detail-modal {
+  width: min(100%, 420px);
   max-width: 420px;
-  width: 100%;
   max-height: 90vh;
   overflow: auto;
-  padding: 24px;
+  padding: 20px;
+  flex-shrink: 0;
 }
 
 .alert-detail-modal__header {
@@ -49,6 +51,16 @@
 .alert-detail-modal__severity--info {
   background: rgba(68, 211, 126, 0.15);
   color: var(--success, #44d37e);
+}
+
+.alert-detail-modal__severity--maintenance {
+  background: rgba(52, 152, 219, 0.2);
+  color: #3498DB;
+}
+
+.alert-detail-modal__severity--urgent {
+  background: rgba(233, 30, 99, 0.2);
+  color: #E91E63;
 }
 
 .alert-detail-modal__title {
@@ -121,6 +133,12 @@
 
 .alert-detail-modal__value-inline strong {
   color: var(--text);
+}
+
+.alert-detail-modal__escalation-note {
+  color: var(--warning, #f0a500);
+  font-size: 0.85em;
+  font-style: italic;
 }
 
 .alert-detail-modal__footer {

@@ -4,7 +4,11 @@ import './EmptyState.css';
 const EmptyState = ({ icon, title, message, action }) => {
   return (
     <div className="empty-state" role="status">
-      {icon && <span className="empty-icon" aria-hidden="true">{icon}</span>}
+      {icon && (
+        <div className="empty-icon" aria-hidden="true">
+          {icon}
+        </div>
+      )}
       {title && <h3 className="empty-title">{title}</h3>}
       {message && <p className="empty-message">{message}</p>}
       {action && (

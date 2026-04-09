@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import LastUpdated from "./LastUpdated";
+import CurrentClassification from "./CurrentClassification";
 import "./PageDateWithStatus.css";
 
 const DATE_TIME_OPTIONS = {
@@ -15,9 +16,13 @@ const DATE_TIME_OPTIONS = {
 /**
  * Live-updating date/time (every second) with optional "Last updated" status below.
  * Use on all pages for consistent header date and status.
- * @param {{ lastUpdated?: Date | null, className?: string }} props
+ * @param {{ lastUpdated?: Date | null, className?: string, showClassification?: boolean }} props
  */
-export default function PageDateWithStatus({ lastUpdated = null, className = "" }) {
+export default function PageDateWithStatus({
+  lastUpdated = null,
+  className = "",
+  showClassification = true,
+}) {
   const [currentTime, setCurrentTime] = useState(() => new Date());
 
   useEffect(() => {
@@ -32,6 +37,7 @@ export default function PageDateWithStatus({ lastUpdated = null, className = "" 
         {currentTime.toLocaleString(undefined, DATE_TIME_OPTIONS)}
       </span>
       {lastUpdated != null && <LastUpdated timestamp={lastUpdated} />}
+      {showClassification && <CurrentClassification />}
     </div>
   );
 }

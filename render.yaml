@@ -1,0 +1,27 @@
+# WQMS MQTT Bridge — Background Worker on Render
+# Deploys server/ as a worker that runs `npm run bridge` (HiveMQ → Supabase)
+# See server/DEPLOY_RENDER.md for step-by-step setup.
+
+services:
+  - type: worker
+    name: wqms-mqtt-bridge
+    runtime: node
+    rootDir: server
+
+    buildCommand: npm install
+    startCommand: npm run bridge
+
+    # Add your values in Render Dashboard → Environment (or use sync: false to be prompted)
+    envVars:
+      - key: MQTT_URL
+        sync: false
+      - key: MQTT_USER
+        sync: false
+      - key: MQTT_PASS
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: SUPABASE_TABLE
+        value: sensor_readings

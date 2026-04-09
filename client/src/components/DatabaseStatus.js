@@ -1,12 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { isSupabaseEnabled, supabase } from '../lib/supabaseClient';
-import { config } from '../config/env';
 import './DatabaseStatus.css';
 
 /**
  * Shows whether Supabase is configured and reachable.
  * Runs a quick test query on mount so you can see "DB: Supabase ✓" when connected.
- * When not connected, shows which env var(s) are missing so you can fix Vercel.
  */
 const DatabaseStatus = () => {
   const [status, setStatus] = useState('idle'); // 'idle' | 'checking' | 'ok' | 'error'
@@ -37,30 +35,7 @@ const DatabaseStatus = () => {
       });
   }, []);
 
-  if (!isSupabaseEnabled()) {
-    const hasUrl = !!config.supabase.url;
-    const hasKey = !!config.supabase.anonKey;
-    const missing = [];
-    if (!hasUrl) missing.push('REACT_APP_SUPABASE_URL');
-    if (!hasKey) missing.push('REACT_APP_SUPABASE_PUBLISHABLE_DEFAULT_KEY');
-    const hint = missing.length
-      ? `Missing in build: ${missing.join(', ')}. In Vercel add these (Supabase → Connect → Create React App), then Redeploy with "Clear cache".`
-      : 'Vercel: add REACT_APP_SUPABASE_URL & REACT_APP_SUPABASE_PUBLISHABLE_DEFAULT_KEY for Production, then Redeploy with "Clear cache".';
-    return (
-      <div
-        className="database-status database-status--none"
-        role="status"
-        aria-label="Supabase not connected"
-        title={hint}
-      >
-        <span className="database-status__dot" />
-        <span className="database-status__label">DB: Not connected</span>
-        <span className="database-status__hint" title={hint}>
-          {missing.length ? `Missing: ${missing.join(', ')} — clear cache & redeploy` : 'Clear cache & redeploy'}
-        </span>
-      </div>
-    );
-  }
+  if (!isSupabaseEnabled()) return null;
 
   return (
     <div
@@ -68,16 +43,16 @@ const DatabaseStatus = () => {
       role="status"
       aria-label={
         status === 'ok'
-          ? 'Connected to Supabase'
+          ? 'Connected'
           : status === 'error'
-          ? `Supabase error: ${errorMsg}`
-          : 'Checking Supabase connection'
+          ? `Error: ${errorMsg}`
+          : 'Checking connection'
       }
       title={status === 'error' ? errorMsg : undefined}
     >
       <span className="database-status__dot" />
       <span className="database-status__label">
-        DB: Supabase
+        Database
         {status === 'checking' && ' …'}
         {status === 'ok' && ' ✓'}
         {status === 'error' && ' ✗'}

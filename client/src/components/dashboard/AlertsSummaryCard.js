@@ -1,5 +1,5 @@
-import React, { useState, useRef, useEffect } from "react";
-import LastUpdated from "../LastUpdated";
+import React, { useState, useMemo } from "react";
+import { Link } from "react-router-dom";
 import EmptyState from "../EmptyState";
 import AlertDetailModal from "../AlertDetailModal";
 import { AlertSkeleton } from "../LoadingSkeleton";
@@ -20,91 +20,113 @@ function getRelativeTime(date) {
   return d.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
 }
 
+/** Filter tier for pills: critical, warning, info. Node→critical, maintenance→info. */
+function getFilterTier(alert) {
+  const t = alert?.type;
+  if (t === "node") return "critical";
+  if (t === "maintenance") return "info";
+  const s = (alert?.severity || "info").toLowerCase();
+  if (s === "high") return "critical";
+  if (s === "medium") return "warning";
+  return "info";
+}
+
+/** Display class for styling: maintenance (blue), urgent (magenta), or severity-based for params. */
+function getDisplayClass(alert) {
+  const t = alert?.type;
+  if (t === "maintenance") return "maintenance";
+  if (t === "node") return "urgent";
+  const s = (alert?.severity || "info").toLowerCase();
+  if (s === "high") return "critical";
+  if (s === "medium") return "warning";
+  return "info";
+}
+
+const SEVERITY_PILLS = [
+  { value: "all", label: "All", color: null },
+  { value: "critical", label: "Critical", color: "critical" },
+  { value: "warning", label: "Warning", color: "warning" },
+  { value: "info", label: "Info", color: "info" },
+];
+
 export function AlertsSummaryCard({
   alerts = [],
-  recentAlerts,
   isLoadingAlerts,
-  lastUpdated,
-  onExportJson,
-  onExportCsv,
-  formatDateShort = (d) => (d ? new Date(d).toLocaleDateString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "—"),
 }) {
-  const list = recentAlerts != null ? recentAlerts : alerts.slice(0, 5);
-  const [exportOpen, setExportOpen] = useState(false);
+  const [severityFilter, setSeverityFilter] = useState("all");
   const [selectedAlert, setSelectedAlert] = useState(null);
   const [readIds, setReadIds] = useState(new Set());
-  const exportDropdownRef = useRef(null);
+  const [collapsed, setCollapsed] = useState(false);
 
-  useEffect(() => {
-    if (!exportOpen) return;
-    const handleClickOutside = (e) => {
-      if (exportDropdownRef.current && !exportDropdownRef.current.contains(e.target)) {
-        setExportOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [exportOpen]);
+  const severityCounts = useMemo(() => {
+    const counts = { critical: 0, warning: 0, info: 0 };
+    alerts.forEach((a) => {
+      const tier = getFilterTier(a);
+      counts[tier]++;
+    });
+    return counts;
+  }, [alerts]);
 
-  const hasExport = onExportJson || onExportCsv;
-  const unreadCount = list.filter((a) => !readIds.has(a.id || a.timestamp)).length;
+  const filteredAlerts = useMemo(() => {
+    if (severityFilter === "all") return alerts;
+    return alerts.filter((a) => getFilterTier(a) === severityFilter);
+  }, [alerts, severityFilter]);
 
-  const handleMarkAllRead = () => {
-    setReadIds(new Set(list.map((a) => a.id || a.timestamp)));
-  };
+  const list = filteredAlerts.slice(0, 5);
+  const hasAlerts = alerts.length > 0;
+  const hasVisibleAlerts = list.length > 0;
+  const hasMore = alerts.length > 5;
 
   return (
-    <div className="card card--fill alerts-summary-card alerts-notifications-panel">
+    <div className={`card alerts-summary-card alerts-notifications-panel${collapsed ? " alerts-summary-card--collapsed" : " card--fill"}${!hasAlerts ? " alerts-summary-card--empty" : ""}${hasMore ? " alerts-summary-card--scrollable" : ""}`}>
       <div className="alerts-notifications-header">
-        <h2 className="alerts-notifications-title">Notifications</h2>
-        {hasExport && (
-          <div className="alerts-notifications-header-actions">
-            <div className="alerts-notifications-export" ref={exportDropdownRef}>
-              <button
-                type="button"
-                className="ghost-btn export-dropdown__trigger"
-                onClick={() => setExportOpen((v) => !v)}
-                aria-haspopup="true"
-                aria-expanded={exportOpen}
-                aria-label="Export alerts"
-              >
-                Export <span className="export-dropdown__chevron">▼</span>
-              </button>
-              {exportOpen && (
-                <div className="export-dropdown__menu" role="menu">
-                  {onExportJson && (
-                    <button
-                      type="button"
-                      role="menuitem"
-                      className="export-dropdown__item"
-                      onClick={() => {
-                        onExportJson(alerts);
-                        setExportOpen(false);
-                      }}
-                    >
-                      Export as JSON
-                    </button>
+        <div className="alerts-summary-title-row">
+          <h2 className="alerts-notifications-title">Alerts Summary</h2>
+          <span className="alerts-summary-count" aria-label={`${alerts.length} alerts`}>
+            {alerts.length}
+          </span>
+        </div>
+        <button
+          type="button"
+          className="alerts-summary-collapse-btn"
+          onClick={() => setCollapsed((c) => !c)}
+          aria-label={collapsed ? "Expand alerts" : "Minimize alerts"}
+          aria-expanded={!collapsed}
+        >
+          <span className={`alerts-summary-collapse-icon${collapsed ? " alerts-summary-collapse-icon--collapsed" : ""}`}>
+            ‹
+          </span>
+        </button>
+      </div>
+      <div className={`card__body alerts-notifications-body${collapsed ? " alerts-notifications-body--hidden" : ""}`}>
+        {alerts.length > 0 && (
+          <div className="alerts-summary-pills" role="tablist" aria-label="Filter by severity">
+            {SEVERITY_PILLS.map((p) => {
+              const count = p.color ? severityCounts[p.value] : alerts.length;
+              const isActive = severityFilter === p.value;
+              return (
+                <button
+                  key={p.value}
+                  type="button"
+                  role="tab"
+                  aria-selected={isActive}
+                  className={`alerts-summary-pill alerts-summary-pill--${p.color ?? "all"}${isActive ? " alerts-summary-pill--active" : ""}`}
+                  onClick={() => setSeverityFilter(p.value)}
+                >
+                  {p.color && count > 0 && (
+                    <span className={`alerts-summary-pill-dot alerts-summary-pill-dot--${p.color}`} aria-hidden />
                   )}
-                  {onExportCsv && (
-                    <button
-                      type="button"
-                      role="menuitem"
-                      className="export-dropdown__item"
-                      onClick={() => {
-                        onExportCsv(alerts);
-                        setExportOpen(false);
-                      }}
-                    >
-                      Export as CSV
-                    </button>
+                  {p.label}
+                  {count > 0 && (
+                    <span className={`alerts-summary-pill-count${p.color ? ` alerts-summary-pill-count--${p.color}` : ""}`}>
+                      {count}
+                    </span>
                   )}
-                </div>
-              )}
-            </div>
+                </button>
+              );
+            })}
           </div>
         )}
-      </div>
-      <div className="card__body alerts-notifications-body">
         {isLoadingAlerts ? (
           <div className="alerts-list alerts-notifications-list">
             {[1, 2, 3].map((i) => (
@@ -113,43 +135,43 @@ export function AlertsSummaryCard({
           </div>
         ) : list.length === 0 ? (
           <EmptyState
-            icon="🔔"
+            icon={<svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>}
             title="No alerts"
-            message="No alerts for the selected node."
+            message={alerts.length === 0 ? "No alerts — all systems operating normally." : `No ${severityFilter} alerts.`}
           />
         ) : (
-          <>
-            <ul className="alerts-list alerts-notifications-list" aria-label="Recent alerts">
-              {list.map((a) => {
-                const alertId = a.id || a.timestamp;
-                const isUnread = !readIds.has(alertId);
-                return (
-                  <li key={alertId} className="alerts-list__item alerts-notifications-item">
-                    <button
-                      type="button"
-                      className={`alert alert--${(a.severity || "info").toLowerCase()} alert--clickable alerts-notification-item`}
-                      onClick={() => {
-                        setReadIds((prev) => new Set([...prev, alertId]));
-                        setSelectedAlert(a);
-                      }}
-                      aria-label={`View details: ${a.title || "Alert"}`}
-                    >
-                      {isUnread && <span className="alerts-notification-dot" aria-hidden />}
-                      <span className="alerts-notification-content">
-                        <span className="alert-title">{a.title || "Alert"}</span>
-                        <span className="alert-date">{getRelativeTime(a.timestamp || a.createdAt)}</span>
-                      </span>
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-            {unreadCount > 0 && (
-              <button type="button" className="alerts-mark-all-read" onClick={handleMarkAllRead}>
-                Mark all as read
-              </button>
-            )}
-          </>
+          <ul className="alerts-list alerts-notifications-list" aria-label="Recent alerts">
+            {list.map((a) => {
+              const alertId = a.id || a.timestamp;
+              const displayClass = getDisplayClass(a);
+              return (
+                <li key={alertId} className={`alerts-compact-item alert--${displayClass}`}>
+                  <span className="alerts-compact-left">
+                    <span className="alerts-compact-title">{a.title || "Alert"}</span>
+                    <span className="alerts-compact-time">{getRelativeTime(a.timestamp || a.createdAt)}</span>
+                  </span>
+                  <button
+                    type="button"
+                    className="alerts-compact-btn"
+                    onClick={() => {
+                      setReadIds((prev) => new Set([...prev, alertId]));
+                      setSelectedAlert(a);
+                    }}
+                    aria-label={`View details: ${a.title || "Alert"}`}
+                  >
+                    View
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+        {hasVisibleAlerts && hasMore && (
+          <div className="alerts-summary-footer">
+            <Link to="/alerts" className="alerts-summary-see-all">
+              See more
+            </Link>
+          </div>
         )}
       </div>
       {selectedAlert && (

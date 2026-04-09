@@ -2,7 +2,7 @@
 .dash {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
   min-height: 0;
   flex: 1;
   overflow: hidden;
@@ -12,7 +12,7 @@
   flex-shrink: 0;
   display: flex;
   justify-content: space-between;
-  align-items: flex-start;
+  align-items: center;
   gap: 16px;
   flex-wrap: wrap;
 }
@@ -20,12 +20,13 @@
 .dash__title {
   font-size: 1.5rem;
   font-weight: 700;
-  margin: 0 0 4px 0;
+  margin: 0 0 2px 0;
   color: var(--text);
+  letter-spacing: -0.02em;
 }
 
 .dash__subtitle {
-  font-size: 0.9rem;
+  font-size: 0.85rem;
   color: var(--text-muted);
   margin: 0;
 }
@@ -44,10 +45,48 @@
   flex-direction: row;
   align-items: center;
   gap: 10px;
+  flex-wrap: nowrap;
+  padding: 8px 14px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
+  min-width: 0;
+  overflow: hidden;
+}
+
+[data-theme="dark"] .dash__controls {
+  background: linear-gradient(135deg, var(--panel) 0%, var(--panel-dark) 100%);
+}
+
+.dash__controls-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  margin-right: 2px;
+}
+
+.dash__controls-divider {
+  width: 1px;
+  height: 20px;
+  background: var(--border);
+  flex-shrink: 0;
 }
 
 .dash__muted {
   color: var(--text-muted);
+}
+
+.dash__test-banner {
+  font-size: 0.7rem;
+  padding: 4px 8px;
+  margin-bottom: 6px;
+  background: var(--warn-bg, #fff8e6);
+  color: var(--warn-text, #b38600);
+  border-radius: 6px;
+  border: 1px dashed var(--warn-border, #e6c84a);
 }
 
 /* Grid fills remaining height; cells can scroll internally */
@@ -150,38 +189,106 @@
   }
   .dash__cell--today { grid-column: 1; grid-row: auto; }
   .dash__cell--wqi { grid-column: 1; grid-row: auto; }
+}
+
+/* Mobile: WQI first, then Overview; hide mini map and alerts */
+@media (max-width: 768px), (max-height: 600px) {
+  .dash {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+  }
+  .dash__grid {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+  }
+  .dash__grid > * {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+  }
+  .dash__cell--wqi-first {
+    order: -2;
+  }
+  .dash__cell--today {
+    order: -1;
+  }
+  .dash__cell--today .card__desc {
+    display: none;
+  }
   .dash__cell--live { grid-column: 1; grid-row: auto; }
-  .dash__cell--mini { grid-column: 1; grid-row: auto; }
-  .dash__cell--alerts { grid-column: 1; grid-row: auto; }
+  .dash__cell--mini,
+  .dash__cell--alerts {
+    display: none;
+  }
   .dash__top {
     flex-direction: row;
     align-items: flex-start;
+    width: 100%;
+    max-width: 100%;
   }
   .dash__date {
     align-self: flex-start;
   }
   .dash__controls {
     width: 100%;
+    max-width: 100%;
+    min-width: 0;
+  }
+  /* Live chart: ensure proper dimensions for Chart.js on mobile */
+  .dash__cell--live > .card {
+    width: 100%;
+    min-width: 0;
+  }
+  .dash__cell--live > .card .card__body {
+    width: 100%;
+    min-width: 0;
   }
 }
 
-/* Responsive — tablets portrait / large phones */
-@media (max-width: 768px), (max-height: 600px) {
+/* Responsive — tablets portrait / large phones: natural vertical scroll */
+@media (max-width: 1024px), (max-height: 768px) {
   .dash {
     overflow: visible;
+    flex: none;
+    height: auto;
     min-height: auto;
+    gap: 10px;
   }
   .dash__grid {
     overflow: visible;
+    flex: none;
+    height: auto;
     min-height: auto;
+    grid-template-columns: 1fr;
     grid-template-rows: auto;
+    gap: 10px;
   }
   .dash__grid > * {
     overflow: visible;
+    height: auto;
     min-height: auto;
   }
   .dash__grid > * > .card {
+    height: auto;
     min-height: auto;
+    overflow: visible;
+  }
+  /* Today's Overview: show all params, no internal scroll */
+  .dash__cell--today > .card .card__body {
+    overflow: visible;
+    height: auto;
+    min-height: auto;
+  }
+  /* Live Chart: fixed height so it doesn't collapse */
+  .dash__cell--live > .card {
+    min-height: 260px;
+  }
+  .dash__cell--live > .card .card__body {
+    overflow: hidden;
+    height: 220px;
+    min-height: 220px;
   }
   .dash__title {
     font-size: 1.25rem;
@@ -230,7 +337,7 @@
     flex: 1 1 100%;
   }
   .wqiScore {
-    font-size: 2rem;
+    font-size: 1.75rem;
   }
   .mini-map-wrapper,
   .mini-map-wrapper--leaflet {
@@ -243,6 +350,6 @@
     font-size: 0.95rem;
   }
   .wqiScore {
-    font-size: 1.75rem;
+    font-size: 1.5rem;
   }
 }

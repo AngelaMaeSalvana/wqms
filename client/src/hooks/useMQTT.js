@@ -1,29 +1,29 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import mqtt from 'mqtt';
-import { config } from '../config/env';
 
-// Local dev fallback when .env has no MQTT URL (browser needs ws/wss)
-const FALLBACK_URL = 'ws://localhost:9001';
-
-/** HTTPS pages cannot use ws:// (mixed content). Use wss:// or skip connect. */
-function getSafeMqttUrl(url) {
-  if (typeof window === 'undefined') return url;
-  if (window.location.protocol !== 'https:') return url;
-  // Page is HTTPS (e.g. Vercel): must use wss://
-  if (url.startsWith('wss://') || url.startsWith('wss:')) return url;
-  if (url.startsWith('ws://')) return 'wss://' + url.slice(5);
-  // Fallback is ws://localhost — cannot use on HTTPS; return as-is and let connection fail with clear error
-  return url;
+/**
+ * Convert HiveMQ mqtt:// URL to browser WebSocket wss:// (port 8884).
+ * Browser MQTT uses WebSockets; Node uses raw MQTT/TLS.
+ */
+function toBrowserMqttUrl(mqttUrl) {
+  if (!mqttUrl || typeof mqttUrl !== 'string') return null;
+  if (mqttUrl.startsWith('wss://') || mqttUrl.startsWith('ws://')) return mqttUrl;
+  if (mqttUrl.startsWith('mqtt://') && mqttUrl.includes('hivemq')) {
+    const host = mqttUrl.replace(/^mqtts?:\/\//, '').split('/')[0].replace(/:\d+$/, '');
+    return `wss://${host}:8884/mqtt`;
+  }
+  return mqttUrl;
 }
 
 /**
- * Custom hook for MQTT connection and subscription.
- * Config from .env: REACT_APP_MQTT_WS_URL, REACT_APP_MQTT_USER, REACT_APP_MQTT_PASS
+ * Custom hook for MQTT connection and subscription
  *
- * Sensor node → LoRa → Forwarder → HiveMQ → WQMS dashboard
+ * Uses HiveMQ Cloud. Set REACT_APP_MQTT_WS_URL or REACT_APP_MQTT_URL in .env.
+ * HiveMQ mqtt:// URLs are auto-converted to wss:// for browser.
  *
- * @param {string} brokerUrl - Override URL (optional)
- * @param {object} options - Override options (optional)
+ * @param {string} brokerUrl - MQTT broker URL (or from .env)
+ * @param {object} options - MQTT connection options
+ * @returns {object} - { client, isConnected, error, subscribe, unsubscribe, reconnect }
  */
 export const useMQTT = (brokerUrl = null, options = {}) => {
   const [isConnected, setIsConnected] = useState(false);
@@ -31,12 +31,14 @@ export const useMQTT = (brokerUrl = null, options = {}) => {
   const [error, setError] = useState(null);
   const clientRef = useRef(null);
 
-  let url = brokerUrl || config.mqtt.url || FALLBACK_URL;
-  url = getSafeMqttUrl(url);
-  const username = options.username ?? config.mqtt.user ?? '';
-  const password = options.password ?? config.mqtt.pass ?? '';
+  const rawUrl = brokerUrl || process.env.REACT_APP_MQTT_WS_URL || process.env.REACT_APP_MQTT_URL || '';
+  const url = toBrowserMqttUrl(rawUrl) || rawUrl;
 
   useEffect(() => {
+    if (!url) {
+      setIsConnecting(false);
+      return;
+    }
     const mqttOptions = {
       clientId: `wqms-dashboard-${Math.random().toString(16).substr(2, 8)}`,
       clean: true,
@@ -44,8 +46,8 @@ export const useMQTT = (brokerUrl = null, options = {}) => {
       connectTimeout: 30000,
       protocolVersion: 4,
       protocolId: 'MQTT',
-      username: (url.startsWith('wss://') || url.startsWith('wss:')) && username ? username : undefined,
-      password: (url.startsWith('wss://') || url.startsWith('wss:')) && password ? password : undefined,
+      username: process.env.REACT_APP_MQTT_USER || undefined,
+      password: process.env.REACT_APP_MQTT_PASS || undefined,
       ...options,
     };
 
@@ -108,7 +110,7 @@ export const useMQTT = (brokerUrl = null, options = {}) => {
         clientRef.current = null;
       }
     };
-  }, [url, username, password, JSON.stringify(options)]);
+  }, [url, JSON.stringify(options)]);
 
   const subscribe = useCallback((topics, callback) => {
     if (!clientRef.current || !clientRef.current.connected) {
@@ -133,11 +135,11 @@ export const useMQTT = (brokerUrl = null, options = {}) => {
       if (callback) {
         clientRef.current.on('message', (receivedTopic, message) => {
           if (receivedTopic === topic) {
+            const t_dash_rx = Date.now();
             try {
               const data = JSON.parse(message.toString());
-              callback(data, receivedTopic);
+              callback({ ...data, t_dash_rx }, receivedTopic);
             } catch (err) {
-              // If not JSON, pass as string
               callback(message.toString(), receivedTopic);
             }
           }
@@ -213,11 +215,13 @@ export const useWaterQualityMQTT = (client, onData, topics = ['water-quality/+',
 
     // Set up message handler
     const messageHandler = (topic, message) => {
+      // t_dash_rx: epoch ms when this message arrived in the browser.
+      // Used to compute Forwarder-to-Dashboard latency = t_dash_rx - t_fwd_rx.
+      const t_dash_rx = Date.now();
       try {
         const data = JSON.parse(message.toString());
-        onData(data, topic);
+        onData({ ...data, t_dash_rx }, topic);
       } catch (err) {
-        // If not JSON, pass as string
         onData(message.toString(), topic);
       }
     };

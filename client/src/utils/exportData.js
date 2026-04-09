@@ -56,20 +56,56 @@ export const exportToCSV = (data, filename = 'water-quality-data') => {
 };
 
 /**
- * Format readings data for export
+ * Export data to Excel format (CSV with .xls extension and Excel mime type for compatibility)
  */
-export const formatReadingsForExport = (readings) => {
-  return readings.map(reading => ({
-    date: reading.date || reading.timestamp,
-    wqi: reading.wqi,
-    temperature: reading.temperature,
-    turbidity: reading.turbidity,
-    pH: reading.pH || reading.ph,
-    dissolvedOxygen: reading.dissolvedOxygen || reading.dissolved_oxygen,
-    nh3: reading.nh3 || reading.NH3,
-    nodeId: reading.nodeId || reading.node_id,
-    location: reading.location,
-  }));
+export const exportToExcel = (data, filename = 'water-quality-data') => {
+  if (!Array.isArray(data) || data.length === 0) {
+    console.error('Data must be a non-empty array');
+    return;
+  }
+  const headers = Object.keys(data[0]);
+  const escape = (v) => {
+    const s = String(v ?? '');
+    if (s.includes(',') || s.includes('"') || s.includes('\n')) return `"${s.replace(/"/g, '""')}"`;
+    return s;
+  };
+  const csvRows = [
+    headers.join(','),
+    ...data.map(row => headers.map(h => escape(row[h])).join(',')),
+  ];
+  const csvString = '\uFEFF' + csvRows.join('\r\n');
+  const blob = new Blob([csvString], { type: 'application/vnd.ms-excel;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${filename}-${new Date().toISOString().split('T')[0]}.xls`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+};
+
+/**
+ * Format readings data for export.
+ * @param {object[]} readings - Raw readings (sensor_readings or similar).
+ * @param {object} [nodesById] - Optional map of node id -> { location, ... } to resolve location from nodes table.
+ */
+export const formatReadingsForExport = (readings, nodesById = null) => {
+  return readings.map(reading => {
+    const nodeId = reading.nodeId || reading.node_id;
+    const location = nodesById?.[nodeId]?.location ?? reading.location ?? '';
+    return {
+      date: reading.date || reading.timestamp,
+      wqi: reading.wqi,
+      temperature: reading.temperature,
+      turbidity: reading.turbidity,
+      pH: reading.pH || reading.ph,
+      dissolvedOxygen: reading.dissolvedOxygen || reading.dissolved_oxygen,
+      nh3: reading.nh3 || reading.NH3,
+      nodeId,
+      location,
+    };
+  });
 };
 
 /**

@@ -1,13 +1,29 @@
 import React, { useState, useEffect } from "react";
 import { useTheme } from "../contexts/ThemeContext";
-import { getCrystalReport, saveCrystalReport, clearCrystalReport } from "../utils/crystalReportStorage";
+import { useAuth } from "../contexts/AuthContext";
+import InfoTooltip from "../components/InfoTooltip";
+import { DEFAULT_WQI_WEIGHTS, getWQIWeights } from "../utils/wqiCalculator";
+import {
+  loadFromStorage,
+  saveToStorage,
+  syncSettingsFromSupabase,
+  saveSettingsToSupabaseAndLocal,
+  DEFAULT_MAINTENANCE,
+  SETTINGS_KEYS,
+} from "../utils/settingsStorage";
+import { sendEventNotification } from "../services/emailService";
+import api from "../services/api";
+import { DEFAULT_ALERT_LOGIC, getAlertLogic, saveAlertLogic } from "../utils/alertsData";
+import {
+  DEFAULT_DATA_COLLECTION,
+  FREQUENCY_MODES,
+  getAcquisitionPublishPayload,
+  getEffectiveAcquisitionIntervalMinutes,
+  isAcquisitionPublishFingerprintUnchanged,
+  mergeDataCollection,
+  rememberAcquisitionPublishFingerprint,
+} from "../utils/dataAcquisition";
 import "./Settings.css";
-
-const FONT_OPTIONS = [
-  { value: "small", label: "Small" },
-  { value: "medium", label: "Medium" },
-  { value: "large", label: "Large" },
-];
 
 const DEFAULT_THRESHOLDS = {
   temperatureMin: 18,
@@ -19,57 +35,246 @@ const DEFAULT_THRESHOLDS = {
   nh3Max: 0.5,
 };
 
+/** TSS (mg/L) to NTU: 1 NTU ≈ 1.5 mg/L TSS → NTU = TSS / 1.5 */
+const tssToNtu = (tss) => Math.round((tss / 1.5) * 10) / 10;
+
+/** DENR DAO 2016-08/2021-19 water quality classifications and preset thresholds */
+const THRESHOLD_CLASSIFICATIONS = {
+  AA: {
+    temperatureMin: 26,
+    temperatureMax: 30,
+    pHMin: 6.5,
+    pHMax: 8.5,
+    turbidityMax: tssToNtu(25),
+    dissolvedOxygenMin: 5,
+    nh3Max: 0.05,
+  },
+  A: {
+    temperatureMin: 26,
+    temperatureMax: 30,
+    pHMin: 6.5,
+    pHMax: 8.5,
+    turbidityMax: tssToNtu(50),
+    dissolvedOxygenMin: 5,
+    nh3Max: 0.05,
+  },
+  B: {
+    temperatureMin: 26,
+    temperatureMax: 30,
+    pHMin: 6.5,
+    pHMax: 8.5,
+    turbidityMax: tssToNtu(65),
+    dissolvedOxygenMin: 5,
+    nh3Max: 0.05,
+  },
+  C: {
+    temperatureMin: 25,
+    temperatureMax: 31,
+    pHMin: 6.5,
+    pHMax: 9,
+    turbidityMax: tssToNtu(80),
+    dissolvedOxygenMin: 5,
+    nh3Max: 0.05,
+  },
+  D: {
+    temperatureMin: 25,
+    temperatureMax: 32,
+    pHMin: 6,
+    pHMax: 9,
+    turbidityMax: tssToNtu(110),
+    dissolvedOxygenMin: 2,
+    nh3Max: 0.75,
+  },
+  SA: {
+    temperatureMin: 26,
+    temperatureMax: 30,
+    pHMin: 7,
+    pHMax: 8.5,
+    turbidityMax: tssToNtu(25),
+    dissolvedOxygenMin: 6,
+    nh3Max: 0.04,
+  },
+  SB: {
+    temperatureMin: 26,
+    temperatureMax: 30,
+    pHMin: 7,
+    pHMax: 8.5,
+    turbidityMax: tssToNtu(50),
+    dissolvedOxygenMin: 6,
+    nh3Max: 0.05,
+  },
+  SC: {
+    temperatureMin: 25,
+    temperatureMax: 31,
+    pHMin: 6.5,
+    pHMax: 8.5,
+    turbidityMax: tssToNtu(80),
+    dissolvedOxygenMin: 5,
+    nh3Max: 0.05,
+  },
+  SD: {
+    temperatureMin: 25,
+    temperatureMax: 32,
+    pHMin: 6,
+    pHMax: 9,
+    turbidityMax: tssToNtu(110),
+    dissolvedOxygenMin: 2,
+    nh3Max: 0.75,
+  },
+};
+
+const CLASSIFICATION_OPTIONS = [...Object.keys(THRESHOLD_CLASSIFICATIONS), "Custom"];
+const CLASSIFICATION_STORAGE_KEY = "wqms_threshold_classification";
+
 const DEFAULT_CALIBRATION = {
   temperatureOffset: 0,
   pHOffset: 0,
-  turbidityOffset: 0,
-  dissolvedOxygenOffset: 0,
-  nh3Offset: 0,
-  flowRateOffset: 0,
 };
 
-function loadFromStorage(key, fallback) {
-  try {
-    const s = localStorage.getItem(key);
-    return s ? JSON.parse(s) : fallback;
-  } catch {
-    return fallback;
-  }
+function sanitizeCalibration(raw) {
+  const t = parseFloat(raw?.temperatureOffset);
+  const p = parseFloat(raw?.pHOffset);
+  return {
+    temperatureOffset: Number.isFinite(t) ? t : 0,
+    pHOffset: Number.isFinite(p) ? p : 0,
+  };
 }
 
-function saveToStorage(key, value) {
-  try {
-    localStorage.setItem(key, JSON.stringify(value));
-  } catch (e) {
-    console.warn("Could not save to localStorage", e);
-  }
-}
+const DEFAULT_NOTIFICATIONS = {
+  emailEnabled: false,
+  notificationEmail: "",
+};
+
+const WQI_WEIGHTS_KEY = "wqms_wqi_weights";
+const NOTIFICATIONS_KEY = "wqms_notifications";
 
 export default function Settings() {
   const { theme, setTheme } = useTheme();
-  const [fontSize, setFontSize] = useState(() => localStorage.getItem("fontPreference") || "medium");
-  const [thresholds, setThresholds] = useState(() => ({
-    ...DEFAULT_THRESHOLDS,
-    ...loadFromStorage("wqms_thresholds", {}),
+  const { user, profile, refreshProfile, isAdmin } = useAuth();
+  const [thresholdClassification, setThresholdClassification] = useState(() => {
+    const stored = loadFromStorage(CLASSIFICATION_STORAGE_KEY, "Custom");
+    return CLASSIFICATION_OPTIONS.includes(stored) ? stored : "Custom";
+  });
+  const [thresholds, setThresholds] = useState(() => {
+    const stored = loadFromStorage("wqms_thresholds", {});
+    const cls = loadFromStorage(CLASSIFICATION_STORAGE_KEY, "Custom");
+    const validCls = CLASSIFICATION_OPTIONS.includes(cls) ? cls : "Custom";
+    const preset = validCls !== "Custom" ? THRESHOLD_CLASSIFICATIONS[validCls] : null;
+    return {
+      ...DEFAULT_THRESHOLDS,
+      ...(preset || stored),
+    };
+  });
+  const [calibration, setCalibration] = useState(() =>
+    sanitizeCalibration({ ...DEFAULT_CALIBRATION, ...loadFromStorage("wqms_calibration", {}) })
+  );
+  const [dataCollection, setDataCollection] = useState(() =>
+    mergeDataCollection(loadFromStorage("wqms_data_collection", {}))
+  );
+  const [wqiWeights, setWqiWeights] = useState(() => ({
+    ...DEFAULT_WQI_WEIGHTS,
+    ...loadFromStorage(WQI_WEIGHTS_KEY, {}),
   }));
-  const [calibration, setCalibration] = useState(() => ({
-    ...DEFAULT_CALIBRATION,
-    ...loadFromStorage("wqms_calibration", {}),
+  const [notifications, setNotifications] = useState(() => ({
+    ...DEFAULT_NOTIFICATIONS,
+    ...loadFromStorage(NOTIFICATIONS_KEY, {}),
+  }));
+  const [alertLogic, setAlertLogic] = useState(() => getAlertLogic());
+  const [maintenance, setMaintenance] = useState(() => ({
+    ...DEFAULT_MAINTENANCE,
+    ...loadFromStorage(SETTINGS_KEYS.maintenance, {}),
   }));
   const [saveFeedback, setSaveFeedback] = useState(null);
-  const [crystalReport, setCrystalReport] = useState(() => getCrystalReport());
+  const [activeTab, setActiveTab] = useState("system"); // "system" | "preferences"
+  const [settingsLoaded, setSettingsLoaded] = useState(false);
+  const [accountUsername, setAccountUsername] = useState("");
+  const [accountEmail, setAccountEmail] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const [passwordDraft, setPasswordDraft] = useState("");
+  const [confirmPasswordDraft, setConfirmPasswordDraft] = useState("");
+  const [accountFeedback, setAccountFeedback] = useState(null);
+
+  // Load settings from Supabase on mount (when enabled)
+  useEffect(() => {
+    syncSettingsFromSupabase()
+      .then(() => {
+        const cls = loadFromStorage(CLASSIFICATION_STORAGE_KEY, "Custom");
+        const validCls = CLASSIFICATION_OPTIONS.includes(cls) ? cls : "Custom";
+        const stored = loadFromStorage("wqms_thresholds", {});
+        const preset = validCls !== "Custom" ? THRESHOLD_CLASSIFICATIONS[validCls] : null;
+        setThresholdClassification(validCls);
+        setThresholds((t) => ({ ...t, ...(preset || stored) }));
+        setCalibration(sanitizeCalibration({ ...DEFAULT_CALIBRATION, ...loadFromStorage("wqms_calibration", {}) }));
+        const dc = mergeDataCollection(loadFromStorage(SETTINGS_KEYS.dataCollection, {}));
+        setDataCollection(dc);
+        setWqiWeights((w) => ({ ...w, ...loadFromStorage(WQI_WEIGHTS_KEY, {}) }));
+        setNotifications((n) => ({ ...n, ...loadFromStorage(NOTIFICATIONS_KEY, {}) }));
+        setMaintenance((m) => ({ ...m, ...loadFromStorage(SETTINGS_KEYS.maintenance, {}) }));
+
+        const acqPayload = getAcquisitionPublishPayload(dc);
+        if (
+          acqPayload &&
+          !isAcquisitionPublishFingerprintUnchanged(acqPayload)
+        ) {
+          api
+            .publishAcquisitionConfig(acqPayload)
+            .then(() => {
+              rememberAcquisitionPublishFingerprint(acqPayload);
+            })
+            .catch((e) => {
+              console.warn(
+                "Saved acquisition settings could not be pushed to field nodes (is the API server running?)",
+                e
+              );
+            });
+        }
+      })
+      .finally(() => setSettingsLoaded(true));
+  }, []);
 
   useEffect(() => {
-    document.documentElement.setAttribute("data-font-size", fontSize);
-    localStorage.setItem("fontPreference", fontSize);
-  }, [fontSize]);
+    setAccountUsername(profile?.username || "");
+    setAccountEmail(profile?.email || "");
+  }, [profile?.username, profile?.email]);
+
+  useEffect(() => {
+    if (!isAdmin) {
+      setActiveTab("preferences");
+    }
+  }, [isAdmin]);
+
+  const isCustomClassification = thresholdClassification === "Custom";
+
+  const isAutoAdaptMode =
+    (dataCollection.frequencyMode ?? FREQUENCY_MODES.USER_SELECTED) === FREQUENCY_MODES.AUTO_ADAPT;
+  const effectiveAutoAcquisitionMinutes = isAutoAdaptMode
+    ? getEffectiveAcquisitionIntervalMinutes(dataCollection)
+    : null;
+  const flowMappingInvalid =
+    isAutoAdaptMode &&
+    Number(dataCollection.flowRateAtFastCondition) <= Number(dataCollection.flowRateAtSlowCondition);
 
   const updateThreshold = (key, value) => {
+    if (!isCustomClassification) return;
     const n = parseFloat(value);
     if (!isNaN(n)) {
       const next = { ...thresholds, [key]: n };
       setThresholds(next);
       saveToStorage("wqms_thresholds", next);
+    }
+  };
+
+  const handleClassificationChange = (value) => {
+    setThresholdClassification(value);
+    saveToStorage(CLASSIFICATION_STORAGE_KEY, value);
+    if (value !== "Custom") {
+      const preset = THRESHOLD_CLASSIFICATIONS[value];
+      if (preset) {
+        setThresholds(preset);
+        saveToStorage("wqms_thresholds", preset);
+      }
     }
   };
 
@@ -82,37 +287,196 @@ export default function Settings() {
     }
   };
 
-  const handleSaveAll = () => {
-    saveToStorage("wqms_thresholds", thresholds);
-    saveToStorage("wqms_calibration", calibration);
-    document.documentElement.setAttribute("data-font-size", fontSize);
-    localStorage.setItem("fontPreference", fontSize);
-    setSaveFeedback("Saved");
-    setTimeout(() => setSaveFeedback(null), 2000);
-  };
-
-  const handleCrystalReportImport = (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const name = file.name || "report.rpt";
-    if (!/\.rptx?$/i.test(name)) {
-      setSaveFeedback("Please select a .rpt or .rptx file");
-      setTimeout(() => setSaveFeedback(null), 3000);
-      e.target.value = "";
+  const updateDataCollection = (key, value) => {
+    if (key === "defaultIntervalMinutes") {
+      const s = String(value).trim();
+      if (s === "") {
+        const next = { ...dataCollection };
+        delete next.defaultIntervalMinutes;
+        setDataCollection(next);
+        saveToStorage("wqms_data_collection", next);
+        return;
+      }
+      const n = parseInt(s, 10);
+      if (!isNaN(n) && n >= 1 && n <= 120) {
+        const next = { ...dataCollection, defaultIntervalMinutes: n };
+        setDataCollection(next);
+        saveToStorage("wqms_data_collection", next);
+      }
       return;
     }
-    saveCrystalReport({ fileName: name });
-    setCrystalReport(getCrystalReport());
-    setSaveFeedback("Report format imported");
-    setTimeout(() => setSaveFeedback(null), 2000);
-    e.target.value = "";
+    const n = parseInt(value, 10);
+    if (!isNaN(n) && n >= 0) {
+      const next = { ...dataCollection, [key]: n };
+      setDataCollection(next);
+      saveToStorage("wqms_data_collection", next);
+    }
   };
 
-  const handleClearCrystalReport = () => {
-    clearCrystalReport();
-    setCrystalReport(null);
-    setSaveFeedback("Report format cleared");
+  const updateDataCollectionEnum = (key, value) => {
+    const next = { ...dataCollection, [key]: value };
+    setDataCollection(next);
+    saveToStorage("wqms_data_collection", next);
+  };
+
+  const updateDataCollectionFloat = (key, value) => {
+    const n = parseFloat(value);
+    if (!Number.isNaN(n) && n >= 0) {
+      const next = { ...dataCollection, [key]: n };
+      setDataCollection(next);
+      saveToStorage("wqms_data_collection", next);
+    }
+  };
+
+  const updateWqiWeight = (key, value) => {
+    const n = parseFloat(value);
+    if (!isNaN(n) && n >= 0) {
+      const next = { ...wqiWeights, [key]: n };
+      setWqiWeights(next);
+      saveToStorage(WQI_WEIGHTS_KEY, next);
+    }
+  };
+
+  const updateNotifications = (key, value) => {
+    const next = { ...notifications, [key]: value };
+    setNotifications(next);
+    saveToStorage(NOTIFICATIONS_KEY, next);
+  };
+
+  const updateAlertLogic = (key, value) => {
+    const n = parseFloat(value);
+    if (!isNaN(n) && n >= 0) {
+      const next = { ...alertLogic, [key]: n };
+      setAlertLogic(next);
+      saveAlertLogic(next);
+    }
+  };
+
+  const updateMaintenance = (key, value) => {
+    const n = parseInt(value, 10);
+    if (!isNaN(n) && n >= 1) {
+      const next = { ...maintenance, [key]: n };
+      setMaintenance(next);
+      saveToStorage(SETTINGS_KEYS.maintenance, next);
+    }
+  };
+
+  const handleSaveAll = async () => {
+    const prevThresholds = loadFromStorage("wqms_last_synced_thresholds", {});
+    const thresholdKeys = ["temperatureMin", "temperatureMax", "pHMin", "pHMax", "turbidityMax", "dissolvedOxygenMin", "nh3Max"];
+    const thresholdsChanged = thresholdKeys.some((k) => prevThresholds[k] !== undefined && prevThresholds[k] !== thresholds[k]);
+
+    const settingsByKey = {
+      wqms_thresholds: thresholds,
+      wqms_threshold_classification: thresholdClassification,
+      wqms_calibration: sanitizeCalibration(calibration),
+      wqms_data_collection: dataCollection,
+      [WQI_WEIGHTS_KEY]: wqiWeights,
+      [NOTIFICATIONS_KEY]: notifications,
+      [SETTINGS_KEYS.maintenance]: maintenance,
+    };
+    try {
+      if (!user) {
+        setSaveFeedback("Please sign in to save settings");
+        setTimeout(() => setSaveFeedback(null), 2000);
+        return;
+      }
+
+      const email = accountEmail.trim().toLowerCase();
+      if (!email) {
+        setSaveFeedback("Email is required for password recovery");
+        setTimeout(() => setSaveFeedback(null), 3000);
+        return;
+      }
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        setSaveFeedback("Enter a valid email address");
+        setTimeout(() => setSaveFeedback(null), 3000);
+        return;
+      }
+
+      const username = accountUsername.trim();
+      if (username.length < 3 || username.length > 32) {
+        setSaveFeedback("Username must be 3-32 characters");
+        setTimeout(() => setSaveFeedback(null), 3000);
+        return;
+      }
+      if (newPassword) {
+        if (newPassword.length < 8) {
+          setSaveFeedback("Password must be at least 8 characters");
+          setTimeout(() => setSaveFeedback(null), 3000);
+          return;
+        }
+        if (newPassword !== confirmPassword) {
+          setSaveFeedback("Passwords do not match");
+          setTimeout(() => setSaveFeedback(null), 3000);
+          return;
+        }
+      }
+      await api.upsertProfile({
+        username,
+        email,
+        password: newPassword || undefined,
+      });
+      await refreshProfile();
+      setNewPassword("");
+      setConfirmPassword("");
+
+      if (!isAdmin) {
+        const guestSettings = { [NOTIFICATIONS_KEY]: notifications };
+        await saveSettingsToSupabaseAndLocal(guestSettings).catch(() => {});
+        setSaveFeedback("Saved");
+        setTimeout(() => setSaveFeedback(null), 2000);
+        return;
+      }
+
+      await saveSettingsToSupabaseAndLocal(settingsByKey);
+      if (thresholdsChanged) {
+        sendEventNotification("threshold_update", { previous: prevThresholds, current: thresholds });
+      }
+      saveToStorage("wqms_last_synced_thresholds", thresholds);
+      try {
+        const acqPayload = getAcquisitionPublishPayload(dataCollection);
+        if (acqPayload) {
+          await api.publishAcquisitionConfig(acqPayload);
+          rememberAcquisitionPublishFingerprint(acqPayload);
+        }
+      } catch (e) {
+        console.warn("Acquisition settings could not be sent to field nodes (is the API server running?)", e);
+      }
+      setSaveFeedback("Saved");
+    } catch (e) {
+      setSaveFeedback("Error saving");
+      console.warn(e);
+    }
     setTimeout(() => setSaveFeedback(null), 2000);
+  };
+
+  const openPasswordModal = () => {
+    setPasswordDraft(newPassword);
+    setConfirmPasswordDraft(confirmPassword);
+    setShowPasswordModal(true);
+  };
+
+  const closePasswordModal = () => {
+    setShowPasswordModal(false);
+    setPasswordDraft("");
+    setConfirmPasswordDraft("");
+  };
+
+  const confirmPasswordChange = () => {
+    if (passwordDraft && passwordDraft.length < 8) {
+      setAccountFeedback("Password must be at least 8 characters");
+      setTimeout(() => setAccountFeedback(null), 3000);
+      return;
+    }
+    if (passwordDraft !== confirmPasswordDraft) {
+      setAccountFeedback("Passwords do not match");
+      setTimeout(() => setAccountFeedback(null), 3000);
+      return;
+    }
+    setNewPassword(passwordDraft);
+    setConfirmPassword(confirmPasswordDraft);
+    closePasswordModal();
   };
 
   return (
@@ -120,16 +484,53 @@ export default function Settings() {
       <header className="page-header">
         <div>
           <h1 className="page-title">Settings</h1>
-          <p className="page-subtitle">Calibration, thresholds, theme &amp; font</p>
+          <p className="page-subtitle">Sensor calibration, alert thresholds &amp; preferences</p>
         </div>
       </header>
 
+      <div className="settings-tabs" role="tablist" aria-label="Settings categories">
+        {isAdmin && (
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === "system"}
+            aria-controls="settings-panel-system"
+            id="tab-system"
+            className={`settings-tab ${activeTab === "system" ? "settings-tab--active" : ""}`}
+            onClick={() => setActiveTab("system")}
+          >
+            Calibration, Threshold &amp; Data
+          </button>
+        )}
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === "preferences"}
+          aria-controls="settings-panel-preferences"
+          id="tab-preferences"
+          className={`settings-tab ${activeTab === "preferences" ? "settings-tab--active" : ""}`}
+          onClick={() => setActiveTab("preferences")}
+        >
+          User Preferences
+        </button>
+      </div>
+
       <div className="settings-content">
-        {/* Calibration */}
-        <section className="settings-section card">
+        {/* Tab panel: Calibration, Threshold, Data Collection */}
+        <div
+          id="settings-panel-system"
+          role="tabpanel"
+          aria-labelledby="tab-system"
+          hidden={!isAdmin || activeTab !== "system"}
+          className="settings-tab-panel"
+        >
+          {/* Calibration */}
+          <section className="settings-section card">
           <div className="card__header">
-            <h2 className="card__title">Calibration</h2>
-            <p className="card__desc">Sensor calibration offsets (applied to readings)</p>
+            <h2 className="card__title">
+              Calibration
+              <InfoTooltip text="Adjust temperature and pH with a small offset if readings are consistently high or low. Turbidity, DO, NH₃, and flow use lab/backend correction only." label="Calibration help" />
+            </h2>
           </div>
           <div className="card__body">
             <div className="settings-grid">
@@ -155,70 +556,57 @@ export default function Settings() {
                   aria-label="pH calibration offset"
                 />
               </label>
-              <label className="settings-label">
-                <span>Turbidity offset (NTU)</span>
-                <input
-                  type="number"
-                  step="0.1"
-                  className="settings-input"
-                  value={calibration.turbidityOffset}
-                  onChange={(e) => updateCalibration("turbidityOffset", e.target.value)}
-                  aria-label="Turbidity calibration offset"
-                />
-              </label>
-              <label className="settings-label">
-                <span>Dissolved O₂ offset (mg/L)</span>
-                <input
-                  type="number"
-                  step="0.1"
-                  className="settings-input"
-                  value={calibration.dissolvedOxygenOffset ?? 0}
-                  onChange={(e) => updateCalibration("dissolvedOxygenOffset", e.target.value)}
-                  aria-label="Dissolved oxygen calibration offset"
-                />
-              </label>
-              <label className="settings-label">
-                <span>NH₃ offset (mg/L)</span>
-                <input
-                  type="number"
-                  step="0.01"
-                  className="settings-input"
-                  value={calibration.nh3Offset ?? 0}
-                  onChange={(e) => updateCalibration("nh3Offset", e.target.value)}
-                  aria-label="NH3 calibration offset"
-                />
-              </label>
-              <label className="settings-label">
-                <span>Flow rate offset (L/min)</span>
-                <input
-                  type="number"
-                  step="0.1"
-                  className="settings-input"
-                  value={calibration.flowRateOffset ?? 0}
-                  onChange={(e) => updateCalibration("flowRateOffset", e.target.value)}
-                  aria-label="Flow rate calibration offset"
-                />
-              </label>
             </div>
           </div>
         </section>
 
         {/* Thresholds */}
         <section className="settings-section card">
-          <div className="card__header">
-            <h2 className="card__title">Thresholds</h2>
-            <p className="card__desc">Alert thresholds for water quality parameters</p>
+          <div className="card__header settings-threshold-header">
+            <div>
+              <h2 className="card__title">
+                Thresholds
+                <InfoTooltip text="Set the safe range for each parameter. An alert is triggered when a reading goes outside these limits." label="Thresholds help" />
+              </h2>
+            </div>
+            <label className="settings-label settings-classification-select-wrap">
+              <span>Classification</span>
+              <select
+                className="settings-input settings-select"
+                value={thresholdClassification}
+                onChange={(e) => handleClassificationChange(e.target.value)}
+                aria-label="Water quality classification"
+              >
+                {CLASSIFICATION_OPTIONS.map((opt) => (
+                  <option key={opt} value={opt}>
+                    {opt}
+                  </option>
+                ))}
+              </select>
+              {!isCustomClassification && (
+                <InfoTooltip
+                  text="This is a DENR standard preset — values are read-only. Switch to Custom to edit."
+                  label="DENR preset info"
+                />
+              )}
+            </label>
           </div>
           <div className="card__body">
+            {isCustomClassification && (
+              <p className="settings-helper settings-threshold-helper">
+                Custom — you can freely edit the limit values below.
+              </p>
+            )}
             <div className="settings-grid">
               <label className="settings-label">
                 <span>Temperature min (°C)</span>
                 <input
                   type="number"
                   step="0.5"
-                  className="settings-input"
+                  className={`settings-input ${!isCustomClassification ? "settings-input--readonly" : ""}`}
                   value={thresholds.temperatureMin}
                   onChange={(e) => updateThreshold("temperatureMin", e.target.value)}
+                  readOnly={!isCustomClassification}
                   aria-label="Minimum temperature threshold"
                 />
               </label>
@@ -227,9 +615,10 @@ export default function Settings() {
                 <input
                   type="number"
                   step="0.5"
-                  className="settings-input"
+                  className={`settings-input ${!isCustomClassification ? "settings-input--readonly" : ""}`}
                   value={thresholds.temperatureMax}
                   onChange={(e) => updateThreshold("temperatureMax", e.target.value)}
+                  readOnly={!isCustomClassification}
                   aria-label="Maximum temperature threshold"
                 />
               </label>
@@ -238,9 +627,10 @@ export default function Settings() {
                 <input
                   type="number"
                   step="0.1"
-                  className="settings-input"
+                  className={`settings-input ${!isCustomClassification ? "settings-input--readonly" : ""}`}
                   value={thresholds.pHMin}
                   onChange={(e) => updateThreshold("pHMin", e.target.value)}
+                  readOnly={!isCustomClassification}
                   aria-label="Minimum pH threshold"
                 />
               </label>
@@ -249,9 +639,10 @@ export default function Settings() {
                 <input
                   type="number"
                   step="0.1"
-                  className="settings-input"
+                  className={`settings-input ${!isCustomClassification ? "settings-input--readonly" : ""}`}
                   value={thresholds.pHMax}
                   onChange={(e) => updateThreshold("pHMax", e.target.value)}
+                  readOnly={!isCustomClassification}
                   aria-label="Maximum pH threshold"
                 />
               </label>
@@ -260,10 +651,12 @@ export default function Settings() {
                 <input
                   type="number"
                   step="0.5"
-                  className="settings-input"
+                  className={`settings-input ${!isCustomClassification ? "settings-input--readonly" : ""}`}
                   value={thresholds.turbidityMax}
                   onChange={(e) => updateThreshold("turbidityMax", e.target.value)}
+                  readOnly={!isCustomClassification}
                   aria-label="Maximum turbidity threshold"
+                  title="Derived from TSS: 1 NTU ≈ 1.5 mg/L TSS"
                 />
               </label>
               <label className="settings-label">
@@ -271,9 +664,10 @@ export default function Settings() {
                 <input
                   type="number"
                   step="0.1"
-                  className="settings-input"
+                  className={`settings-input ${!isCustomClassification ? "settings-input--readonly" : ""}`}
                   value={thresholds.dissolvedOxygenMin}
                   onChange={(e) => updateThreshold("dissolvedOxygenMin", e.target.value)}
+                  readOnly={!isCustomClassification}
                   aria-label="Minimum dissolved oxygen threshold"
                 />
               </label>
@@ -282,9 +676,10 @@ export default function Settings() {
                 <input
                   type="number"
                   step="0.01"
-                  className="settings-input"
+                  className={`settings-input ${!isCustomClassification ? "settings-input--readonly" : ""}`}
                   value={thresholds.nh3Max}
                   onChange={(e) => updateThreshold("nh3Max", e.target.value)}
+                  readOnly={!isCustomClassification}
                   aria-label="Maximum NH3 threshold"
                 />
               </label>
@@ -292,15 +687,513 @@ export default function Settings() {
           </div>
         </section>
 
+        {/* WQI Parameter Weights */}
+        <section className="settings-section card">
+          <div className="card__header">
+            <h2 className="card__title">
+              Water Quality Index (WQI) Weights
+              <InfoTooltip text="How much each parameter influences the overall water quality score. Higher weight = more impact on the final score. Values are automatically balanced to add up to 1." label="WQI weights help" />
+            </h2>
+          </div>
+          <div className="card__body">
+            <div className="settings-grid">
+              <label className="settings-label">
+                <span>Dissolved Oxygen weight</span>
+                <input
+                  type="number"
+                  min={0}
+                  max={1}
+                  step="0.05"
+                  className="settings-input"
+                  value={wqiWeights.dissolvedOxygen ?? DEFAULT_WQI_WEIGHTS.dissolvedOxygen}
+                  onChange={(e) => updateWqiWeight("dissolvedOxygen", e.target.value)}
+                  aria-label="Weight for Dissolved Oxygen"
+                />
+              </label>
+              <label className="settings-label">
+                <span>Ammonia (NH₃) weight</span>
+                <input
+                  type="number"
+                  min={0}
+                  max={1}
+                  step="0.05"
+                  className="settings-input"
+                  value={wqiWeights.nh3 ?? DEFAULT_WQI_WEIGHTS.nh3}
+                  onChange={(e) => updateWqiWeight("nh3", e.target.value)}
+                  aria-label="Weight for NH3"
+                />
+              </label>
+              <label className="settings-label">
+                <span>pH weight</span>
+                <input
+                  type="number"
+                  min={0}
+                  max={1}
+                  step="0.05"
+                  className="settings-input"
+                  value={wqiWeights.pH ?? DEFAULT_WQI_WEIGHTS.pH}
+                  onChange={(e) => updateWqiWeight("pH", e.target.value)}
+                  aria-label="Weight for pH"
+                />
+              </label>
+              <label className="settings-label">
+                <span>Turbidity weight</span>
+                <input
+                  type="number"
+                  min={0}
+                  max={1}
+                  step="0.05"
+                  className="settings-input"
+                  value={wqiWeights.turbidity ?? DEFAULT_WQI_WEIGHTS.turbidity}
+                  onChange={(e) => updateWqiWeight("turbidity", e.target.value)}
+                  aria-label="Weight for Turbidity"
+                />
+              </label>
+              <label className="settings-label">
+                <span>Temperature weight</span>
+                <input
+                  type="number"
+                  min={0}
+                  max={1}
+                  step="0.05"
+                  className="settings-input"
+                  value={wqiWeights.temperature ?? DEFAULT_WQI_WEIGHTS.temperature}
+                  onChange={(e) => updateWqiWeight("temperature", e.target.value)}
+                  aria-label="Weight for Temperature"
+                />
+              </label>
+            </div>
+            {(() => {
+              const w = getWQIWeights();
+              const sum = Object.values(w).reduce((a, v) => a + v, 0);
+              const maxWeight = Math.max(...Object.values(w));
+              const hasExtreme = maxWeight > 0.5;
+              return (
+                <>
+                  <p className="settings-helper" style={{ marginTop: "0.75rem" }}>
+                    Weights sum to {sum.toFixed(2)}
+                    {sum !== 1 && " — auto-normalized to 1.00"}
+                  </p>
+                  {hasExtreme && (
+                    <p className="settings-helper" role="alert" style={{ color: "var(--accent-warning, #f0a500)" }}>
+                      ⚠ One parameter has a very high weight. This may cause the score to rely too heavily on a single reading. Consider spreading the weights more evenly.
+                    </p>
+                  )}
+                </>
+              );
+            })()}
+          </div>
+        </section>
+
+        {/* Alert Logic */}
+        <section className="settings-section card">
+          <div className="card__header">
+            <h2 className="card__title">
+              Alert Sensitivity
+              <InfoTooltip text="Control how sensitive the system is when triggering alerts." label="Alert sensitivity help" />
+            </h2>
+          </div>
+          <div className="card__body">
+            <div className="settings-grid">
+              <label className="settings-label">
+                <span>pH alert buffer <InfoTooltip text="How far pH must recover before the alert clears. Prevents repeated on/off alerts near the threshold. Default: 0.2" label="pH buffer help" /></span>
+                <input
+                  type="number"
+                  min={0}
+                  max={2}
+                  step="0.05"
+                  className="settings-input"
+                  value={alertLogic.pHHysteresisOffset ?? DEFAULT_ALERT_LOGIC.pHHysteresisOffset}
+                  onChange={(e) => updateAlertLogic("pHHysteresisOffset", e.target.value)}
+                  aria-label="pH alert buffer"
+                />
+              </label>
+              <label className="settings-label">
+                <span>Ammonia (NH₃) rapid-rise limit (mg/L) <InfoTooltip text="Triggers a warning if ammonia rises by more than this amount between two consecutive readings. Default: 0.15 mg/L" label="NH3 rapid-rise help" /></span>
+                <input
+                  type="number"
+                  min={0}
+                  max={5}
+                  step="0.01"
+                  className="settings-input"
+                  value={alertLogic.nh3SlopeLimit ?? DEFAULT_ALERT_LOGIC.nh3SlopeLimit}
+                  onChange={(e) => updateAlertLogic("nh3SlopeLimit", e.target.value)}
+                  aria-label="Ammonia rapid-rise limit"
+                />
+              </label>
+            </div>
+          </div>
+        </section>
+
+        {/* Data collection & updates */}
+        <section className="settings-section card">
+          <div className="card__header">
+            <h2 className="card__title">
+              Data collection &amp; updates
+              <InfoTooltip text="Control how frequently sensor readings are recorded and how much data is loaded at a time." label="Data collection help" />
+            </h2>
+          </div>
+          <div className="card__body">
+            <div className="settings-grid">
+              <label className="settings-label settings-label--full">
+                <span>
+                  Sampling mode{" "}
+                  <InfoTooltip
+                    text="User-selected keeps a fixed interval you set. Auto-adapt computes interval from river flow (1–15 min): slower flow → longer interval, faster flow → shorter. Flow is simulated until a sensor is connected."
+                    label="Sampling mode help"
+                  />
+                </span>
+                <select
+                  className="settings-input"
+                  value={dataCollection.frequencyMode ?? FREQUENCY_MODES.USER_SELECTED}
+                  onChange={(e) => updateDataCollectionEnum("frequencyMode", e.target.value)}
+                  aria-label="Data acquisition sampling mode"
+                >
+                  <option value={FREQUENCY_MODES.USER_SELECTED}>User-selected interval</option>
+                  <option value={FREQUENCY_MODES.AUTO_ADAPT}>Auto-adapt from flow rate</option>
+                </select>
+              </label>
+
+              {!isAutoAdaptMode && (
+                <>
+                  <label className="settings-label">
+                    <span>
+                      Acquisition interval (minutes){" "}
+                      <InfoTooltip
+                        text="Fixed minutes between readings (1–120). Stored in your settings; field nodes only receive an update after Save when this is set."
+                        label="User interval help"
+                      />
+                    </span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={120}
+                      className="settings-input"
+                      value={
+                        dataCollection.defaultIntervalMinutes === undefined ||
+                        dataCollection.defaultIntervalMinutes === null
+                          ? ""
+                          : dataCollection.defaultIntervalMinutes
+                      }
+                      onChange={(e) => updateDataCollection("defaultIntervalMinutes", e.target.value)}
+                      aria-label="User-selected data collection interval in minutes"
+                    />
+                  </label>
+                </>
+              )}
+
+              {isAutoAdaptMode && (
+                <>
+                  <label className="settings-label">
+                    <span>
+                      Simulated flow rate{" "}
+                      <InfoTooltip
+                        text="Hard-coded flow value for testing until a physical flow sensor is available. Use the same units as the slow/fast reference values below (e.g. m³/s)."
+                        label="Simulated flow help"
+                      />
+                    </span>
+                    <input
+                      type="number"
+                      min={0}
+                      step="0.01"
+                      className="settings-input"
+                      value={dataCollection.simulatedFlowRate ?? DEFAULT_DATA_COLLECTION.simulatedFlowRate}
+                      onChange={(e) => updateDataCollectionFloat("simulatedFlowRate", e.target.value)}
+                      aria-label="Simulated river flow rate for auto-adapt"
+                    />
+                  </label>
+                  <label className="settings-label">
+                    <span>
+                      Flow at slow condition (→ 15 min){" "}
+                      <InfoTooltip
+                        text="At or below this flow, acquisition uses the longest interval (15 minutes)."
+                        label="Slow flow mapping help"
+                      />
+                    </span>
+                    <input
+                      type="number"
+                      min={0}
+                      step="0.01"
+                      className="settings-input"
+                      value={dataCollection.flowRateAtSlowCondition ?? DEFAULT_DATA_COLLECTION.flowRateAtSlowCondition}
+                      onChange={(e) => updateDataCollectionFloat("flowRateAtSlowCondition", e.target.value)}
+                      aria-label="Flow rate mapped to 15 minute interval"
+                    />
+                  </label>
+                  <label className="settings-label">
+                    <span>
+                      Flow at fast condition (→ 1 min){" "}
+                      <InfoTooltip
+                        text="At or above this flow, acquisition uses the shortest interval (1 minute). Must be greater than the slow-condition value."
+                        label="Fast flow mapping help"
+                      />
+                    </span>
+                    <input
+                      type="number"
+                      min={0}
+                      step="0.01"
+                      className="settings-input"
+                      value={dataCollection.flowRateAtFastCondition ?? DEFAULT_DATA_COLLECTION.flowRateAtFastCondition}
+                      onChange={(e) => updateDataCollectionFloat("flowRateAtFastCondition", e.target.value)}
+                      aria-label="Flow rate mapped to 1 minute interval"
+                    />
+                  </label>
+                  <p className="settings-acquisition-preview" role="status">
+                    <strong>Effective acquisition interval:</strong>{" "}
+                    {effectiveAutoAcquisitionMinutes} minute{effectiveAutoAcquisitionMinutes === 1 ? "" : "s"}
+                    {flowMappingInvalid ? (
+                      <span className="settings-acquisition-preview__warn">
+                        {" "}
+                        — set fast condition &gt; slow condition for linear mapping.
+                      </span>
+                    ) : null}
+                  </p>
+                </>
+              )}
+
+              <label className="settings-label">
+                <span>Max readings to load <InfoTooltip text="How many recent readings to fetch at once (100–2000). Higher values show more history but may load slower." label="Readings limit help" /></span>
+                <input
+                  type="number"
+                  min={100}
+                  max={2000}
+                  className="settings-input"
+                  value={dataCollection.readingsLimit ?? 500}
+                  onChange={(e) => updateDataCollection("readingsLimit", e.target.value)}
+                  aria-label="Maximum readings to load"
+                />
+              </label>
+            </div>
+          </div>
+        </section>
+
+          <div className="settings-actions">
+            <button
+              type="button"
+              className="settings-save-btn"
+              onClick={handleSaveAll}
+                disabled={!isAdmin}
+              aria-label="Save all settings"
+            >
+              Save settings
+            </button>
+            {saveFeedback && (
+              <span className="settings-save-feedback" role="status">
+                {saveFeedback}
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* Tab panel: User Preferences (Theme & Font) */}
+        <div
+          id="settings-panel-preferences"
+          role="tabpanel"
+          aria-labelledby="tab-preferences"
+          hidden={activeTab !== "preferences"}
+          className="settings-tab-panel"
+        >
+        {/* User Account */}
+        <section className="settings-section card">
+          <div className="card__header">
+            <h2 className="card__title">
+              User Account
+              <InfoTooltip text="Update your username, email, or password." label="Account settings help" />
+            </h2>
+          </div>
+          <div className="card__body">
+            {!user ? (
+              <p className="settings-helper">Sign in to manage your account details.</p>
+            ) : (
+              <>
+            <div className="settings-grid">
+              <label className="settings-label">
+                <span>Username</span>
+                <input
+                  type="text"
+                  minLength={3}
+                  maxLength={32}
+                  className="settings-input"
+                  value={accountUsername}
+                  onChange={(e) => setAccountUsername(e.target.value)}
+                  aria-label="Account username"
+                />
+              </label>
+              <label className="settings-label">
+                <span>Email</span>
+                <input
+                  type="email"
+                  className="settings-input"
+                  value={accountEmail}
+                  onChange={(e) => setAccountEmail(e.target.value)}
+                  placeholder="name@example.com"
+                  aria-label="Account email"
+                />
+              </label>
+            </div>
+            <div className="settings-actions" style={{ marginTop: "12px" }}>
+              <button
+                type="button"
+                className="settings-save-btn"
+                onClick={openPasswordModal}
+                aria-label="Change account password"
+              >
+                Change password
+              </button>
+              {newPassword ? (
+                <span className="settings-save-feedback" role="status">
+                  Password change queued. Click Save settings to apply.
+                </span>
+              ) : null}
+              {accountFeedback && (
+                <span className="settings-save-feedback" role="status">
+                  {accountFeedback}
+                </span>
+              )}
+            </div>
+
+            {showPasswordModal ? (
+              <div className="settings-modal-backdrop" role="presentation" onClick={closePasswordModal}>
+                <div
+                  className="settings-modal"
+                  role="dialog"
+                  aria-modal="true"
+                  aria-label="Change password"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <h3 className="settings-modal__title">Change password</h3>
+                  <div className="settings-grid">
+                    <label className="settings-label">
+                      <span>New password</span>
+                      <input
+                        type="password"
+                        minLength={8}
+                        className="settings-input"
+                        value={passwordDraft}
+                        onChange={(e) => setPasswordDraft(e.target.value)}
+                        placeholder="Enter new password"
+                        aria-label="New account password"
+                      />
+                    </label>
+                    <label className="settings-label">
+                      <span>Confirm new password</span>
+                      <input
+                        type="password"
+                        minLength={8}
+                        className="settings-input"
+                        value={confirmPasswordDraft}
+                        onChange={(e) => setConfirmPasswordDraft(e.target.value)}
+                        placeholder="Re-enter new password"
+                        aria-label="Confirm new account password"
+                      />
+                    </label>
+                  </div>
+                  <div className="settings-actions" style={{ marginTop: "12px" }}>
+                    <button type="button" className="settings-save-btn" onClick={confirmPasswordChange}>
+                      Confirm
+                    </button>
+                    <button type="button" className="settings-save-btn" onClick={closePasswordModal}>
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ) : null}
+              </>
+            )}
+          </div>
+        </section>
+
+        {/* Email Notifications */}
+        <section className="settings-section card">
+          <div className="card__header">
+            <h2 className="card__title">
+              Email Notifications
+              <InfoTooltip text="Enable or disable email notifications. Recipient uses the signed-in user's default email." label="Email notifications help" />
+            </h2>
+          </div>
+          <div className="card__body">
+            <div className="settings-option-row">
+              <span className="settings-option-label">Enable email alerts</span>
+              <label className="settings-toggle-wrap">
+                <input
+                  type="checkbox"
+                  checked={!!notifications.emailEnabled}
+                  onChange={(e) => updateNotifications("emailEnabled", e.target.checked)}
+                  aria-label="Enable email notifications"
+                />
+                <span className="settings-toggle" aria-hidden="true" />
+              </label>
+            </div>
+          </div>
+        </section>
+
+        {isAdmin && (
+          <>
+            {/* Maintenance Schedule */}
+            <section className="settings-section card">
+              <div className="card__header">
+                <h2 className="card__title">
+                  Maintenance Schedule
+                  <InfoTooltip text="Get a reminder alert when a monitoring node hasn't been physically serviced or inspected within the chosen time period." label="Maintenance help" />
+                </h2>
+              </div>
+              <div className="card__body">
+                <div className="settings-maintenance-options">
+                  {[
+                    { label: "2 Weeks", days: 14 },
+                    { label: "1 Month", days: 30 },
+                    { label: "2 Months", days: 60 },
+                    { label: "3 Months", days: 90 },
+                    { label: "6 Months", days: 180 },
+                    { label: "Custom", days: null },
+                  ].map((opt) => {
+                    const isCustomOption = opt.days === null;
+                    const isPreset = !isCustomOption;
+                    const isActive = isPreset
+                      ? maintenance.intervalDays === opt.days
+                      : ![14, 30, 60, 90, 180].includes(maintenance.intervalDays);
+                    return (
+                      <button
+                        key={opt.label}
+                        type="button"
+                        className={`settings-maintenance-chip${isActive ? " settings-maintenance-chip--active" : ""}`}
+                        onClick={() => {
+                          if (isPreset) updateMaintenance("intervalDays", opt.days);
+                        }}
+                        aria-pressed={isActive}
+                      >
+                        {opt.label}
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className="settings-maintenance-custom">
+                  <label className="settings-label" style={{ maxWidth: 260 }}>
+                    <span>Custom interval (days)</span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={365}
+                      className="settings-input"
+                      value={maintenance.intervalDays}
+                      onChange={(e) => updateMaintenance("intervalDays", e.target.value)}
+                      aria-label="Maintenance interval in days"
+                    />
+                  </label>
+                </div>
+              </div>
+            </section>
+          </>
+        )}
+
         {/* Theme */}
         <section className="settings-section card">
           <div className="card__header">
             <h2 className="card__title">Theme</h2>
-            <p className="card__desc">Dark or light mode</p>
           </div>
           <div className="card__body">
             <div className="settings-option-row">
-              <span className="settings-option-label">Appearance</span>
               <div className="settings-theme-buttons">
                 <button
                   type="button"
@@ -320,94 +1213,35 @@ export default function Settings() {
                 >
                   Light
                 </button>
+                <button
+                  type="button"
+                  className={`settings-theme-btn ${theme === "system" ? "settings-theme-btn--active" : ""}`}
+                  onClick={() => setTheme("system")}
+                  aria-pressed={theme === "system"}
+                  aria-label="Follow system"
+                >
+                  System
+                </button>
               </div>
             </div>
           </div>
         </section>
 
-        {/* Font preference */}
-        <section className="settings-section card">
-          <div className="card__header">
-            <h2 className="card__title">Font size</h2>
-            <p className="card__desc">Text size preference</p>
+          <div className="settings-actions">
+            <button
+              type="button"
+              className="settings-save-btn"
+              onClick={handleSaveAll}
+              aria-label="Save all settings"
+            >
+              Save settings
+            </button>
+            {saveFeedback && (
+              <span className="settings-save-feedback" role="status">
+                {saveFeedback}
+              </span>
+            )}
           </div>
-          <div className="card__body">
-            <div className="settings-option-row">
-              <span className="settings-option-label">Size</span>
-              <div className="settings-font-buttons">
-                {FONT_OPTIONS.map((opt) => (
-                  <button
-                    key={opt.value}
-                    type="button"
-                    className={`settings-font-btn ${fontSize === opt.value ? "settings-font-btn--active" : ""}`}
-                    onClick={() => setFontSize(opt.value)}
-                    aria-pressed={fontSize === opt.value}
-                    aria-label={`Font size: ${opt.label}`}
-                  >
-                    {opt.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-        </section>
-
-        {/* Crystal Report format */}
-        <section className="settings-section card">
-          <div className="card__header">
-            <h2 className="card__title">Crystal Report format</h2>
-            <p className="card__desc">Import a .rpt or .rptx template for use in Reports exports</p>
-          </div>
-          <div className="card__body">
-            <div className="settings-crystal-report">
-              <label className="settings-file-label">
-                <span className="settings-file-btn">Choose report file</span>
-                <input
-                  type="file"
-                  accept=".rpt,.rptx"
-                  className="settings-file-input"
-                  onChange={handleCrystalReportImport}
-                  aria-label="Import Crystal Report (.rpt or .rptx)"
-                />
-              </label>
-              {crystalReport ? (
-                <div className="settings-crystal-report-current">
-                  <span className="settings-crystal-report-name" title={crystalReport.importedAt}>
-                    {crystalReport.fileName}
-                  </span>
-                  <span className="settings-crystal-report-meta">
-                    Imported {crystalReport.importedAt ? new Date(crystalReport.importedAt).toLocaleDateString() : ""}
-                  </span>
-                  <button
-                    type="button"
-                    className="settings-crystal-report-clear"
-                    onClick={handleClearCrystalReport}
-                    aria-label="Clear Crystal Report template"
-                  >
-                    Clear
-                  </button>
-                </div>
-              ) : (
-                <p className="settings-crystal-report-empty">No report template selected</p>
-              )}
-            </div>
-          </div>
-        </section>
-
-        <div className="settings-actions">
-          <button
-            type="button"
-            className="settings-save-btn"
-            onClick={handleSaveAll}
-            aria-label="Save all settings"
-          >
-            Save settings
-          </button>
-          {saveFeedback && (
-            <span className="settings-save-feedback" role="status">
-              {saveFeedback}
-            </span>
-          )}
         </div>
       </div>
     </div>

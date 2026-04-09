@@ -1,63 +1,49 @@
-import React, { useState, useEffect, useCallback, useMemo } from "react";
+import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { createPortal } from "react-dom";
 import { MapContainer, TileLayer } from "react-leaflet";
 import MapMarkersOverlay from "../components/map/MapMarkersOverlay";
+import BatteryIndicator, { batteryPropsFromReading } from "../components/BatteryIndicator";
+import MapRecenterButton from "../components/map/MapRecenterButton";
 import PageDateWithStatus from "../components/PageDateWithStatus";
-import api from "../services/api";
-import { useMQTTContext } from "../contexts/MQTTContext";
-import { calculateWQI } from "../utils/wqiCalculator";
 import { getNodes, loadNodes } from "../utils/nodesStorage";
+import { useSensorTest } from "../hooks/useSensorTest";
+import { useLatestReadingsByNode } from "../hooks/useLatestReadingsByNode";
+import { PageLoader } from "../components/LoadingSkeleton";
 import "./Map.css";
 
 const FALLBACK_CENTER = [8.462591, 124.707831];
 const DEFAULT_ZOOM = 11;
 
-function getWQIClass(wqi) {
-  if (wqi == null || isNaN(wqi)) return { class: "N/A", label: "No Data", quality: "muted" };
-  if (wqi < 50) return { class: "I", label: "Excellent", quality: "excellent" };
-  if (wqi <= 100) return { class: "II", label: "Good", quality: "good" };
-  if (wqi <= 200) return { class: "III", label: "Poor", quality: "poor" };
-  if (wqi <= 300) return { class: "IV", label: "Very Poor", quality: "very-poor" };
-  return { class: "V", label: "Unsuitable", quality: "unsuitable" };
-}
-
-function normalizeReading(r) {
-  if (!r) return null;
-  const temp = r.temperature ?? null;
-  const turb = r.turbidity ?? null;
-  const ph = r.pH ?? r.ph ?? null;
-  const ammonia = r.nh3 ?? r.NH3 ?? null;
-  const doVal = r.dissolvedOxygen ?? r.dissolved_oxygen ?? r.do ?? r.DO ?? null;
-  let wqi = r.wqi ?? r.WQI;
-  if (wqi == null && temp != null && turb != null && ph != null && ammonia != null && doVal != null) {
-    wqi = calculateWQI({ temperature: temp, turbidity: turb, pH: ph, nh3: ammonia, dissolvedOxygen: doVal });
-  }
-  return {
-    temperature: temp,
-    turbidity: turb,
-    pH: ph,
-    nh3: ammonia,
-    dissolvedOxygen: doVal,
-    wqi: wqi != null ? Math.round(wqi) : null,
-    nodeId: r.nodeId ?? r.node ?? null,
-  };
-}
-
 export default function Map() {
-  const { isConnected: mqttConnected, latestReadingsByNode } = useMQTTContext();
-  const [nodes, setNodes] = useState(() => getNodes());
-  const [currentMetrics, setCurrentMetrics] = useState({
-    temperature: null,
-    turbidity: null,
-    pH: null,
-    nh3: null,
-    dissolvedOxygen: null,
-    wqi: null,
-    nodeId: null,
-  });
-  const [isSensorTestModalOpen, setIsSensorTestModalOpen] = useState(false);
-  const [sensorTestResults, setSensorTestResults] = useState(null);
-  const [isTestingSensor, setIsTestingSensor] = useState(false);
+  const [nodes, setNodes] = useState([]);
+  const [nodesLoaded, setNodesLoaded] = useState(false);
   const [lastUpdated] = useState(() => new Date());
+  const sensorTest = useSensorTest();
+  const { readingsByNode } = useLatestReadingsByNode();
+
+  // Mobile bottom sheet state
+  const [selectedNode, setSelectedNode] = useState(null);
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const sheetRef = useRef(null);
+
+  const isMobile = () => window.innerWidth <= 1024 || window.innerHeight <= 768;
+
+  const handleNodeSelect = useCallback((nodeId) => {
+    const node = nodes.find((n) => n.id === nodeId);
+    if (!node) return;
+    setSelectedNode(node);
+    setSheetOpen(true);
+  }, [nodes]);
+
+  const closeSheet = useCallback(() => {
+    setSheetOpen(false);
+    setTimeout(() => setSelectedNode(null), 300);
+  }, []);
+
+  // Close sheet on backdrop touch
+  const handleSheetBackdropClick = useCallback((e) => {
+    if (e.target === e.currentTarget) closeSheet();
+  }, [closeSheet]);
 
   const allNodes = useMemo(() => nodes, [nodes]);
   const mapCenter = useMemo(() => {
@@ -70,7 +56,7 @@ export default function Map() {
   }, [allNodes]);
 
   useEffect(() => {
-    loadNodes().then(() => setNodes(getNodes()));
+    loadNodes().then(() => setNodes(getNodes())).finally(() => setNodesLoaded(true));
   }, []);
   useEffect(() => {
     const onFocus = () => loadNodes().then(() => setNodes(getNodes()));
@@ -78,147 +64,93 @@ export default function Map() {
     return () => window.removeEventListener("focus", onFocus);
   }, []);
 
-  const fetchLatestReading = useCallback(async () => {
-    try {
-      const r = await api.getLatestReading();
-      const norm = normalizeReading(r);
-      if (norm) {
-        setCurrentMetrics((prev) => ({
-          ...prev,
-          ...norm,
-          nodeId: norm.nodeId ?? prev.nodeId,
-        }));
-      }
-    } catch (err) {
-      console.debug("Map: could not fetch latest reading", err.message);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (mqttConnected && Object.keys(latestReadingsByNode).length > 0) {
-      const readings = Object.values(latestReadingsByNode);
-      const latest = readings.reduce((a, b) => ((a._receivedAt ?? 0) >= (b._receivedAt ?? 0) ? a : b));
-      setCurrentMetrics((prev) => ({
-        ...prev,
-        temperature: latest.temperature ?? prev.temperature,
-        turbidity: latest.turbidity ?? prev.turbidity,
-        pH: latest.pH ?? latest.ph ?? prev.pH,
-        nh3: latest.nh3 ?? prev.nh3,
-        dissolvedOxygen: latest.dissolvedOxygen ?? prev.dissolvedOxygen,
-        wqi: latest.wqi ?? prev.wqi,
-        nodeId: latest.nodeId ?? prev.nodeId,
-      }));
-    }
-  }, [mqttConnected, latestReadingsByNode]);
-
-  useEffect(() => {
-    if (mqttConnected) return;
-    fetchLatestReading();
-    const interval = setInterval(fetchLatestReading, 60000);
-    return () => clearInterval(interval);
-  }, [mqttConnected, fetchLatestReading]);
-
-  const getStoredTestResults = useCallback((nodeId) => {
-    try {
-      const key = `sensorTest_${nodeId}`;
-      const stored = localStorage.getItem(key);
-      if (stored) {
-        const data = JSON.parse(stored);
-        const testDate = new Date(data.date);
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        testDate.setHours(0, 0, 0, 0);
-        if (testDate.getTime() === today.getTime()) return data.results;
-      }
-    } catch (e) {
-      console.warn("getStoredTestResults", e);
-    }
-    return null;
-  }, []);
-
-  const storeTestResults = useCallback((nodeId, results) => {
-    try {
-      localStorage.setItem(
-        `sensorTest_${nodeId}`,
-        JSON.stringify({ date: new Date().toISOString(), results })
-      );
-    } catch (e) {
-      console.warn("storeTestResults", e);
-    }
-  }, []);
-
   const handleSensorTest = useCallback(
-    (nodeId, forceRun = false) => {
-      const id = nodeId ?? currentMetrics.nodeId;
-      if (!id) return;
-      if (!forceRun) {
-        const stored = getStoredTestResults(id);
-        if (stored) {
-          setSensorTestResults(stored);
-          setIsSensorTestModalOpen(true);
-          setIsTestingSensor(false);
-          return;
-        }
-      }
-      setIsTestingSensor(false);
-      setSensorTestResults({
-        nodeId: id,
-        status: "error",
-        message: "No sensor data yet.",
-        timestamp: new Date().toISOString(),
-        sensors: [],
-        empty: true,
-      });
-      setIsSensorTestModalOpen(true);
+    (nodeId) => {
+      if (!nodeId) return;
+      sensorTest.runTest(nodeId);
     },
-    [currentMetrics.nodeId, getStoredTestResults]
+    [sensorTest]
   );
 
-  const nodeIdForMarker = currentMetrics.nodeId ?? null;
-  const isTestingThisNode = isTestingSensor && (sensorTestResults?.nodeId === nodeIdForMarker || !sensorTestResults);
-  const testStatusForNode = sensorTestResults?.nodeId === nodeIdForMarker ? sensorTestResults?.status : null;
+  const handleMarkerClick = useCallback(
+    (nodeId) => {
+      if (!nodeId) return;
+      if (isMobile()) {
+        handleNodeSelect(nodeId);
+      } else {
+        handleSensorTest(nodeId);
+      }
+    },
+    [handleNodeSelect, handleSensorTest] // eslint-disable-line react-hooks/exhaustive-deps
+  );
 
-  const mapMarkers = allNodes.filter((n) => n.lat != null && n.lng != null).map((n) => {
-    const stored = getStoredTestResults(n.id);
-    const statusForNode = sensorTestResults?.nodeId === n.id ? sensorTestResults?.status : stored?.status ?? null;
+  const mapMarkers = allNodes.filter((n) => n.lat != null && n.lng != null && n.active !== false).map((n) => {
+    const inactive = n.active === false;
+    const statusForNode = sensorTest.allResults[n.id]?.status ?? n.lastSensorTestStatus ?? null;
+    const latest = readingsByNode[n.id];
+    const batteryVoltage = latest?.battery_voltage ?? latest?.batteryVoltage ?? null;
+    const batteryPercentage = latest?.battery_percentage ?? latest?.batteryPercentage ?? null;
     return {
       key: n.id,
       lat: n.lat,
       lng: n.lng,
       nodeId: n.id,
-      onTestSensor: handleSensorTest,
-      isTesting: isTestingSensor && (sensorTestResults?.nodeId === n.id || !sensorTestResults),
-      testStatus: statusForNode,
+      nodeName: n.name,
+      nodeLocation: n.location,
+      inactive,
+      batteryVoltage,
+      batteryPercentage,
+      onTestSensor: inactive ? null : handleMarkerClick,
+      isTesting: !inactive && sensorTest.isTesting && sensorTest.results === null,
+      testStatus: inactive ? null : statusForNode,
     };
   });
 
-  const nodesTableData = allNodes.map((n) => {
-    const stored = getStoredTestResults(n.id);
-    const result = sensorTestResults?.nodeId === n.id ? sensorTestResults : stored;
-    let repairStatus = "Not tested";
-    if (result?.status === "success") repairStatus = "OK";
-    else if (result?.status === "warning") repairStatus = "Needs repair";
-    else if (result?.status === "error") repairStatus = "Needs fix";
-    return {
-      ...n,
-      lastTest: result ? new Date(result.timestamp).toLocaleString() : "—",
-      repairStatus,
-      resultStatus: result?.status ?? null,
-    };
-  });
+  if (!nodesLoaded) {
+    return (
+      <div className="map-page">
+        <PageLoader />
+      </div>
+    );
+  }
 
   return (
     <div className="map-page">
       <header className="page-header">
         <div>
           <h1 className="page-title">Map &amp; Locations</h1>
+          <p className="page-subtitle">Geographic overview of monitoring nodes</p>
         </div>
-        <PageDateWithStatus lastUpdated={lastUpdated} className="page-meta" />
+        <PageDateWithStatus lastUpdated={lastUpdated} className="page-meta" showClassification={false} />
       </header>
 
-      <section className="card map-card">
-        <div className="map-body">
-          <div className="map-wrapper leaflet-map-wrapper">
+      <section className="card map-page__card">
+        <div className="map-page__map">
+            <div className="map-nodes-overlay" aria-label="Node list">
+              <div className="map-nodes-overlay__header">Nodes</div>
+              <ul className="map-nodes-overlay__list">
+                {allNodes.filter((n) => n.active !== false).map((node) => {
+                  const result = sensorTest.allResults[node.id];
+                  const lastTested = result?.timestamp
+                    ? new Date(result.timestamp).toLocaleString()
+                    : (node.lastSensorTestAt ? new Date(node.lastSensorTestAt).toLocaleString() : "—");
+                  const status = result?.status ?? node.lastSensorTestStatus ?? null;
+                  const statusLabels = { success: "OK", warning: "Issue", error: "Fail", offline: "Offline" };
+                  const statusLabel = statusLabels[status] ?? "—";
+                  return (
+                    <li key={node.id} className="map-nodes-overlay__item">
+                      <div className="map-nodes-overlay__info">
+                        <span className="map-nodes-overlay__name">{node.name || node.id}</span>
+                        <span className="map-nodes-overlay__meta">{lastTested}</span>
+                      </div>
+                      <span className={`map-nodes-overlay__status map-nodes-overlay__status--${status ?? "none"}`}>
+                        {statusLabel}
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
             <MapContainer
               center={mapCenter}
               zoom={DEFAULT_ZOOM}
@@ -231,72 +163,121 @@ export default function Map() {
                 url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
               />
               <MapMarkersOverlay markers={mapMarkers} />
+              <MapRecenterButton center={mapCenter} className="map-recenter-btn--mobile" />
             </MapContainer>
-          </div>
         </div>
       </section>
 
-      <section className="card map-nodes-card">
-        <header className="section-header">
-          <h2 className="card__title">All Nodes — Location &amp; Sensor Status</h2>
-        </header>
-        <div className="map-nodes-card__body">
-          <div className="map-nodes-table-wrap">
-            <table className="map-nodes-table" role="table">
-              <thead>
-                <tr>
-                  <th>Node</th>
-                  <th>Location</th>
-                  <th>Coordinates</th>
-                  <th>Last test</th>
-                  <th>Sensor status</th>
-                  <th aria-label="Actions" />
-                </tr>
-              </thead>
-              <tbody>
-                {nodesTableData.map((row) => (
-                  <tr key={row.id}>
-                    <td>
-                      <span className="map-nodes-table__node-name">{row.name}</span>
-                      <span className="map-nodes-table__node-id">{row.id}</span>
-                    </td>
-                    <td>{row.location}</td>
-                    <td className="map-nodes-table__coords">
-                      {row.lat != null && row.lng != null
-                        ? `${row.lat.toFixed(4)}, ${row.lng.toFixed(4)}`
-                        : "—"}
-                    </td>
-                    <td>{row.lastTest}</td>
-                    <td>
-                      <span
-                        className={`map-nodes-table__status map-nodes-table__status--${row.resultStatus ?? "none"}`}
-                        title={row.resultStatus ? row.repairStatus : "No test run today"}
-                      >
-                        {row.repairStatus}
-                      </span>
-                    </td>
-                    <td>
+      {/* Mobile node detail bottom sheet */}
+      {createPortal(
+        <div
+          className={`map-node-sheet-backdrop ${sheetOpen ? "map-node-sheet-backdrop--open" : ""}`}
+          onClick={handleSheetBackdropClick}
+          aria-hidden={!sheetOpen}
+        >
+          <div
+            ref={sheetRef}
+            className={`map-node-sheet ${sheetOpen ? "map-node-sheet--open" : ""}`}
+            role="dialog"
+            aria-modal="true"
+            aria-label={selectedNode ? `Node ${selectedNode.name || selectedNode.id} details` : "Node details"}
+          >
+            {selectedNode && (() => {
+              const result = sensorTest.allResults[selectedNode.id] ?? null;
+              const status = result?.status ?? null;
+              const statusLabels = {
+                success: "All sensors OK",
+                warning: "Sensor issue",
+                error: "Sensor failure",
+                offline: "Node offline",
+              };
+              const statusLabel = statusLabels[status] ?? "Not checked";
+              return (
+                <>
+                  <div className="map-node-sheet__handle" />
+                  <div className="map-node-sheet__header">
+                    <div className="map-node-sheet__title-row">
+                      <div>
+                        <h2 className="map-node-sheet__name">{selectedNode.name || selectedNode.id}</h2>
+                        <p className="map-node-sheet__id">{selectedNode.id}</p>
+                      </div>
                       <button
                         type="button"
-                        className="ghost-btn map-nodes-table__test-btn"
-                        onClick={() => handleSensorTest(row.id)}
-                        aria-label={`Test sensor for ${row.name}`}
+                        className="map-node-sheet__close"
+                        onClick={closeSheet}
+                        aria-label="Close"
                       >
-                        Test sensor
+                        ×
                       </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                    </div>
+                  </div>
+                  <div className="map-node-sheet__body">
+                    <div className="map-node-sheet__info-grid">
+                      {selectedNode.location && (
+                        <div className="map-node-sheet__info-item">
+                          <span className="map-node-sheet__info-label">Location</span>
+                          <span className="map-node-sheet__info-value">{selectedNode.location}</span>
+                        </div>
+                      )}
+                      {selectedNode.lat != null && selectedNode.lng != null && (
+                        <div className="map-node-sheet__info-item">
+                          <span className="map-node-sheet__info-label">Coordinates</span>
+                          <span className="map-node-sheet__info-value map-node-sheet__coords">
+                            {selectedNode.lat.toFixed(4)}, {selectedNode.lng.toFixed(4)}
+                          </span>
+                        </div>
+                      )}
+                      {(readingsByNode[selectedNode.id]?.battery_voltage != null || readingsByNode[selectedNode.id]?.battery_percentage != null) && (
+                        <div className="map-node-sheet__info-item">
+                          <span className="map-node-sheet__info-label">Battery</span>
+                          <span className="map-node-sheet__info-value">
+                            <BatteryIndicator
+                              {...batteryPropsFromReading(readingsByNode[selectedNode.id])}
+                              showPercentage
+                              size="medium"
+                            />
+                          </span>
+                        </div>
+                      )}
+                      <div className="map-node-sheet__info-item">
+                        <span className="map-node-sheet__info-label">Sensor status</span>
+                        <span className={`map-node-sheet__status map-node-sheet__status--${status ?? "none"}`}>
+                          {statusLabel}
+                        </span>
+                      </div>
+                      {result?.timestamp && (
+                        <div className="map-node-sheet__info-item">
+                          <span className="map-node-sheet__info-label">Last tested</span>
+                          <span className="map-node-sheet__info-value">
+                            {new Date(result.timestamp).toLocaleString()}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      className="map-node-sheet__test-btn"
+                      onClick={() => {
+                        closeSheet();
+                        handleSensorTest(selectedNode.id);
+                      }}
+                      disabled={sensorTest.isTesting}
+                    >
+                      {sensorTest.isTesting ? "Testing…" : "Run Sensor Test"}
+                    </button>
+                  </div>
+                </>
+              );
+            })()}
           </div>
-        </div>
-      </section>
+        </div>,
+        document.body
+      )}
 
-      {isSensorTestModalOpen && (
+      {sensorTest.isOpen && createPortal(
         <div
           className="map-modal-overlay"
-          onClick={() => setIsSensorTestModalOpen(false)}
+          onClick={sensorTest.close}
           role="presentation"
         >
           <div
@@ -307,74 +288,73 @@ export default function Map() {
             aria-labelledby="sensor-test-modal-title"
           >
             <header className="section-header">
-              <h2 id="sensor-test-modal-title">Sensor Test Results</h2>
+              <h2 id="sensor-test-modal-title">Sensor Status</h2>
               <button
                 type="button"
                 className="ghost-btn"
-                onClick={() => setIsSensorTestModalOpen(false)}
+                onClick={sensorTest.close}
                 aria-label="Close"
               >
                 ×
               </button>
             </header>
             <div className="sensor-test-modal-body">
-              {isTestingSensor ? (
+              {sensorTest.isTesting ? (
                 <div className="sensor-test-loading">
                   <span className="sensor-test-loading-icon">⚙️</span>
-                  <p>Testing sensors...</p>
+                  <p>Checking sensor data...</p>
                 </div>
-              ) : sensorTestResults ? (
+              ) : sensorTest.results ? (
                 <>
                   <div
-                    className={`sensor-test-summary sensor-test-summary--${sensorTestResults.status}`}
+                    className={`sensor-test-summary sensor-test-summary--${sensorTest.results.status}`}
                   >
                     <span className="sensor-test-summary-icon">
-                      {sensorTestResults.status === "success"
+                      {sensorTest.results.status === "success"
                         ? "✅"
-                        : sensorTestResults.status === "warning"
+                        : sensorTest.results.status === "warning"
                         ? "⚠️"
+                        : sensorTest.results.status === "offline"
+                        ? "📡"
                         : "❌"}
                     </span>
-                    <p className="sensor-test-summary-message">{sensorTestResults.message}</p>
+                    <p className="sensor-test-summary-message">{sensorTest.results.message}</p>
                     <p className="sensor-test-summary-time">
-                      {new Date(sensorTestResults.timestamp).toLocaleString()}
+                      {sensorTest.results.dataAge
+                        ? `Last data: ${sensorTest.results.dataAge}`
+                        : `Checked: ${new Date(sensorTest.results.timestamp).toLocaleString()}`}
                     </p>
                   </div>
-                  {sensorTestResults.empty ? (
-                    <p className="sensor-test-empty-msg">Connect to HiveMQ and ensure the node is sending data.</p>
-                  ) : (
-                    <>
-                      <div className="sensor-test-list">
-                        <h3>Sensor Status</h3>
-                        {sensorTestResults.sensors?.map((s, i) => (
-                          <div key={i} className="sensor-test-item">
-                            <div>
-                              <p className="sensor-test-item-name">{s.name}</p>
-                              <p className="sensor-test-item-response">Response: {s.responseTime}</p>
-                            </div>
-                            <div className="sensor-test-item-value">
-                              <span className={`sensor-test-badge sensor-test-badge--${s.status}`}>
-                                {s.status === "pass" ? "PASS" : "FAIL"}
-                              </span>
-                              <span>{s.value}</span>
-                            </div>
-                          </div>
-                        ))}
+                  <div className="sensor-test-list">
+                    <h3>Sensor Status</h3>
+                    {sensorTest.results.sensors?.map((s, i) => (
+                      <div key={i} className="sensor-test-item">
+                        <div>
+                          <p className="sensor-test-item-name">{s.name}</p>
+                          <p className="sensor-test-item-response">Response: {s.responseTime}</p>
+                        </div>
+                        <div className="sensor-test-item-value">
+                          <span className={`sensor-test-badge sensor-test-badge--${s.status}`}>
+                            {s.status === "pass" ? "PASS" : s.status === "stale" ? "NO DATA" : "FAIL"}
+                          </span>
+                          <span>{s.value}</span>
+                        </div>
                       </div>
-                      <button
-                        type="button"
-                        className="ghost-btn sensor-test-run-again"
-                        onClick={() => handleSensorTest(sensorTestResults.nodeId ?? nodeIdForMarker, true)}
-                      >
-                        Run Test Again
-                      </button>
-                    </>
-                  )}
+                    ))}
+                  </div>
+                  <button
+                    type="button"
+                    className="ghost-btn sensor-test-run-again"
+                    onClick={() => handleSensorTest(sensorTest.results.nodeId)}
+                  >
+                    Refresh
+                  </button>
                 </>
               ) : null}
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

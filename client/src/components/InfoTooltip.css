@@ -1,0 +1,84 @@
+.info-tooltip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  vertical-align: middle;
+}
+
+.info-tooltip__trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--panel-dark);
+  color: var(--text-muted);
+  font-size: 0.7rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s, color 0.2s, border-color 0.2s;
+  flex-shrink: 0;
+}
+
+.info-tooltip__trigger:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text);
+  border-color: rgba(255, 255, 255, 0.25);
+}
+
+.info-tooltip__trigger:focus {
+  outline: none;
+  border-color: rgba(141, 218, 213, 0.6);
+  box-shadow: 0 0 0 2px rgba(141, 218, 213, 0.2);
+}
+
+[data-theme="light"] .info-tooltip__trigger:focus {
+  border-color: rgba(27, 156, 133, 0.6);
+  box-shadow: 0 0 0 2px rgba(27, 156, 133, 0.2);
+}
+
+.info-tooltip__content {
+  min-width: 200px;
+  max-width: 420px;
+  padding: 12px 14px;
+  background: #fff;
+  border: 1px solid rgba(0, 0, 0, 0.15);
+  border-radius: 8px;
+  font-size: 0.8rem;
+  line-height: 1.45;
+  color: #1a1a1a;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+  white-space: normal;
+}
+
+/* Portal tooltip: fixed position */
+.info-tooltip__content--portal {
+  position: fixed;
+  z-index: 9999;
+}
+
+/* Arrow on left, pointing left (tooltip is to the right of trigger) */
+.info-tooltip__content--right::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 0;
+  transform: translate(-100%, -50%);
+  border: 6px solid transparent;
+  border-right-color: #fff;
+}
+
+/* Arrow on right, pointing right (tooltip is to the left of trigger) */
+.info-tooltip__content--left::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  right: 0;
+  transform: translate(100%, -50%);
+  border: 6px solid transparent;
+  border-left-color: #fff;
+}

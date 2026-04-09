@@ -1,8 +1,9 @@
 /**
  * ESP32 LoRa Water Quality Monitoring Node
  * 
- * This sketch reads water quality sensors and publishes data to an MQTT broker
- * for the Water Quality Monitoring System (WQMS).
+ * This sketch reads water quality sensors and publishes to an MQTT broker (WQMS).
+ * Each cycle: stabilize → 1 Hz samples for the remainder of 2 minutes (rolling
+ * window of 60) → per-channel median → publish → sleep to complete the 2-minute period.
  * 
  * Hardware Requirements:
  * - ESP32 LoRa module (e.g., Heltec ESP32 LoRa)
@@ -25,8 +26,12 @@
 #include <WiFi.h>
 #include <PubSubClient.h>
 #include <ArduinoJson.h>
+#include <stdlib.h>
 #include "config.h"
 #include "sensors.h"
+
+void checkWiFi();
+void checkMQTT();
 
 // ============================================
 // Global Variables
@@ -35,14 +40,82 @@
 WiFiClient espClient;
 PubSubClient mqttClient(espClient);
 
-unsigned long lastPublishTime = 0;
 unsigned long lastReconnectAttempt = 0;
 const unsigned long RECONNECT_INTERVAL = 5000; // 5 seconds
+unsigned long seqCounter = 0; // Monotonically increasing sequence number
 
 // MQTT topic strings
 String mqttTopic;
 String mqttTopicSensor;
 String mqttTopicAlert;
+
+// Two-minute median cycle: rolling buffer of last MEDIAN_WINDOW readings
+static SensorReadings s_sampleRing[MEDIAN_WINDOW];
+static uint8_t s_ringHead = 0;
+static uint8_t s_ringCount = 0;
+static float s_sortScratch[MEDIAN_WINDOW];
+
+static int compareFloat(const void* a, const void* b) {
+  float fa = *(const float*)a;
+  float fb = *(const float*)b;
+  if (fa < fb) return -1;
+  if (fa > fb) return 1;
+  return 0;
+}
+
+static float medianOfBuffer(float* buf, uint8_t n) {
+  if (n == 0) return SENSOR_ERROR_VALUE;
+  qsort(buf, n, sizeof(float), compareFloat);
+  if (n % 2 == 1) return buf[n / 2];
+  return (buf[n / 2 - 1] + buf[n / 2]) / 2.0f;
+}
+
+static float medianChannel(float (SensorReadings::* member)) {
+  uint8_t n = 0;
+  for (uint8_t i = 0; i < s_ringCount; i++) {
+    uint8_t idx = (uint8_t)((s_ringHead + MEDIAN_WINDOW - s_ringCount + i) % MEDIAN_WINDOW);
+    float v = s_sampleRing[idx].*member;
+    if (v != SENSOR_ERROR_VALUE && !isnan(v) && !isinf(v)) {
+      s_sortScratch[n++] = v;
+    }
+  }
+  return medianOfBuffer(s_sortScratch, n);
+}
+
+/** Per-channel median of ring; invalid samples excluded per channel. */
+static SensorReadings medianFromRing() {
+  SensorReadings out;
+  out.temperature = medianChannel(&SensorReadings::temperature);
+  out.turbidity = medianChannel(&SensorReadings::turbidity);
+  out.pH = medianChannel(&SensorReadings::pH);
+  out.nh3 = medianChannel(&SensorReadings::nh3);
+  out.dissolvedOxygen = medianChannel(&SensorReadings::dissolvedOxygen);
+  out.hasErrors = (out.temperature == SENSOR_ERROR_VALUE || out.turbidity == SENSOR_ERROR_VALUE ||
+                   out.pH == SENSOR_ERROR_VALUE || out.nh3 == SENSOR_ERROR_VALUE ||
+                   out.dissolvedOxygen == SENSOR_ERROR_VALUE);
+  return out;
+}
+
+static void ringPush(const SensorReadings& r) {
+  s_sampleRing[s_ringHead] = r;
+  s_ringHead = (uint8_t)((s_ringHead + 1) % MEDIAN_WINDOW);
+  if (s_ringCount < MEDIAN_WINDOW) s_ringCount++;
+}
+
+static void ringReset() {
+  s_ringHead = 0;
+  s_ringCount = 0;
+}
+
+/** Yields to WiFi/MQTT while delaying (call often during long waits). */
+static void delayWithMqtt(unsigned long ms) {
+  unsigned long start = millis();
+  while (millis() - start < ms) {
+    checkWiFi();
+    checkMQTT();
+    delay(10);
+  }
+}
 
 // ============================================
 // WiFi Functions
@@ -245,16 +318,13 @@ int calculateWQI(float temp, float turb, float ph, float nh3, float do_val) {
 // ============================================
 
 /**
- * Publish sensor data to MQTT broker
+ * Publish sensor data to MQTT broker (median or single capture).
  */
-void publishSensorData() {
+void publishSensorData(const SensorReadings& readings) {
   if (!mqttClient.connected()) {
     Serial.println("⚠️ MQTT not connected. Cannot publish data.");
     return;
   }
-  
-  // Read all sensors
-  SensorReadings readings = readAllSensors();
   
   // Check if we have valid readings
   if (readings.hasErrors && 
@@ -279,9 +349,10 @@ void publishSensorData() {
   // Create JSON document
   StaticJsonDocument<512> doc;
   
-  // Add node information
+  // Add node information (location is in dashboard nodes table, keyed by node_id)
   doc["nodeId"] = NODE_ID;
-  doc["location"] = NODE_LOCATION;
+  doc["seq"] = ++seqCounter;
+  doc["tx_millis"] = millis();
   
   // Add sensor readings (only if valid)
   if (readings.temperature != SENSOR_ERROR_VALUE) {
@@ -350,6 +421,44 @@ void publishSensorData() {
   }
 }
 
+#if STABILIZATION_MS >= CYCLE_MS
+#error STABILIZATION_MS must be less than CYCLE_MS
+#endif
+
+/**
+ * One full period: stabilize → 1 Hz samples (rolling last MEDIAN_WINDOW) → median → MQTT → pad to CYCLE_MS.
+ */
+static void runTwoMinuteCycle() {
+  unsigned long t0 = millis();
+  uint32_t sampleSeconds = (uint32_t)((CYCLE_MS - STABILIZATION_MS) / SAMPLE_INTERVAL_MS);
+
+  Serial.println("⏳ Stabilization (sensor settle)...");
+  delayWithMqtt(STABILIZATION_MS);
+
+  ringReset();
+  Serial.print("📊 Acquiring ");
+  Serial.print(sampleSeconds);
+  Serial.println(" s @ 1 Hz (median of last ≤60 valid samples per channel)...");
+
+  for (uint32_t i = 0; i < sampleSeconds; i++) {
+    ringPush(readAllSensors());
+    delayWithMqtt(SAMPLE_INTERVAL_MS);
+  }
+
+  SensorReadings median = medianFromRing();
+
+  if (mqttClient.connected()) {
+    publishSensorData(median);
+  } else {
+    Serial.println("⚠️ MQTT not connected. Skipping publish.");
+  }
+
+  unsigned long elapsed = millis() - t0;
+  if (elapsed < CYCLE_MS) {
+    delayWithMqtt(CYCLE_MS - elapsed);
+  }
+}
+
 // ============================================
 // Setup and Loop
 // ============================================
@@ -368,9 +477,11 @@ void setup() {
   Serial.println(NODE_ID);
   Serial.print("📍 Location: ");
   Serial.println(NODE_LOCATION);
-  Serial.print("⏱️  Publish Interval: ");
-  Serial.print(PUBLISH_INTERVAL_MS / 1000);
-  Serial.println(" seconds");
+  Serial.print("⏱️  Cycle: ");
+  Serial.print(CYCLE_MS / 1000);
+  Serial.print(" s | Stabilization: ");
+  Serial.print(STABILIZATION_MS / 1000);
+  Serial.println(" s");
   Serial.println();
   
   // Setup WiFi
@@ -380,36 +491,27 @@ void setup() {
   setupMQTT();
   
   // Initialize ADC (ESP32 uses 12-bit ADC by default)
-  // Note: Some pins may need different attenuation settings
-  analogSetAttenuation(ADC_11db); // 0-3.3V range
-  
+  analogSetAttenuation(ADC_11db); // default 0–3.3 V range
+  initSensors();                  // DS18B20 + turbidity ADC pin attenuation
+
   Serial.println();
   Serial.println("🚀 Setup complete. Starting main loop...");
   Serial.println();
 }
 
 void loop() {
-  // Check WiFi connection
-  checkWiFi();
-  
-  // Check MQTT connection
-  checkMQTT();
-  
-  // Publish data at regular intervals
-  unsigned long currentTime = millis();
-  if (currentTime - lastPublishTime >= PUBLISH_INTERVAL_MS) {
-    lastPublishTime = currentTime;
-    
-    if (mqttClient.connected()) {
-      publishSensorData();
-    } else {
-      Serial.println("⚠️ MQTT not connected. Skipping publish.");
+  static bool first = true;
+  if (first) {
+    first = false;
+    if (WAKE_EARLY_MS > 0) {
+      Serial.println("⏳ Wake early before first cycle...");
+      delayWithMqtt(WAKE_EARLY_MS);
     }
-    
-    Serial.println(); // Blank line for readability
   }
-  
-  // Small delay to prevent watchdog issues
-  delay(100);
+
+  checkWiFi();
+  checkMQTT();
+  runTwoMinuteCycle();
+  Serial.println();
 }
 

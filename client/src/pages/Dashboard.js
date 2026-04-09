@@ -1,47 +1,168 @@
-import React, { useMemo, useState, useEffect, useRef, useCallback } from "react";
+import React, { useMemo, useState, useEffect, useCallback } from "react";
+import { createPortal } from "react-dom";
 import NodeSelector from "../components/dashboard/NodeSelector";
 import NodeStatus from "../components/dashboard/NodeStatus";
+import BatteryIndicator, { batteryPropsFromReading } from "../components/BatteryIndicator";
 import TodayCard from "../components/dashboard/TodayCard";
 import LiveChart from "../components/dashboard/LiveChart";
 import WqiCard from "../components/dashboard/WqiCard";
 import MiniMapCard from "../components/dashboard/MiniMapCard";
 import AlertsSummaryCard from "../components/dashboard/AlertsSummaryCard";
 import PageDateWithStatus from "../components/PageDateWithStatus";
-import { useMQTTContext } from "../contexts/MQTTContext";
+import { useLiveAlerts } from "../contexts/LiveAlertsContext";
 import { calculateWQI, getWQIClass } from "../utils/wqiCalculator";
-import { buildAlertsForAllNodes } from "../utils/alertsData";
-import { exportToJSON, exportToCSV, formatAlertsForExport } from "../utils/exportData";
-import { getNodes, loadNodes } from "../utils/nodesStorage";
+import { getNH3FromReading } from "../utils/nh3Calculator";
+import { PageLoader } from "../components/LoadingSkeleton";
 import "../pages/Map.css";
 import "./Dashboard.css";
 
-function formatDateShort(d) {
-  if (!d) return "—";
-  return new Date(d).toLocaleDateString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+/** Severity order for sort: Critical (high) first, then Warning (medium), then Info (low/info). */
+function getSeverityOrder(severity) {
+  const s = (severity || "info").toLowerCase();
+  if (s === "high") return 0;
+  if (s === "medium") return 1;
+  return 2;
+}
+
+/** Test alerts for verifying severity display. Enable via ?testAlerts=1 or localStorage wqms_test_alerts=1 */
+function getTestAlerts(selectedNodeId) {
+  const enabled =
+    typeof window !== "undefined" &&
+    (new URLSearchParams(window.location.search).get("testAlerts") === "1" ||
+      localStorage.getItem("wqms_test_alerts") === "1");
+  if (!enabled || !selectedNodeId) return [];
+  const now = Date.now();
+  return [
+    {
+      id: "test-alert-high",
+      nodeId: selectedNodeId,
+      nodeName: "Test Node",
+      type: "threshold",
+      title: "[TEST] High severity alert",
+      detail: "Simulated HIGH severity for visual verification.",
+      severity: "high",
+      parameter: "test",
+      timestamp: now,
+      createdAt: new Date(now).toISOString(),
+    },
+    {
+      id: "test-alert-medium",
+      nodeId: selectedNodeId,
+      nodeName: "Test Node",
+      type: "threshold",
+      title: "[TEST] Medium severity alert",
+      detail: "Simulated MEDIUM severity for visual verification.",
+      severity: "medium",
+      parameter: "test",
+      timestamp: now - 60000,
+      createdAt: new Date(now - 60000).toISOString(),
+    },
+    {
+      id: "test-alert-low",
+      nodeId: selectedNodeId,
+      nodeName: "Test Node",
+      type: "threshold",
+      title: "[TEST] Low severity alert",
+      detail: "Simulated LOW severity for visual verification.",
+      severity: "low",
+      parameter: "test",
+      timestamp: now - 120000,
+      createdAt: new Date(now - 120000).toISOString(),
+    },
+    {
+      id: "test-alert-info",
+      nodeId: selectedNodeId,
+      nodeName: "Test Node",
+      type: "threshold",
+      title: "[TEST] Info severity alert",
+      detail: "Simulated INFO severity for visual verification.",
+      severity: "info",
+      parameter: "test",
+      timestamp: now - 180000,
+      createdAt: new Date(now - 180000).toISOString(),
+    },
+  ];
+}
+
+const SELECTED_NODE_STORAGE_KEY = "wqms_selected_node_id";
+
+function getStoredNodeId() {
+  try {
+    return localStorage.getItem(SELECTED_NODE_STORAGE_KEY) || "";
+  } catch {
+    return "";
+  }
+}
+
+function setStoredNodeId(id) {
+  try {
+    if (id) localStorage.setItem(SELECTED_NODE_STORAGE_KEY, id);
+  } catch {}
+}
+
+function useIsMobile(breakpoint = 768) {
+  const [isMobile, setIsMobile] = useState(() =>
+    typeof window !== "undefined" ? window.innerWidth <= breakpoint : false
+  );
+  useEffect(() => {
+    const mq = window.matchMedia(`(max-width: ${breakpoint}px)`);
+    const handler = () => setIsMobile(mq.matches);
+    handler();
+    mq.addEventListener("change", handler);
+    return () => mq.removeEventListener("change", handler);
+  }, [breakpoint]);
+  return isMobile;
 }
 
 export default function Dashboard() {
-  const { isConnected: mqttConnected, getLatestReading, latestReadingsByNode } = useMQTTContext();
-  const [nodes, setNodes] = useState(() => getNodes());
-  const [selectedNodeId, setSelectedNodeId] = useState(() => getNodes()[0]?.id);
-  const alerts = useMemo(() => buildAlertsForAllNodes(nodes, latestReadingsByNode), [nodes, latestReadingsByNode]);
-  const liveReading = getLatestReading(selectedNodeId);
+  const {
+    nodes,
+    refreshNodes,
+    todayReadings,
+    readingsByNode,
+    readingsLoaded,
+    nodesLoaded,
+    lastUpdated,
+    setLastUpdated,
+    sensorTest,
+    nodeStatuses,
+    alerts,
+  } = useLiveAlerts();
 
-  useEffect(() => {
-    loadNodes().then(() => setNodes(getNodes()));
-  }, []);
-  useEffect(() => {
-    const onFocus = () => loadNodes().then(() => setNodes(getNodes()));
-    window.addEventListener("focus", onFocus);
-    return () => window.removeEventListener("focus", onFocus);
-  }, []);
+  const [selectedNodeId, setSelectedNodeId] = useState(getStoredNodeId);
   const [isLoadingAlerts] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [lastUpdated, setLastUpdated] = useState(() => new Date());
-  const [isSensorTestModalOpen, setIsSensorTestModalOpen] = useState(false);
-  const [sensorTestResults, setSensorTestResults] = useState(null);
-  const [isTestingSensor, setIsTestingSensor] = useState(false);
-  const autoRefreshIntervalRef = useRef(null);
+
+  useEffect(() => {
+    if (!nodes.length) return;
+    const activeList = nodes.filter((n) => n.active !== false);
+    const stored = getStoredNodeId();
+    setSelectedNodeId((id) => {
+      const validCurrent = id && activeList.some((n) => n.id === id);
+      if (validCurrent) return id;
+      if (stored && activeList.some((n) => n.id === stored)) return stored;
+      return activeList[0]?.id ?? nodes[0]?.id ?? "";
+    });
+  }, [nodes]);
+
+  /** Alerts for the selected node on the current date only (for Dashboard Alerts Summary card) */
+  const dashboardAlerts = useMemo(() => {
+    const nodeId = selectedNodeId || null;
+    const today = new Date().toDateString();
+    const filtered = alerts.filter((a) => {
+      const matchesNode = (a.nodeId || a.node_id) === nodeId;
+      const ts = a.timestamp ?? a.createdAt;
+      const alertDate = ts != null ? new Date(ts).toDateString() : today;
+      const matchesToday = alertDate === today;
+      return matchesNode && matchesToday;
+    });
+    const testAlerts = getTestAlerts(nodeId);
+    if (testAlerts.length === 0) return filtered;
+    const combined = [...filtered, ...testAlerts];
+    return combined.sort(
+      (a, b) => getSeverityOrder(a.severity) - getSeverityOrder(b.severity) || (b.timestamp || 0) - (a.timestamp || 0)
+    );
+  }, [alerts, selectedNodeId]);
 
   const selectedNode = useMemo(
     () => nodes.find((n) => n.id === selectedNodeId) || nodes[0],
@@ -50,94 +171,97 @@ export default function Dashboard() {
 
   const handleRefresh = () => {
     setIsRefreshing(true);
-    setTimeout(() => {
+    refreshNodes().finally(() => {
       setIsRefreshing(false);
       setLastUpdated(new Date());
-    }, 800);
+    });
   };
 
-  const handleRefreshRef = useRef(handleRefresh);
-  handleRefreshRef.current = handleRefresh;
-
-  useEffect(() => {
-    const intervalMs = 30 * 60 * 1000;
-    autoRefreshIntervalRef.current = setInterval(() => handleRefreshRef.current(), intervalMs);
-    return () => {
-      if (autoRefreshIntervalRef.current) clearInterval(autoRefreshIntervalRef.current);
-    };
-  }, []);
-
-  const handleExportJson = (data) => {
-    exportToJSON(formatAlertsForExport(data || alerts), "wqms-alerts");
-  };
-
-  const handleExportCsv = (data) => {
-    exportToCSV(formatAlertsForExport(data || alerts), "wqms-alerts");
-  };
-
-  /** Chart data: only from live MQTT (no mock). Empty when no data. */
+  /** Today's data from API/Supabase only. One point per reading for selected node. */
   const todayData = useMemo(() => {
-    if (!liveReading) return null;
-    const ts = liveReading.timestamp ? new Date(liveReading.timestamp) : new Date();
-    const label = `${String(ts.getHours()).padStart(2, "0")}:${String(ts.getMinutes()).padStart(2, "0")}`;
-    const v = (x) => (x != null && !isNaN(x) ? Number(x) : null);
-    const temp = v(liveReading.temperature);
-    const turb = v(liveReading.turbidity);
-    const ph = v(liveReading.pH ?? liveReading.ph);
-    const nh3 = v(liveReading.nh3);
-    const flow = v(liveReading.flowRate);
-    const doVal = v(liveReading.dissolvedOxygen);
-    if (temp == null && turb == null && ph == null && nh3 == null && flow == null && doVal == null) return null;
+    const nodeId = selectedNode?.id || null;
+    const list = (todayReadings || []).filter(
+      (r) => (r.node_id || r.nodeId) === nodeId
+    ).sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+    if (list.length === 0) {
+      return {
+        labels: [],
+        timestamps: [],
+        datasets: [
+          { label: "Temperature °C", data: [], borderColor: "#1b9c85", backgroundColor: "rgba(27, 156, 133, 0.1)", fill: true },
+          { label: "Turbidity", data: [], borderColor: "#d45b5b", backgroundColor: "rgba(212, 91, 91, 0.1)", fill: true },
+          { label: "Water pH", data: [], borderColor: "#f0a500", backgroundColor: "rgba(240, 165, 0, 0.1)", fill: true },
+          { label: "NH₃ mg/L", data: [], borderColor: "#9b59b6", backgroundColor: "rgba(155, 89, 182, 0.1)", fill: true },
+          { label: "Flow rate L/min", data: [], borderColor: "#3498db", backgroundColor: "rgba(52, 152, 219, 0.1)", fill: true },
+          { label: "Dissolved O₂ mg/L", data: [], borderColor: "#2ecc71", backgroundColor: "rgba(46, 204, 113, 0.1)", fill: true },
+        ],
+      };
+    }
+    const labels = list.map((r) => {
+      const d = new Date(r.timestamp);
+      return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+    });
+    const timestamps = list.map((r) => r.timestamp);
+    const tempData = list.map((r) => r.temperature ?? null);
+    const turbData = list.map((r) => r.turbidity ?? null);
+    const phData = list.map((r) => r.ph ?? r.pH ?? null);
+    const nh3Data = list.map((r) => getNH3FromReading(r));
+    const flowData = list.map((r) => r.flow_rate ?? r.flowRate ?? null);
+    const doData = list.map((r) => r.dissolved_oxygen ?? r.dissolvedOxygen ?? r.do ?? null);
     return {
-      labels: [label],
+      labels,
+      timestamps,
       datasets: [
-        { label: "Temperature °C", data: [temp], borderColor: "#1b9c85", backgroundColor: "rgba(27, 156, 133, 0.1)", fill: true },
-        { label: "Turbidity", data: [turb], borderColor: "#d45b5b", backgroundColor: "rgba(212, 91, 91, 0.1)", fill: true },
-        { label: "Water pH", data: [ph], borderColor: "#f0a500", backgroundColor: "rgba(240, 165, 0, 0.1)", fill: true },
-        { label: "NH₃ mg/L", data: [nh3], borderColor: "#9b59b6", backgroundColor: "rgba(155, 89, 182, 0.1)", fill: true },
-        { label: "Flow rate L/min", data: [flow], borderColor: "#3498db", backgroundColor: "rgba(52, 152, 219, 0.1)", fill: true },
-        { label: "Dissolved O₂ mg/L", data: [doVal], borderColor: "#2ecc71", backgroundColor: "rgba(46, 204, 113, 0.1)", fill: true },
+        { label: "Temperature °C", data: tempData, borderColor: "#1b9c85", backgroundColor: "rgba(27, 156, 133, 0.1)", fill: true },
+        { label: "Turbidity", data: turbData, borderColor: "#d45b5b", backgroundColor: "rgba(212, 91, 91, 0.1)", fill: true },
+        { label: "Water pH", data: phData, borderColor: "#f0a500", backgroundColor: "rgba(240, 165, 0, 0.1)", fill: true },
+        { label: "NH₃ mg/L (calc)", data: nh3Data, borderColor: "#9b59b6", backgroundColor: "rgba(155, 89, 182, 0.1)", fill: true },
+        { label: "Flow rate L/min", data: flowData, borderColor: "#3498db", backgroundColor: "rgba(52, 152, 219, 0.1)", fill: true },
+        { label: "Dissolved O₂ mg/L", data: doData, borderColor: "#2ecc71", backgroundColor: "rgba(46, 204, 113, 0.1)", fill: true },
       ],
     };
-  }, [liveReading]);
+  }, [selectedNode?.id, todayReadings]);
 
-  const todayStatsFromLive = useMemo(() => {
-    if (!liveReading) return null;
-    const v = (x) => (x != null && !isNaN(x) ? Math.round(Number(x) * 10) / 10 : null);
-    const one = (x) => {
-      const a = v(x);
-      return a != null ? { low: a, avg: a, high: a } : { low: null, avg: null, high: null };
+  const todayStats = useMemo(() => {
+    if (!todayData?.datasets?.length) return null;
+    const getStats = (arr, round = true) => {
+      if (!Array.isArray(arr) || arr.length === 0) return { low: null, avg: null, high: null };
+      const min = Math.min(...arr);
+      const max = Math.max(...arr);
+      const sum = arr.reduce((a, b) => a + b, 0);
+      const avg = arr.length ? sum / arr.length : null;
+      if (round) {
+        return {
+          low: Math.round(min * 10) / 10,
+          avg: avg != null ? Math.round(avg * 10) / 10 : null,
+          high: Math.round(max * 10) / 10,
+        };
+      }
+      return { low: min, avg, high: max };
     };
+    const ds = todayData.datasets;
     return {
-      temperature: one(liveReading.temperature),
-      turbidity: one(liveReading.turbidity),
-      ph: one(liveReading.pH ?? liveReading.ph),
-      nh3: one(liveReading.nh3),
-      flowRate: one(liveReading.flowRate),
-      dissolvedOxygen: one(liveReading.dissolvedOxygen),
+      temperature: getStats(ds[0]?.data),
+      turbidity: getStats(ds[1]?.data),
+      ph: getStats(ds[2]?.data),
+      nh3: getStats(ds[3]?.data, false),
+      flowRate: getStats(ds[4]?.data),
+      dissolvedOxygen: getStats(ds[5]?.data),
     };
-  }, [liveReading]);
+  }, [todayData]);
 
-  const todayStats = liveReading && todayStatsFromLive ? todayStatsFromLive : null;
-
-  /** WQI: use live reading WQI when connected, else from today's parameter averages. */
+  /** WQI from today's parameter averages. Uses calculateWQI with avg values (NH3 from readings). */
   const wqiValue = useMemo(() => {
-    if (liveReading && liveReading.wqi != null && !isNaN(liveReading.wqi)) return Math.round(liveReading.wqi);
     if (!todayStats) return null;
     const { temperature, ph, nh3, turbidity, dissolvedOxygen } = todayStats;
-    const avgTemp = temperature?.avg;
-    const avgPh = ph?.avg;
-    const avgNh3 = nh3?.avg;
-    const avgTurb = turbidity?.avg;
-    const avgDO = dissolvedOxygen?.avg;
     return calculateWQI({
-      temperature: avgTemp ?? undefined,
-      pH: avgPh ?? undefined,
-      nh3: avgNh3 ?? undefined,
-      turbidity: avgTurb ?? undefined,
-      dissolvedOxygen: avgDO ?? undefined,
+      temperature: temperature?.avg ?? undefined,
+      pH: ph?.avg ?? undefined,
+      nh3: nh3?.avg ?? undefined,
+      turbidity: turbidity?.avg ?? undefined,
+      dissolvedOxygen: dissolvedOxygen?.avg ?? undefined,
     });
-  }, [liveReading, todayStats]);
+  }, [todayStats]);
 
   const wqiLabel = useMemo(() => {
     if (wqiValue == null) return "—";
@@ -152,75 +276,70 @@ export default function Dashboard() {
     scales: { y: { beginAtZero: true } },
   }), []);
 
-  const getStoredTestResults = useCallback((nodeId) => {
-    try {
-      const key = `sensorTest_${nodeId}`;
-      const stored = localStorage.getItem(key);
-      if (stored) {
-        const data = JSON.parse(stored);
-        const testDate = new Date(data.date);
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        testDate.setHours(0, 0, 0, 0);
-        if (testDate.getTime() === today.getTime()) return data.results;
-      }
-    } catch (e) {
-      console.warn("getStoredTestResults", e);
-    }
-    return null;
-  }, []);
+  const isPageLoading = !nodesLoaded || !readingsLoaded;
+  const isMobile = useIsMobile(768);
 
   const handleSensorTest = useCallback(
-    (nodeId, forceRun = false) => {
-      const id = nodeId ?? selectedNode?.id;
-      if (!id) return;
-      if (!forceRun) {
-        const stored = getStoredTestResults(id);
-        if (stored) {
-          setSensorTestResults(stored);
-          setIsSensorTestModalOpen(true);
-          setIsTestingSensor(false);
-          return;
-        }
-      }
-      setIsTestingSensor(false);
-      setSensorTestResults({
-        nodeId: id,
-        status: "error",
-        message: "No sensor data yet.",
-        timestamp: new Date().toISOString(),
-        sensors: [],
-        empty: true,
-      });
-      setIsSensorTestModalOpen(true);
+    (nodeId) => {
+      sensorTest.runTest(nodeId ?? selectedNode?.id);
     },
-    [selectedNode?.id, getStoredTestResults]
+    [selectedNode?.id, sensorTest]
   );
+
+  if (isPageLoading) {
+    return (
+      <div className="dash">
+        <PageLoader />
+      </div>
+    );
+  }
 
   return (
     <div className="dash">
       <header className="dash__top">
         <div>
           <h1 className="dash__title">Dashboard</h1>
+          <p className="dash__subtitle">Real-time water quality monitoring</p>
         </div>
-        <PageDateWithStatus lastUpdated={lastUpdated} className="dash__date" />
+        <PageDateWithStatus lastUpdated={lastUpdated} className="dash__date" showClassification={false} />
       </header>
 
       <div className="dash__controls">
+        <span className="dash__controls-label">Node</span>
         <NodeSelector
-          nodes={nodes}
+          nodes={nodes.filter((n) => n.active !== false)}
           value={selectedNodeId}
-          onChange={setSelectedNodeId}
+          onChange={(id) => {
+            setSelectedNodeId(id);
+            setStoredNodeId(id);
+          }}
         />
-        <NodeStatus status={selectedNode?.status} isLive={mqttConnected && !!liveReading} />
+        <span className="dash__controls-divider" aria-hidden="true" />
+        {selectedNode && (() => {
+          const r = readingsByNode[selectedNode.id];
+          const bp = batteryPropsFromReading(r);
+          return (bp.voltage != null || bp.percentage != null) ? (
+            <>
+              <BatteryIndicator {...bp} showPercentage size="medium" />
+              <span className="dash__controls-divider" aria-hidden="true" />
+            </>
+          ) : null;
+        })()}
+        <NodeStatus status={selectedNode ? (nodeStatuses[selectedNode.id] ?? 'offline') : 'offline'} />
       </div>
 
       <div className="dash__grid">
         <section className="dash__cell dash__cell--today">
-          <TodayCard todayStats={todayStats} selectedNode={selectedNode} />
+          <TodayCard
+            todayStats={todayStats}
+            latestReading={readingsByNode[selectedNode?.id]}
+            selectedNode={selectedNode}
+            readingsLoaded={readingsLoaded}
+            variant={isMobile ? "tabs" : "grid"}
+          />
         </section>
-        <section className="dash__cell dash__cell--wqi">
-          <WqiCard value={wqiValue} label={wqiLabel} />
+        <section className={`dash__cell dash__cell--wqi ${isMobile ? "dash__cell--wqi-first" : ""}`}>
+          <WqiCard value={wqiValue} label={wqiLabel} minimal={isMobile} />
         </section>
         <section className="dash__cell dash__cell--live">
           <LiveChart todayData={todayData} todayChartOptions={todayChartOptions} />
@@ -230,27 +349,28 @@ export default function Dashboard() {
             nodes={nodes}
             selectedNode={selectedNode}
             onTestSensor={handleSensorTest}
-            isTestingSensor={isTestingSensor}
-            sensorTestResults={sensorTestResults}
+            isTestingSensor={sensorTest.isTesting}
+            sensorTestResults={sensorTest.allResults}
+            readingsByNode={readingsByNode}
           />
         </section>
         <section className="dash__cell dash__cell--alerts">
+          {getTestAlerts(selectedNodeId).length > 0 && (
+            <div className="dash__test-banner" role="status">
+              Test alerts enabled — disable with ?testAlerts=0 or clear wqms_test_alerts
+            </div>
+          )}
           <AlertsSummaryCard
-            alerts={alerts}
-            recentAlerts={alerts.slice(0, 5)}
+            alerts={dashboardAlerts}
             isLoadingAlerts={isLoadingAlerts}
-            lastUpdated={lastUpdated}
-            onExportJson={handleExportJson}
-            onExportCsv={handleExportCsv}
-            formatDateShort={formatDateShort}
           />
         </section>
       </div>
 
-      {isSensorTestModalOpen && (
+      {sensorTest.isOpen && createPortal(
         <div
           className="map-modal-overlay"
-          onClick={() => setIsSensorTestModalOpen(false)}
+          onClick={sensorTest.close}
           role="presentation"
         >
           <div
@@ -261,74 +381,73 @@ export default function Dashboard() {
             aria-labelledby="sensor-test-modal-title"
           >
             <header className="section-header">
-              <h2 id="sensor-test-modal-title">Sensor Test Results</h2>
+              <h2 id="sensor-test-modal-title">Sensor Status</h2>
               <button
                 type="button"
                 className="ghost-btn"
-                onClick={() => setIsSensorTestModalOpen(false)}
+                onClick={sensorTest.close}
                 aria-label="Close"
               >
                 ×
               </button>
             </header>
             <div className="sensor-test-modal-body">
-              {isTestingSensor ? (
+              {sensorTest.isTesting ? (
                 <div className="sensor-test-loading">
                   <span className="sensor-test-loading-icon">⚙️</span>
-                  <p>Testing sensors...</p>
+                  <p>Checking sensor data...</p>
                 </div>
-              ) : sensorTestResults ? (
+              ) : sensorTest.results ? (
                 <>
                   <div
-                    className={`sensor-test-summary sensor-test-summary--${sensorTestResults.status}`}
+                    className={`sensor-test-summary sensor-test-summary--${sensorTest.results.status}`}
                   >
                     <span className="sensor-test-summary-icon">
-                      {sensorTestResults.status === "success"
+                      {sensorTest.results.status === "success"
                         ? "✅"
-                        : sensorTestResults.status === "warning"
+                        : sensorTest.results.status === "warning"
                         ? "⚠️"
+                        : sensorTest.results.status === "offline"
+                        ? "📡"
                         : "❌"}
                     </span>
-                    <p className="sensor-test-summary-message">{sensorTestResults.message}</p>
+                    <p className="sensor-test-summary-message">{sensorTest.results.message}</p>
                     <p className="sensor-test-summary-time">
-                      {new Date(sensorTestResults.timestamp).toLocaleString()}
+                      {sensorTest.results.dataAge
+                        ? `Last data: ${sensorTest.results.dataAge}`
+                        : `Checked: ${new Date(sensorTest.results.timestamp).toLocaleString()}`}
                     </p>
                   </div>
-                  {sensorTestResults.empty ? (
-                    <p className="sensor-test-empty-msg">Connect to HiveMQ and ensure the node is sending data.</p>
-                  ) : (
-                    <>
-                      <div className="sensor-test-list">
-                        <h3>Sensor Status</h3>
-                        {sensorTestResults.sensors?.map((s, i) => (
-                          <div key={i} className="sensor-test-item">
-                            <div>
-                              <p className="sensor-test-item-name">{s.name}</p>
-                              <p className="sensor-test-item-response">Response: {s.responseTime}</p>
-                            </div>
-                            <div className="sensor-test-item-value">
-                              <span className={`sensor-test-badge sensor-test-badge--${s.status}`}>
-                                {s.status === "pass" ? "PASS" : "FAIL"}
-                              </span>
-                              <span>{s.value}</span>
-                            </div>
-                          </div>
-                        ))}
+                  <div className="sensor-test-list">
+                    <h3>Sensor Status</h3>
+                    {sensorTest.results.sensors?.map((s, i) => (
+                      <div key={i} className="sensor-test-item">
+                        <div>
+                          <p className="sensor-test-item-name">{s.name}</p>
+                          <p className="sensor-test-item-response">Response: {s.responseTime}</p>
+                        </div>
+                        <div className="sensor-test-item-value">
+                          <span className={`sensor-test-badge sensor-test-badge--${s.status}`}>
+                            {s.status === "pass" ? "PASS" : s.status === "stale" ? "NO DATA" : "FAIL"}
+                          </span>
+                          <span>{s.value}</span>
+                        </div>
                       </div>
-                      <button
-                        type="button"
-                        className="ghost-btn sensor-test-run-again"
-                        onClick={() => handleSensorTest(sensorTestResults.nodeId, true)}
-                      >
-                        Run Test Again
-                      </button>
-                    </>
-                  )}
+                    ))}
+                  </div>
+                  <button
+                    type="button"
+                    className="ghost-btn sensor-test-run-again"
+                    onClick={() => handleSensorTest(sensorTest.results.nodeId)}
+                  >
+                    Refresh
+                  </button>
                 </>
               ) : null}
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

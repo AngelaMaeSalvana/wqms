@@ -1,0 +1,50 @@
+.battery-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--battery-color, #333);
+}
+
+.battery-indicator--low {
+  color: var(--battery-low-color, #d32f2f);
+}
+
+.battery-indicator--low .battery-svg {
+  animation: battery-low-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes battery-low-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+.battery-indicator--small .battery-svg {
+  width: 14px;
+  height: 7px;
+}
+
+.battery-indicator--medium .battery-svg {
+  width: 18px;
+  height: 9px;
+}
+
+.battery-indicator--large .battery-svg {
+  width: 22px;
+  height: 11px;
+}
+
+.battery-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.battery-icon--unknown {
+  font-size: 0.85em;
+  opacity: 0.6;
+}
+
+.battery-percentage {
+  font-size: 0.85em;
+  font-weight: 500;
+}

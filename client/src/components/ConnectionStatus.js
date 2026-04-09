@@ -1,10 +1,10 @@
 import React, { useState } from 'react';
-import { config } from '../config/env';
 import './ConnectionStatus.css';
 
 const ConnectionStatus = ({ isConnected, isConnecting, error, onReconnect, brokerUrl }) => {
   const [showDetails, setShowDetails] = useState(false);
-  const mqttUrl = brokerUrl || config.mqtt?.url || 'HiveMQ Cloud';
+  
+  const mqttUrl = brokerUrl || process.env.REACT_APP_MQTT_WS_URL || process.env.REACT_APP_MQTT_URL || 'HiveMQ (not configured)';
 
   return (
     <div 
@@ -34,8 +34,8 @@ const ConnectionStatus = ({ isConnected, isConnecting, error, onReconnect, broke
             <p><strong>MQTT Broker:</strong> {mqttUrl}</p>
             {error && <p><strong>Error:</strong> {error}</p>}
             <p className="connection-help">
-              💡 <strong>Live data:</strong> Sensor → LoRa → Forwarder → HiveMQ → Dashboard.<br/>
-              Default: HiveMQ Cloud (WSS). Override with REACT_APP_MQTT_WS_URL, REACT_APP_MQTT_USER, REACT_APP_MQTT_PASS in .env
+              💡 <strong>To connect:</strong><br/>
+              Set REACT_APP_MQTT_WS_URL (e.g. mqtt://xxx.s1.eu.hivemq.cloud), REACT_APP_MQTT_USER, and REACT_APP_MQTT_PASS in client/.env
             </p>
           </div>
         </div>

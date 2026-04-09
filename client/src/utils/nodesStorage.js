@@ -1,10 +1,11 @@
 const STORAGE_KEY = "wqms_custom_nodes";
 
-// When Supabase is enabled, cache nodes from DB; getNodes() returns this after loadNodes().
 let nodesCache = null;
 
 /**
- * Returns the list of nodes: from Supabase cache if Supabase enabled and loaded, else localStorage.
+ * Returns the list of nodes: from in-memory cache (set by loadNodes) or localStorage.
+ * No seed/dummy data. Pages should use initial state [] and set nodes after loadNodes()
+ * so Supabase is the source when enabled (no flash of old localStorage).
  */
 export function getNodes() {
   if (nodesCache !== null) return nodesCache;
@@ -19,24 +20,45 @@ export function getNodes() {
 }
 
 /**
- * When Supabase is enabled: fetches nodes from DB, updates cache and localStorage, returns list.
- * When Supabase is disabled: resolves with getNodes() (localStorage).
+ * Clears the in-memory nodes cache. Next getNodes() will use localStorage until
+ * loadNodes() runs again. Call before loadNodes() to force a fresh fetch from Supabase.
+ */
+export function invalidateNodesCache() {
+  nodesCache = null;
+}
+
+/**
+ * When Supabase is enabled: fetches nodes from DB, updates cache and localStorage.
+ * Always uses Supabase as source when enabled; never falls back to localStorage
+ * so that deleted nodes don't reappear from stale cache.
+ * Otherwise: resolves with getNodes() (localStorage).
  */
 export async function loadNodes() {
   try {
     const { isSupabaseEnabled } = await import('../lib/supabaseClient');
     const { getNodesFromSupabase } = await import('../services/supabaseService');
     if (isSupabaseEnabled()) {
-      const fromDb = await getNodesFromSupabase();
-      const list = Array.isArray(fromDb) ? fromDb.map((r) => ({
-        id: r.id,
-        name: r.name,
-        location: r.location,
-        status: r.status ?? 'offline',
-        lat: r.lat,
-        lng: r.lng,
-      })) : [];
-      nodesCache = list; // always use DB as source of truth (even if empty)
+      nodesCache = null;
+      const [fromDb, lastTestsMap] = await Promise.all([
+        getNodesFromSupabase(),
+        (await import('../services/supabaseService')).getNodeLastSensorTestsMap(),
+      ]);
+      const list = Array.isArray(fromDb) ? fromDb.map((r) => {
+        const lt = lastTestsMap[r.id] || {};
+        return {
+          id: r.id,
+          name: r.name,
+          location: r.location,
+          status: r.status ?? 'offline',
+          lat: r.lat,
+          lng: r.lng,
+          lastMaintenance: r.last_maintenance ?? r.lastMaintenance ?? null,
+          lastSensorTestAt: lt.last_sensor_test_at ?? r.last_sensor_test_at ?? r.lastSensorTestAt ?? null,
+          lastSensorTestStatus: lt.last_sensor_test_status ?? r.last_sensor_test_status ?? r.lastSensorTestStatus ?? null,
+          active: r.active !== false,
+        };
+      }) : [];
+      nodesCache = list;
       try {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
       } catch {
@@ -46,6 +68,16 @@ export async function loadNodes() {
     }
   } catch (e) {
     console.warn("loadNodes from Supabase failed", e);
+    // When Supabase is enabled, never show stale localStorage—deleted nodes must stay hidden.
+    try {
+      const { isSupabaseEnabled } = await import('../lib/supabaseClient');
+      if (isSupabaseEnabled()) {
+        nodesCache = [];
+        return [];
+      }
+    } catch {
+      // ignore import errors
+    }
   }
   nodesCache = null;
   return getNodes();
@@ -64,8 +96,20 @@ export async function saveNodes(nodes) {
   try {
     const { isSupabaseEnabled } = await import('../lib/supabaseClient');
     const { saveNodesToSupabase } = await import('../services/supabaseService');
-    if (isSupabaseEnabled()) await saveNodesToSupabase(nodes);
+    if (isSupabaseEnabled()) {
+      await saveNodesToSupabase(nodes);
+    }
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('wqms-nodes-updated'));
+    }
   } catch (e) {
     console.warn("saveNodes to Supabase failed", e);
+    if (typeof window !== 'undefined') {
+      window.alert(
+        "Could not save nodes to the database. Changes may be lost on refresh.\n\n" +
+        "If add/deactivate don't persist, run this in Supabase Dashboard → SQL Editor:\n" +
+        "ALTER TABLE nodes ADD COLUMN IF NOT EXISTS active boolean NOT NULL DEFAULT true;"
+      );
+    }
   }
 }

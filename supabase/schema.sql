@@ -3,25 +3,145 @@
 
 -- Enable UUID extension (optional, for id columns)
 -- We use bigint serial IDs to match existing API.
+CREATE EXTENSION IF NOT EXISTS citext;
 
--- 1. Water quality readings (from sensors / MQTT)
-CREATE TABLE IF NOT EXISTS water_quality_readings (
+-- 0. User profiles (hybrid auth support: email/password + OAuth)
+-- One app profile row per Supabase auth user.
+CREATE TABLE IF NOT EXISTS profiles (
+  id uuid PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+  username citext NOT NULL UNIQUE,
+  role text NOT NULL DEFAULT 'guest' CHECK (role IN ('guest', 'admin')),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+-- Role normalization for existing installs.
+ALTER TABLE profiles DROP CONSTRAINT IF EXISTS profiles_role_check;
+UPDATE profiles SET role = 'guest' WHERE role NOT IN ('guest', 'admin');
+ALTER TABLE profiles ADD CONSTRAINT profiles_role_check CHECK (role IN ('guest', 'admin'));
+
+-- Keep auth.users app metadata in sync so role is also visible in Auth user details.
+CREATE OR REPLACE FUNCTION sync_auth_user_role_from_profile()
+RETURNS TRIGGER AS $$
+BEGIN
+  UPDATE auth.users
+  SET raw_app_meta_data = COALESCE(raw_app_meta_data, '{}'::jsonb) || jsonb_build_object('role', NEW.role)
+  WHERE id = NEW.id;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+DROP TRIGGER IF EXISTS profiles_sync_auth_role ON profiles;
+CREATE TRIGGER profiles_sync_auth_role
+  AFTER INSERT OR UPDATE OF role ON profiles
+  FOR EACH ROW EXECUTE FUNCTION sync_auth_user_role_from_profile();
+
+-- Backfill current roles into auth metadata.
+UPDATE auth.users u
+SET raw_app_meta_data = COALESCE(u.raw_app_meta_data, '{}'::jsonb) || jsonb_build_object('role', p.role)
+FROM profiles p
+WHERE p.id = u.id;
+
+-- 0b. App users table (custom auth: username + password)
+-- This is the table intended for adding your own custom columns.
+CREATE TABLE IF NOT EXISTS users (
+  id uuid PRIMARY KEY,
+  username citext NOT NULL UNIQUE,
+  email citext UNIQUE,
+  password_hash text NOT NULL,
+  role text NOT NULL DEFAULT 'guest' CHECK (role IN ('guest', 'admin')),
+  is_active boolean NOT NULL DEFAULT true,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+ALTER TABLE users ADD COLUMN IF NOT EXISTS email citext;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active boolean NOT NULL DEFAULT true;
+CREATE UNIQUE INDEX IF NOT EXISTS users_email_unique_idx ON users (email);
+
+-- One-time password reset links (server-only; accessed via service role).
+CREATE TABLE IF NOT EXISTS password_reset_tokens (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  token_hash text NOT NULL,
+  expires_at timestamptz NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS password_reset_tokens_token_hash_idx ON password_reset_tokens (token_hash);
+CREATE INDEX IF NOT EXISTS password_reset_tokens_user_id_idx ON password_reset_tokens (user_id);
+
+-- Login / logout session history for app-managed users.
+CREATE TABLE IF NOT EXISTS auth_sessions (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  login_at timestamptz NOT NULL DEFAULT now(),
+  logout_at timestamptz,
+  ip_address text,
+  user_agent text,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS auth_sessions_user_login_idx ON auth_sessions (user_id, login_at DESC);
+
+-- Audit trail for role changes (admin/guest).
+CREATE TABLE IF NOT EXISTS user_role_audit (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  actor_user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  target_user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  from_role text NOT NULL CHECK (from_role IN ('guest', 'admin')),
+  to_role text NOT NULL CHECK (to_role IN ('guest', 'admin')),
+  changed_at timestamptz NOT NULL DEFAULT now(),
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS user_role_audit_target_changed_idx ON user_role_audit (target_user_id, changed_at DESC);
+
+-- Generic audit log for app changes (profile updates, node edits, etc.).
+CREATE TABLE IF NOT EXISTS audit_events (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  actor_user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  action text NOT NULL,
+  entity_type text NOT NULL,
+  entity_id text,
+  details jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS audit_events_actor_created_idx ON audit_events (actor_user_id, created_at DESC);
+
+-- 1. Sensor readings (single table for all sensor/forwarder data; MQTT bridge + API write here)
+-- WQI calculated in backend (bridge) per reading when 3+ params available; stored here for reports/calendar.
+CREATE TABLE IF NOT EXISTS sensor_readings (
   id bigint GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
-  node_id text,
-  location text,
+  node_id text NOT NULL,
   temperature real,
   turbidity real,
   ph real,
-  nh3 real,
   dissolved_oxygen real,
+  flow_rate real,
+  seq integer,
+  tx_millis bigint,
+  rx_millis bigint,
+  timestamp timestamptz NOT NULL DEFAULT now(),
+  created_at timestamptz DEFAULT now(),
+  -- Timestamp chain (epoch ms) for E2E latency measurement
+  t_node bigint,
+  t_fwd_rx bigint,
+  t_fwd_pub bigint,
+  t_be_rx bigint,
+  t_dash_rx bigint,
+  -- Test run association
+  test_run_id text,
+  -- LoRa link quality (captured by forwarder on packet reception)
+  rssi smallint,
+  snr  smallint,
   wqi integer,
-  timestamp timestamptz DEFAULT now(),
-  created_at timestamptz DEFAULT now()
+  temperature_corrected real,
+  ph_corrected real,
+  turbidity_corrected real,
+  dissolved_oxygen_corrected real,
+  flow_rate_corrected real,
+  nh3_corrected real
 );
 
-CREATE INDEX IF NOT EXISTS idx_readings_node_id ON water_quality_readings (node_id);
-CREATE INDEX IF NOT EXISTS idx_readings_timestamp ON water_quality_readings (timestamp DESC);
--- Index on date(timestamp) omitted: Postgres requires IMMUTABLE functions in index expressions.
+CREATE INDEX IF NOT EXISTS idx_sensor_readings_node_id ON sensor_readings (node_id);
+CREATE INDEX IF NOT EXISTS idx_sensor_readings_timestamp ON sensor_readings (timestamp DESC);
 
 -- 2. Alerts
 CREATE TABLE IF NOT EXISTS alerts (
@@ -30,27 +150,48 @@ CREATE TABLE IF NOT EXISTS alerts (
   title text,
   detail text,
   severity text,
+  type text,
+  node_name text,
+  parameter text,
+  value real,
+  threshold_min real,
+  threshold_max real,
+  status text DEFAULT 'active',
   timestamp timestamptz DEFAULT now(),
   created_at timestamptz DEFAULT now()
 );
 
 CREATE INDEX IF NOT EXISTS idx_alerts_timestamp ON alerts (timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_alerts_severity ON alerts (severity);
+CREATE INDEX IF NOT EXISTS idx_alerts_status_timestamp ON alerts (status, timestamp DESC);
 
 -- 3. Daily summaries (aggregates for reports)
+-- avg_tan = raw; avg_wqi/min_wqi/max_wqi = computed when building summary (app).
+-- min_*/max_* per parameter = true daily extremes tracked incrementally by bridge.
 CREATE TABLE IF NOT EXISTS daily_summaries (
   id bigint GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
   date date NOT NULL,
   node_id text NOT NULL,
   location text,
   avg_temperature real,
+  min_temperature real,
+  max_temperature real,
   avg_turbidity real,
+  min_turbidity real,
+  max_turbidity real,
   avg_ph real,
-  avg_nh3 real,
+  min_ph real,
+  max_ph real,
+  avg_tan real,
   avg_dissolved_oxygen real,
+  min_dissolved_oxygen real,
+  max_dissolved_oxygen real,
+  avg_flow_rate real,
+  min_flow_rate real,
+  max_flow_rate real,
   avg_wqi real,
-  min_wqi integer,
-  max_wqi integer,
+  min_wqi real,
+  max_wqi real,
   reading_count integer,
   created_at timestamptz DEFAULT now(),
   UNIQUE(date, node_id)
@@ -59,7 +200,16 @@ CREATE TABLE IF NOT EXISTS daily_summaries (
 CREATE INDEX IF NOT EXISTS idx_summaries_date ON daily_summaries (date DESC);
 CREATE INDEX IF NOT EXISTS idx_summaries_node_id ON daily_summaries (node_id);
 
--- 4. Nodes (replaces localStorage; sync across devices when using Supabase)
+-- 4. Settings (thresholds, calibration, data collection, WQI weights; sync across devices when using Supabase)
+CREATE TABLE IF NOT EXISTS settings (
+  id bigint GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+  key text NOT NULL UNIQUE,
+  value jsonb NOT NULL DEFAULT '{}',
+  updated_at timestamptz DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_settings_key ON settings (key);
+
+-- 5. Nodes (replaces localStorage; sync across devices when using Supabase)
 CREATE TABLE IF NOT EXISTS nodes (
   id text PRIMARY KEY,
   name text,
@@ -67,8 +217,19 @@ CREATE TABLE IF NOT EXISTS nodes (
   status text DEFAULT 'offline',
   lat double precision,
   lng double precision,
+  last_maintenance timestamptz,
+  last_sensor_test_at timestamptz,
+  last_sensor_test_status text,
+  active boolean NOT NULL DEFAULT true,
   created_at timestamptz DEFAULT now(),
   updated_at timestamptz DEFAULT now()
+);
+
+-- 6. Node last sensor tests (persisted per node_id; works for nodes table and derived nodes)
+CREATE TABLE IF NOT EXISTS node_last_sensor_tests (
+  node_id text PRIMARY KEY,
+  last_sensor_test_at timestamptz NOT NULL,
+  last_sensor_test_status text
 );
 
 -- Seed default nodes (optional; run once)
@@ -81,16 +242,123 @@ ON CONFLICT (id) DO NOTHING;
 
 -- Row Level Security (RLS): enable then allow anon read/write for WQMS (no auth).
 -- For production with auth, restrict by user/role.
-ALTER TABLE water_quality_readings ENABLE ROW LEVEL SECURITY;
+ALTER TABLE sensor_readings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE alerts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE daily_summaries ENABLE ROW LEVEL SECURITY;
+ALTER TABLE settings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE nodes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE node_last_sensor_tests ENABLE ROW LEVEL SECURITY;
+ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE users ENABLE ROW LEVEL SECURITY;
+ALTER TABLE password_reset_tokens ENABLE ROW LEVEL SECURITY;
+ALTER TABLE auth_sessions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE user_role_audit ENABLE ROW LEVEL SECURITY;
+ALTER TABLE audit_events ENABLE ROW LEVEL SECURITY;
 
--- Policies: allow all for anon key (dashboard + serverless/backend use same DB)
-CREATE POLICY "Allow all on water_quality_readings" ON water_quality_readings FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Allow all on alerts" ON alerts FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Allow all on daily_summaries" ON daily_summaries FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Allow all on nodes" ON nodes FOR ALL USING (true) WITH CHECK (true);
+-- Policies: authenticated access defaults.
+-- Notes:
+-- - Service role can still access tables (server-side key).
+-- - Client access now requires authenticated users.
+-- Drop first so this script is re-runnable (avoids "policy already exists").
+DROP POLICY IF EXISTS "Allow all on sensor_readings" ON sensor_readings;
+DROP POLICY IF EXISTS "Allow service role full access on sensor_readings" ON sensor_readings;
+DROP POLICY IF EXISTS "Allow anon read on sensor_readings" ON sensor_readings;
+DROP POLICY IF EXISTS "Authenticated read sensor_readings" ON sensor_readings;
+DROP POLICY IF EXISTS "Authenticated write sensor_readings" ON sensor_readings;
+DROP POLICY IF EXISTS "Authenticated update sensor_readings" ON sensor_readings;
+CREATE POLICY "Authenticated read sensor_readings" ON sensor_readings
+  FOR SELECT TO authenticated USING (true);
+CREATE POLICY "Authenticated write sensor_readings" ON sensor_readings
+  FOR INSERT TO authenticated WITH CHECK (true);
+CREATE POLICY "Authenticated update sensor_readings" ON sensor_readings
+  FOR UPDATE TO authenticated USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Allow all on alerts" ON alerts;
+DROP POLICY IF EXISTS "Authenticated read alerts" ON alerts;
+DROP POLICY IF EXISTS "Authenticated write alerts" ON alerts;
+DROP POLICY IF EXISTS "Authenticated update alerts" ON alerts;
+CREATE POLICY "Authenticated read alerts" ON alerts
+  FOR SELECT TO authenticated USING (true);
+CREATE POLICY "Authenticated write alerts" ON alerts
+  FOR INSERT TO authenticated WITH CHECK (true);
+CREATE POLICY "Authenticated update alerts" ON alerts
+  FOR UPDATE TO authenticated USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Allow all on daily_summaries" ON daily_summaries;
+DROP POLICY IF EXISTS "Authenticated read daily_summaries" ON daily_summaries;
+DROP POLICY IF EXISTS "Authenticated write daily_summaries" ON daily_summaries;
+DROP POLICY IF EXISTS "Authenticated update daily_summaries" ON daily_summaries;
+CREATE POLICY "Authenticated read daily_summaries" ON daily_summaries
+  FOR SELECT TO authenticated USING (true);
+CREATE POLICY "Authenticated write daily_summaries" ON daily_summaries
+  FOR INSERT TO authenticated WITH CHECK (true);
+CREATE POLICY "Authenticated update daily_summaries" ON daily_summaries
+  FOR UPDATE TO authenticated USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Allow all on settings" ON settings;
+DROP POLICY IF EXISTS "Authenticated read settings" ON settings;
+DROP POLICY IF EXISTS "Authenticated write settings" ON settings;
+DROP POLICY IF EXISTS "Authenticated update settings" ON settings;
+CREATE POLICY "Authenticated read settings" ON settings
+  FOR SELECT TO authenticated USING (true);
+CREATE POLICY "Authenticated write settings" ON settings
+  FOR INSERT TO authenticated WITH CHECK (true);
+CREATE POLICY "Authenticated update settings" ON settings
+  FOR UPDATE TO authenticated USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Allow all on nodes" ON nodes;
+DROP POLICY IF EXISTS "Authenticated read nodes" ON nodes;
+DROP POLICY IF EXISTS "Authenticated write nodes" ON nodes;
+DROP POLICY IF EXISTS "Authenticated update nodes" ON nodes;
+CREATE POLICY "Authenticated read nodes" ON nodes
+  FOR SELECT TO authenticated USING (true);
+CREATE POLICY "Authenticated write nodes" ON nodes
+  FOR INSERT TO authenticated WITH CHECK (true);
+CREATE POLICY "Authenticated update nodes" ON nodes
+  FOR UPDATE TO authenticated USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Allow all on node_last_sensor_tests" ON node_last_sensor_tests;
+DROP POLICY IF EXISTS "Authenticated read node_last_sensor_tests" ON node_last_sensor_tests;
+DROP POLICY IF EXISTS "Authenticated write node_last_sensor_tests" ON node_last_sensor_tests;
+DROP POLICY IF EXISTS "Authenticated update node_last_sensor_tests" ON node_last_sensor_tests;
+CREATE POLICY "Authenticated read node_last_sensor_tests" ON node_last_sensor_tests
+  FOR SELECT TO authenticated USING (true);
+CREATE POLICY "Authenticated write node_last_sensor_tests" ON node_last_sensor_tests
+  FOR INSERT TO authenticated WITH CHECK (true);
+CREATE POLICY "Authenticated update node_last_sensor_tests" ON node_last_sensor_tests
+  FOR UPDATE TO authenticated USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Allow all on profiles" ON profiles;
+DROP POLICY IF EXISTS "Users read own profile" ON profiles;
+DROP POLICY IF EXISTS "Users insert own profile" ON profiles;
+DROP POLICY IF EXISTS "Users update own profile" ON profiles;
+CREATE POLICY "Users read own profile" ON profiles
+  FOR SELECT TO authenticated USING (auth.uid() = id);
+CREATE POLICY "Users insert own profile" ON profiles
+  FOR INSERT TO authenticated WITH CHECK (auth.uid() = id);
+CREATE POLICY "Users update own profile" ON profiles
+  FOR UPDATE TO authenticated USING (auth.uid() = id) WITH CHECK (auth.uid() = id);
+
+DROP POLICY IF EXISTS "Allow all on users" ON users;
+DROP POLICY IF EXISTS "Users read own user" ON users;
+DROP POLICY IF EXISTS "Users update own user" ON users;
+CREATE POLICY "Users read own user" ON users
+  FOR SELECT TO authenticated USING (auth.uid() = id);
+CREATE POLICY "Users update own user" ON users
+  FOR UPDATE TO authenticated USING (auth.uid() = id) WITH CHECK (auth.uid() = id);
+
+DROP POLICY IF EXISTS "Allow all on auth_sessions" ON auth_sessions;
+DROP POLICY IF EXISTS "Users read own auth sessions" ON auth_sessions;
+CREATE POLICY "Users read own auth sessions" ON auth_sessions
+  FOR SELECT TO authenticated USING (auth.uid() = user_id);
+
+DROP POLICY IF EXISTS "Users read own role audit" ON user_role_audit;
+CREATE POLICY "Users read own role audit" ON user_role_audit
+  FOR SELECT TO authenticated USING (auth.uid() = target_user_id);
+
+DROP POLICY IF EXISTS "Users read own audit events" ON audit_events;
+CREATE POLICY "Users read own audit events" ON audit_events
+  FOR SELECT TO authenticated USING (auth.uid() = actor_user_id);
 
 -- Optional: updated_at trigger for nodes
 CREATE OR REPLACE FUNCTION set_updated_at()
@@ -105,3 +373,88 @@ DROP TRIGGER IF EXISTS nodes_updated_at ON nodes;
 CREATE TRIGGER nodes_updated_at
   BEFORE UPDATE ON nodes
   FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+DROP TRIGGER IF EXISTS profiles_updated_at ON profiles;
+CREATE TRIGGER profiles_updated_at
+  BEFORE UPDATE ON profiles
+  FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+DROP TRIGGER IF EXISTS users_updated_at ON users;
+CREATE TRIGGER users_updated_at
+  BEFORE UPDATE ON users
+  FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+-- Optional: refresh daily summaries from sensor_readings (call from app or cron)
+-- Usage: SELECT * FROM refresh_daily_summaries('2025-01-01'::date, '2025-01-31'::date);
+-- Or for a single day: SELECT * FROM refresh_daily_summaries(current_date, current_date);
+CREATE OR REPLACE FUNCTION refresh_daily_summaries(p_start_date date, p_end_date date)
+RETURNS TABLE (
+  date date,
+  node_id text,
+  location text,
+  reading_count bigint,
+  avg_temperature double precision,
+  avg_turbidity double precision,
+  avg_ph double precision,
+  avg_tan double precision,
+  avg_dissolved_oxygen double precision,
+  avg_flow_rate double precision,
+  avg_wqi double precision,
+  min_wqi integer,
+  max_wqi integer
+) AS $$
+BEGIN
+  RETURN QUERY
+  INSERT INTO daily_summaries (
+    date, node_id, location, reading_count,
+    avg_temperature, avg_turbidity, avg_ph, avg_tan, avg_dissolved_oxygen, avg_flow_rate,
+    avg_wqi, min_wqi, max_wqi
+  )
+  SELECT
+    (r.timestamp AT TIME ZONE 'UTC')::date AS date,
+    r.node_id,
+    COALESCE(n.location, r.node_id::text) AS location,
+    count(*)::integer AS reading_count,
+    avg(r.temperature)::real AS avg_temperature,
+    avg(r.turbidity)::real AS avg_turbidity,
+    avg(r.ph)::real AS avg_ph,
+    NULL::real AS avg_tan,
+    avg(r.dissolved_oxygen)::real AS avg_dissolved_oxygen,
+    avg(r.flow_rate)::real AS avg_flow_rate,
+    NULL::real AS avg_wqi,
+    NULL::integer AS min_wqi,
+    NULL::integer AS max_wqi
+  FROM sensor_readings r
+  LEFT JOIN nodes n ON n.id = r.node_id
+  WHERE r.timestamp IS NOT NULL
+    AND (r.timestamp AT TIME ZONE 'UTC')::date >= p_start_date
+    AND (r.timestamp AT TIME ZONE 'UTC')::date <= p_end_date
+  GROUP BY (r.timestamp AT TIME ZONE 'UTC')::date, r.node_id, n.location
+  ON CONFLICT (date, node_id) DO UPDATE SET
+    location = EXCLUDED.location,
+    reading_count = EXCLUDED.reading_count,
+    avg_temperature = EXCLUDED.avg_temperature,
+    avg_turbidity = EXCLUDED.avg_turbidity,
+    avg_ph = EXCLUDED.avg_ph,
+    avg_tan = EXCLUDED.avg_tan,
+    avg_dissolved_oxygen = EXCLUDED.avg_dissolved_oxygen,
+    avg_flow_rate = EXCLUDED.avg_flow_rate,
+    avg_wqi = EXCLUDED.avg_wqi,
+    min_wqi = EXCLUDED.min_wqi,
+    max_wqi = EXCLUDED.max_wqi
+  RETURNING
+    daily_summaries.date,
+    daily_summaries.node_id,
+    daily_summaries.location,
+    daily_summaries.reading_count::bigint,
+    daily_summaries.avg_temperature::double precision,
+    daily_summaries.avg_turbidity::double precision,
+    daily_summaries.avg_ph::double precision,
+    daily_summaries.avg_tan::double precision,
+    daily_summaries.avg_dissolved_oxygen::double precision,
+    daily_summaries.avg_flow_rate::double precision,
+    daily_summaries.avg_wqi::double precision,
+    daily_summaries.min_wqi,
+    daily_summaries.max_wqi;
+END;
+$$ LANGUAGE plpgsql;

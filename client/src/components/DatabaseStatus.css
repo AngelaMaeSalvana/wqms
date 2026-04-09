@@ -27,22 +27,6 @@
   color: var(--text);
 }
 
-.database-status--none {
-  background-color: rgba(128, 128, 128, 0.15);
-  border: 1px solid rgba(128, 128, 128, 0.4);
-  color: var(--text);
-}
-
-.database-status--none .database-status__dot {
-  background: #888;
-}
-
-.database-status__hint {
-  font-size: 10px;
-  opacity: 0.85;
-  margin-left: 4px;
-}
-
 .database-status__dot {
   width: 8px;
   height: 8px;

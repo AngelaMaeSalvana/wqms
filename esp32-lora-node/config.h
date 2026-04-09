@@ -10,8 +10,8 @@
 // ============================================
 // WiFi Configuration
 // ============================================
-#define WIFI_SSID "YOUR_WIFI_SSID"           // Your WiFi network name
-#define WIFI_PASSWORD "YOUR_WIFI_PASSWORD"    // Your WiFi password
+#define WIFI_SSID "Chikoy2.4_LongAsHenk"      // Your WiFi network name
+#define WIFI_PASSWORD "FmAZvn3f"              // Your WiFi password
 
 // ============================================
 // MQTT Broker Configuration
@@ -23,22 +23,49 @@
 // ============================================
 // Node Configuration
 // ============================================
-#define NODE_ID "1"                           // Unique identifier for this node (1, 2, 3, etc.)
+#define NODE_ID "2"                           // Unique identifier for this node (1, 2, 3, etc.)
 #define NODE_LOCATION "Villanueva"            // Location name for this node
 
 // ============================================
-// Publishing Configuration
+// TDMA (Time Division Multiple Access)
 // ============================================
-#define PUBLISH_INTERVAL_MS 5000              // How often to publish data (milliseconds)
+// Each node gets an exclusive time slot so transmissions never collide.
+// Slot boundaries are derived from NTP epoch ms — all nodes share the same clock.
+//
+// NODE_SLOT:      This node's slot (0-based). Only this line changes per node.
+//                   N1=0, N2=1, N3=2, N4=3, N5=4, N6=5, N7=6, N8=7
+// TDMA_NUM_SLOTS: Fixed at 8. Unused slots are idle. NEVER change this —
+//                   existing nodes do not need reflashing when adding new nodes.
+// TDMA_SLOT_MS:   Slot width in ms. Cycle = 8 * 6000ms = 48s per node.
+// TDMA_TX_WINDOW_MS: TX allowed in first 3500ms of slot. Must be > TX+ACK (~2500ms).
+//                    Remaining 2500ms is the guard band.
+// TDMA_FALLBACK_MS:  Sending interval when NTP is not yet synced (= 1 full cycle).
+#define NODE_SLOT          1                  // N2 (N1=0, N2=1, …)
+#define TDMA_NUM_SLOTS     8                  // Fixed max capacity (never change)
+#define TDMA_SLOT_MS       6000               // Slot width in ms (cycle = 48s)
+#define TDMA_TX_WINDOW_MS  3500               // TX allowed within first 3500ms of slot
+#define TDMA_FALLBACK_MS   48000              // Fallback interval when NTP unsynced
+
+// ============================================
+// Publishing Configuration (esp32_wqms_node.ino — MQTT WiFi node)
+// ============================================
+// Two-minute cycle: stabilize, then 1 Hz samples (rolling last 60), median, publish.
+#define CYCLE_MS                 120000UL    // Full period between publishes (2 minutes)
+#define STABILIZATION_MS         45000UL     // 30–60 s typical; sensor settle time before sampling
+#define WAKE_EARLY_MS            0UL         // Optional extra wait at boot before first cycle (e.g. 120000)
+#define MEDIAN_WINDOW            60          // Keep at most this many 1 Hz samples for median
+#define SAMPLE_INTERVAL_MS       1000        // One reading per second during acquisition phase
 #define MQTT_TOPIC_PREFIX "water-quality"     // MQTT topic prefix
 
 // ============================================
 // Sensor Pin Configuration
 // ============================================
-// Adjust these pin numbers based on your actual hardware connections
-#define TEMP_SENSOR_PIN 34                    // ADC1_CH6 (GPIO34) - Temperature sensor
-#define TURBIDITY_SENSOR_PIN 35               // ADC1_CH7 (GPIO35) - Turbidity sensor
-#define PH_SENSOR_PIN 32                      // ADC1_CH4 (GPIO32) - pH sensor
+// DS18B20: DATA on GPIO with 4.7k pull-up to 3V3 (OneWire)
+// Turbidity: analog on GPIO5 (Heltec); NTU = linear fit on raw 12-bit ADC counts
+// pH / turbidity pins below match your wiring (GPIO1 pH, GPIO5 turbidity).
+#define DS18B20_PIN 4                         // DS18B20 DATA
+#define TURBIDITY_SENSOR_PIN 5                // Turbidity ADC (your wiring)
+#define PH_SENSOR_PIN 1                       // pH analog (your wiring)
 #define NH3_SENSOR_PIN 33                     // ADC1_CH5 (GPIO33) - NH3 sensor
 #define DO_SENSOR_PIN 36                      // ADC1_CH0 (GPIO36) - Dissolved Oxygen sensor
 
@@ -47,17 +74,17 @@
 // ============================================
 // Adjust these based on your sensor specifications and calibration
 
-// Temperature sensor calibration (adjust based on your sensor)
-#define TEMP_MIN_VOLTAGE 0.0                  // Minimum voltage output
-#define TEMP_MAX_VOLTAGE 3.3                  // Maximum voltage output
-#define TEMP_MIN_VALUE 0.0                    // Minimum temperature (°C)
-#define TEMP_MAX_VALUE 50.0                   // Maximum temperature (°C)
-
-// Turbidity sensor calibration (NTU)
-#define TURBIDITY_MIN_VOLTAGE 0.0
-#define TURBIDITY_MAX_VOLTAGE 3.3
-#define TURBIDITY_MIN_VALUE 0.0               // Minimum turbidity (NTU)
-#define TURBIDITY_MAX_VALUE 100.0              // Maximum turbidity (NTU)
+// Turbidity (NTU): linear map from 12-bit raw ADC counts — result *is* NTU, not “uncalibrated raw”.
+// With negative slope + large intercept, *low* raw counts yield *high* NTU; typical clear water often
+// sits in a mid/high raw band for your wiring. If NTU looks huge, check raw in Serial (print turRaw)
+// and recalibrate K/B for your divider / sensor, or adjust TURBIDITY_RAW_MIN_VALID if needed.
+// Lab sketch (Heltec): raw < 1500 → sensor fault/disconnected; else NTU = -0.3881*raw + 822.39 (clamp ≥ 0).
+#define TURBIDITY_RAW_MIN_VALID      1500      // Minimum valid 12-bit ADC counts (below = fault / disconnected)
+#define TURBIDITY_NTU_K              (-0.3881f)
+#define TURBIDITY_NTU_B              (822.39f)
+#define TURBIDITY_ADC_SAMPLES        30       // Averaging (20–50 typical)
+#define TURBIDITY_SAMPLE_DELAY_MS    5        // Delay between ADC samples
+#define TURBIDITY_MAX_VALID_NTU      4000.0f // Upper sanity clamp
 
 // pH sensor calibration
 #define PH_MIN_VOLTAGE 0.0
@@ -77,6 +104,16 @@
 #define DO_MAX_VOLTAGE 3.3
 #define DO_MIN_VALUE 0.0                      // Minimum DO (mg/L)
 #define DO_MAX_VALUE 20.0                     // Maximum DO (mg/L)
+
+// ============================================
+// Battery Monitoring (single Li-ion cell)
+// ============================================
+// GPIO pin for battery voltage divider (ADC1). Use -1 to disable.
+// Typical: 100k+100k divider -> 4.2V becomes 2.1V at ADC; set DIVIDER to 2.0
+#define BATTERY_PIN 39                       // ADC1_CH3 (GPIO39) - Heltec LoRa32 V3 VBAT
+#define BATTERY_VOLTAGE_DIVIDER 2.0          // V_battery = adc_voltage * DIVIDER
+#define BATTERY_VOLTAGE_FULL 4.2f            // 100% (single Li-ion)
+#define BATTERY_VOLTAGE_EMPTY 3.3f           // 0%
 
 // ============================================
 // ADC Configuration

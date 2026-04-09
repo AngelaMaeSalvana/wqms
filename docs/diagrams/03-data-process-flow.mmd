@@ -1,0 +1,43 @@
+flowchart TB
+    subgraph ingestion [Ingestion]
+        S[IoT Sensors]
+        M[MQTT Broker]
+        B[Backend API]
+        D[(Database)]
+    end
+
+    subgraph processing [Processing]
+        R[Readings]
+        A[Alerts Engine]
+        W[WebSocket]
+        Realtime[Supabase Realtime]
+    end
+
+    subgraph presentation [Presentation]
+        P1[Dashboard]
+        P2[Reports]
+        P3[Sensor Logs]
+        P4[Alerts]
+        P5[Map]
+    end
+
+    S -->|publish| M
+    M -->|receive| B
+    B -->|store| D
+    B -->|broadcast| W
+    D -->|INSERT| Realtime
+
+    D --> R
+    R --> A
+    A --> D
+    Realtime --> P1
+    Realtime --> P4
+    W --> P1
+    R --> P1
+    R --> P2
+    R --> P3
+    A --> P4
+    D --> P2
+    D --> P3
+    D --> P4
+    D --> P5
