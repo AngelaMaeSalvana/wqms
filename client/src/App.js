@@ -8,6 +8,7 @@ import { PageLoader } from "./components/LoadingSkeleton";
 import ErrorBoundary from "./components/ErrorBoundary.js";
 import { TestRunProvider } from "./contexts/TestRunContext";
 import { AuthProvider } from "./contexts/AuthContext";
+import { LiveAlertsProvider } from "./contexts/LiveAlertsContext";
 import TestRunToast from "./components/TestRunToast";
 import RequireAuth from "./components/RequireAuth";
 import RequireAdmin from "./components/RequireAdmin";
@@ -18,6 +19,7 @@ import SensorLogs from "./pages/SensorLogs";
 import Map from "./pages/Map";
 import Alerts from "./pages/Alerts";
 import Nodes from "./pages/Nodes";
+import Users from "./pages/Users";
 import InactiveNodes from "./pages/InactiveNodes";
 import Settings from "./pages/Settings";
 import PerformanceTest from "./pages/PerformanceTest";
@@ -80,7 +82,9 @@ export default function App() {
                 <Route
                   element={(
                     <RequireAuth>
-                      <Layout />
+                      <LiveAlertsProvider>
+                        <Layout />
+                      </LiveAlertsProvider>
                     </RequireAuth>
                   )}
                 >
@@ -102,6 +106,14 @@ export default function App() {
                     element={(
                       <RequireAdmin>
                         <InactiveNodes />
+                      </RequireAdmin>
+                    )}
+                  />
+                  <Route
+                    path="/users"
+                    element={(
+                      <RequireAdmin>
+                        <Users />
                       </RequireAdmin>
                     )}
                   />

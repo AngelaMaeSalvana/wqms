@@ -45,7 +45,7 @@ export function AuthProvider({ children }) {
     profileCompleted: !!user?.username,
     refreshProfile: async () => refreshProfile(),
     signOut: async () => {
-      api.logout();
+      await api.logoutServer();
       setUser(null);
       try {
         localStorage.removeItem('wqms_current_user');

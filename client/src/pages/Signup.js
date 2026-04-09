@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import api from '../services/api';
+import { useToast } from '../hooks/useToast';
+import { ToastContainer } from '../components/Toast';
 import './Auth.css';
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -12,6 +14,7 @@ export default function Signup() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const { toasts, showToast, removeToast } = useToast();
 
   const signUp = async (e) => {
     e.preventDefault();
@@ -21,17 +24,23 @@ export default function Signup() {
     const normalizedUsername = username.trim();
     const normalizedEmail = email.trim().toLowerCase();
     if (!/^[a-zA-Z0-9_]{3,32}$/.test(normalizedUsername)) {
-      setError('Username must be 3-32 characters and use letters, numbers, or underscore.');
+      const message = 'Username must be 3-32 characters and use letters, numbers, or underscore.';
+      setError(message);
+      showToast(message, 'error');
       setLoading(false);
       return;
     }
     if (!normalizedEmail) {
-      setError('Please enter your email.');
+      const message = 'Please enter your email.';
+      setError(message);
+      showToast(message, 'error');
       setLoading(false);
       return;
     }
     if (!EMAIL_REGEX.test(normalizedEmail)) {
-      setError('Please enter a valid email address.');
+      const message = 'Please enter a valid email address.';
+      setError(message);
+      showToast(message, 'error');
       setLoading(false);
       return;
     }
@@ -39,7 +48,9 @@ export default function Signup() {
       await api.signup({ username: normalizedUsername, email: normalizedEmail, password });
       setSuccess('Signup successful. You can sign in with your username and password. This email is used for password recovery.');
     } catch (err) {
-      setError(err?.message || 'Signup failed');
+      const message = err?.message || 'Signup failed';
+      setError(message);
+      showToast(message, 'error');
     }
     setLoading(false);
   };
@@ -61,6 +72,7 @@ export default function Signup() {
         {success ? <p className="auth-success">{success}</p> : null}
         <p className="auth-footer">Already have an account? <Link to="/login">Login</Link></p>
       </div>
+      <ToastContainer toasts={toasts} onClose={removeToast} />
     </div>
   );
 }

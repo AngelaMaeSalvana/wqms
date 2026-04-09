@@ -290,15 +290,16 @@ async function getUserById(userId) {
     const msg = String(err?.message || '').toLowerCase();
     return (
       msg.includes("users.email") ||
-      (msg.includes("column") && msg.includes("email") && msg.includes("users")) ||
-      (msg.includes("schema cache") && msg.includes("email") && msg.includes("users"))
+      msg.includes("users.is_active") ||
+      (msg.includes("column") && msg.includes("users") && (msg.includes("email") || msg.includes("is_active"))) ||
+      (msg.includes("schema cache") && msg.includes("users") && (msg.includes("email") || msg.includes("is_active")))
     );
   };
 
   if (useSupabase) {
     const withEmail = await supabase
       .from('users')
-      .select('id, username, email, password_hash, role, created_at, updated_at')
+      .select('id, username, email, password_hash, role, is_active, created_at, updated_at')
       .eq('id', userId)
       .maybeSingle();
     if (!withEmail.error) return withEmail.data || null;
@@ -311,9 +312,9 @@ async function getUserById(userId) {
       .eq('id', userId)
       .maybeSingle();
     if (legacy.error) throw legacy.error;
-    return legacy.data ? { ...legacy.data, email: null } : null;
+    return legacy.data ? { ...legacy.data, email: null, is_active: true } : null;
   }
-  return sqliteGet('SELECT id, username, email, password_hash, role, created_at, updated_at FROM users WHERE id = ?', [userId]);
+  return sqliteGet('SELECT id, username, email, password_hash, role, is_active, created_at, updated_at FROM users WHERE id = ?', [userId]);
 }
 
 async function getUserByUsername(username) {
@@ -321,15 +322,16 @@ async function getUserByUsername(username) {
     const msg = String(err?.message || '').toLowerCase();
     return (
       msg.includes("users.email") ||
-      (msg.includes("column") && msg.includes("email") && msg.includes("users")) ||
-      (msg.includes("schema cache") && msg.includes("email") && msg.includes("users"))
+      msg.includes("users.is_active") ||
+      (msg.includes("column") && msg.includes("users") && (msg.includes("email") || msg.includes("is_active"))) ||
+      (msg.includes("schema cache") && msg.includes("users") && (msg.includes("email") || msg.includes("is_active")))
     );
   };
 
   if (useSupabase) {
     const withEmail = await supabase
       .from('users')
-      .select('id, username, email, password_hash, role, created_at, updated_at')
+      .select('id, username, email, password_hash, role, is_active, created_at, updated_at')
       .eq('username', username)
       .maybeSingle();
     if (!withEmail.error) return withEmail.data || null;
@@ -342,9 +344,9 @@ async function getUserByUsername(username) {
       .eq('username', username)
       .maybeSingle();
     if (legacy.error) throw legacy.error;
-    return legacy.data ? { ...legacy.data, email: null } : null;
+    return legacy.data ? { ...legacy.data, email: null, is_active: true } : null;
   }
-  return sqliteGet('SELECT id, username, email, password_hash, role, created_at, updated_at FROM users WHERE username = ?', [username]);
+  return sqliteGet('SELECT id, username, email, password_hash, role, is_active, created_at, updated_at FROM users WHERE username = ?', [username]);
 }
 
 async function getUserByEmail(email) {
@@ -352,8 +354,9 @@ async function getUserByEmail(email) {
     const msg = String(err?.message || '').toLowerCase();
     return (
       msg.includes("users.email") ||
-      (msg.includes("column") && msg.includes("email") && msg.includes("users")) ||
-      (msg.includes("schema cache") && msg.includes("email") && msg.includes("users"))
+      msg.includes("users.is_active") ||
+      (msg.includes("column") && msg.includes("users") && (msg.includes("email") || msg.includes("is_active"))) ||
+      (msg.includes("schema cache") && msg.includes("users") && (msg.includes("email") || msg.includes("is_active")))
     );
   };
 
@@ -361,7 +364,7 @@ async function getUserByEmail(email) {
   if (useSupabase) {
     const { data, error } = await supabase
       .from('users')
-      .select('id, username, email, password_hash, role, created_at, updated_at')
+      .select('id, username, email, password_hash, role, is_active, created_at, updated_at')
       .eq('email', email)
       .maybeSingle();
     if (error) {
@@ -370,25 +373,26 @@ async function getUserByEmail(email) {
     }
     return data || null;
   }
-  return sqliteGet('SELECT id, username, email, password_hash, role, created_at, updated_at FROM users WHERE email = ?', [email]);
+  return sqliteGet('SELECT id, username, email, password_hash, role, is_active, created_at, updated_at FROM users WHERE email = ?', [email]);
 }
 
-async function createUser({ id, username, email = null, password_hash, role = 'guest' }) {
+async function createUser({ id, username, email = null, password_hash, role = 'guest', is_active = true }) {
   const isMissingEmailColumnError = (err) => {
     const msg = String(err?.message || '').toLowerCase();
     return (
       msg.includes("users.email") ||
-      (msg.includes("column") && msg.includes("email") && msg.includes("users")) ||
-      (msg.includes("schema cache") && msg.includes("email") && msg.includes("users"))
+      msg.includes("users.is_active") ||
+      (msg.includes("column") && msg.includes("users") && (msg.includes("email") || msg.includes("is_active"))) ||
+      (msg.includes("schema cache") && msg.includes("users") && (msg.includes("email") || msg.includes("is_active")))
     );
   };
 
   if (useSupabase) {
-    const payload = { id, username, email, password_hash, role, updated_at: new Date().toISOString() };
+    const payload = { id, username, email, password_hash, role, is_active: !!is_active, updated_at: new Date().toISOString() };
     const withEmail = await supabase
       .from('users')
       .insert(payload)
-      .select('id, username, email, role, created_at, updated_at')
+      .select('id, username, email, role, is_active, created_at, updated_at')
       .single();
     if (!withEmail.error) return withEmail.data;
     if (!isMissingEmailColumnError(withEmail.error)) {
@@ -402,13 +406,13 @@ async function createUser({ id, username, email = null, password_hash, role = 'g
       .select('id, username, role, created_at, updated_at')
       .single();
     if (legacy.error) throw legacy.error;
-    return { ...legacy.data, email: null };
+    return { ...legacy.data, email: null, is_active: true };
   }
   await sqliteRun(
-    'INSERT INTO users (id, username, email, password_hash, role, created_at, updated_at) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)',
-    [id, username, email, password_hash, role]
+    'INSERT INTO users (id, username, email, password_hash, role, is_active, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)',
+    [id, username, email, password_hash, role, is_active ? 1 : 0]
   );
-  return { id, username, email, role };
+  return { id, username, email, role, is_active: !!is_active };
 }
 
 async function updateUserAccount({ id, username, email, password_hash }) {
@@ -416,8 +420,9 @@ async function updateUserAccount({ id, username, email, password_hash }) {
     const msg = String(err?.message || '').toLowerCase();
     return (
       msg.includes("users.email") ||
-      (msg.includes("column") && msg.includes("email") && msg.includes("users")) ||
-      (msg.includes("schema cache") && msg.includes("email") && msg.includes("users"))
+      msg.includes("users.is_active") ||
+      (msg.includes("column") && msg.includes("users") && (msg.includes("email") || msg.includes("is_active"))) ||
+      (msg.includes("schema cache") && msg.includes("users") && (msg.includes("email") || msg.includes("is_active")))
     );
   };
 
@@ -430,7 +435,7 @@ async function updateUserAccount({ id, username, email, password_hash }) {
       .from('users')
       .update(payload)
       .eq('id', id)
-      .select('id, username, email, role, created_at, updated_at')
+      .select('id, username, email, role, is_active, created_at, updated_at')
       .single();
     if (!withEmail.error) return withEmail.data;
     if (!isMissingEmailColumnError(withEmail.error)) {
@@ -446,7 +451,7 @@ async function updateUserAccount({ id, username, email, password_hash }) {
       .select('id, username, role, created_at, updated_at')
       .single();
     if (legacy.error) throw legacy.error;
-    return { ...legacy.data, email: null };
+    return { ...legacy.data, email: null, is_active: true };
   }
 
   const fields = [];
@@ -467,7 +472,289 @@ async function updateUserAccount({ id, username, email, password_hash }) {
     fields.push('updated_at = CURRENT_TIMESTAMP');
     await sqliteRun(`UPDATE users SET ${fields.join(', ')} WHERE id = ?`, [...params, id]);
   }
-  return sqliteGet('SELECT id, username, email, role, created_at, updated_at FROM users WHERE id = ?', [id]);
+  return sqliteGet('SELECT id, username, email, role, is_active, created_at, updated_at FROM users WHERE id = ?', [id]);
+}
+
+async function listUsers() {
+  const isMissingEmailColumnError = (err) => {
+    const msg = String(err?.message || '').toLowerCase();
+    return (
+      msg.includes("users.email") ||
+      msg.includes("users.is_active") ||
+      (msg.includes("column") && msg.includes("users") && (msg.includes("email") || msg.includes("is_active"))) ||
+      (msg.includes("schema cache") && msg.includes("users") && (msg.includes("email") || msg.includes("is_active")))
+    );
+  };
+
+  if (useSupabase) {
+    const withEmail = await supabase
+      .from('users')
+      .select('id, username, email, role, is_active, created_at, updated_at')
+      .order('created_at', { ascending: true });
+    if (!withEmail.error) return withEmail.data || [];
+    if (!isMissingEmailColumnError(withEmail.error)) {
+      throw withEmail.error;
+    }
+    const legacy = await supabase
+      .from('users')
+      .select('id, username, role, created_at, updated_at')
+      .order('created_at', { ascending: true });
+    if (legacy.error) throw legacy.error;
+    return (legacy.data || []).map((row) => ({ ...row, email: null, is_active: true }));
+  }
+  return sqliteAll('SELECT id, username, email, role, is_active, created_at, updated_at FROM users ORDER BY created_at ASC');
+}
+
+async function updateUserRole({ id, role }) {
+  if (role !== 'admin' && role !== 'guest') {
+    throw new Error('invalid role');
+  }
+
+  if (useSupabase) {
+    const isMissingEmailColumnError = (err) => {
+      const msg = String(err?.message || '').toLowerCase();
+      return (
+        msg.includes("users.email") ||
+        msg.includes("users.is_active") ||
+        (msg.includes("column") && msg.includes("users") && (msg.includes("email") || msg.includes("is_active"))) ||
+        (msg.includes("schema cache") && msg.includes("users") && (msg.includes("email") || msg.includes("is_active")))
+      );
+    };
+
+    const withEmail = await supabase
+      .from('users')
+      .update({ role, updated_at: new Date().toISOString() })
+      .eq('id', id)
+      .select('id, username, email, role, is_active, created_at, updated_at')
+      .single();
+    if (!withEmail.error) return withEmail.data;
+    if (!isMissingEmailColumnError(withEmail.error)) {
+      throw withEmail.error;
+    }
+
+    const legacy = await supabase
+      .from('users')
+      .update({ role, updated_at: new Date().toISOString() })
+      .eq('id', id)
+      .select('id, username, role, created_at, updated_at')
+      .single();
+    if (legacy.error) throw legacy.error;
+    return { ...legacy.data, email: null, is_active: true };
+  }
+
+  await sqliteRun('UPDATE users SET role = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [role, id]);
+  return sqliteGet('SELECT id, username, email, role, is_active, created_at, updated_at FROM users WHERE id = ?', [id]);
+}
+
+async function updateUserActive({ id, is_active }) {
+  const nextActive = !!is_active;
+  if (useSupabase) {
+    const withEmail = await supabase
+      .from('users')
+      .update({ is_active: nextActive, updated_at: new Date().toISOString() })
+      .eq('id', id)
+      .select('id, username, email, role, is_active, created_at, updated_at')
+      .single();
+    if (!withEmail.error) return withEmail.data;
+    throw withEmail.error;
+  }
+
+  await sqliteRun('UPDATE users SET is_active = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [nextActive ? 1 : 0, id]);
+  return sqliteGet('SELECT id, username, email, role, is_active, created_at, updated_at FROM users WHERE id = ?', [id]);
+}
+
+function isMissingAuthSessionsError(err) {
+  const msg = String(err?.message || '').toLowerCase();
+  return (
+    msg.includes('auth_sessions') &&
+    (msg.includes('does not exist') || msg.includes('schema cache') || msg.includes('relation'))
+  );
+}
+
+async function recordLoginSession({ id, user_id, login_at, ip_address = null, user_agent = null }) {
+  const loginAtIso = login_at ? new Date(login_at).toISOString() : new Date().toISOString();
+  if (useSupabase) {
+    const { error } = await supabase.from('auth_sessions').insert({
+      id,
+      user_id,
+      login_at: loginAtIso,
+      ip_address: ip_address || null,
+      user_agent: user_agent || null,
+    });
+    if (error) {
+      if (isMissingAuthSessionsError(error)) return null;
+      throw error;
+    }
+    return { id, user_id, login_at: loginAtIso };
+  }
+  await sqliteRun(
+    'INSERT INTO auth_sessions (id, user_id, login_at, ip_address, user_agent) VALUES (?, ?, ?, ?, ?)',
+    [id, user_id, loginAtIso, ip_address || null, user_agent || null]
+  );
+  return { id, user_id, login_at: loginAtIso };
+}
+
+async function closeActiveSession({ user_id, logout_at }) {
+  const logoutAtIso = logout_at ? new Date(logout_at).toISOString() : new Date().toISOString();
+  if (useSupabase) {
+    const active = await supabase
+      .from('auth_sessions')
+      .select('id')
+      .eq('user_id', user_id)
+      .is('logout_at', null)
+      .order('login_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (active.error) {
+      if (isMissingAuthSessionsError(active.error)) return null;
+      throw active.error;
+    }
+    if (!active.data?.id) return null;
+    const { error } = await supabase
+      .from('auth_sessions')
+      .update({ logout_at: logoutAtIso })
+      .eq('id', active.data.id);
+    if (error) throw error;
+    return { id: active.data.id, logout_at: logoutAtIso };
+  }
+  const row = await sqliteGet(
+    'SELECT id FROM auth_sessions WHERE user_id = ? AND logout_at IS NULL ORDER BY login_at DESC LIMIT 1',
+    [user_id]
+  );
+  if (!row?.id) return null;
+  await sqliteRun('UPDATE auth_sessions SET logout_at = ? WHERE id = ?', [logoutAtIso, row.id]);
+  return { id: row.id, logout_at: logoutAtIso };
+}
+
+async function listUserSessions({ user_id, limit = 20 }) {
+  const maxLimit = Math.max(1, Math.min(100, parseInt(limit, 10) || 20));
+  if (useSupabase) {
+    const { data, error } = await supabase
+      .from('auth_sessions')
+      .select('id, user_id, login_at, logout_at, ip_address, user_agent, created_at')
+      .eq('user_id', user_id)
+      .order('login_at', { ascending: false })
+      .limit(maxLimit);
+    if (error) {
+      if (isMissingAuthSessionsError(error)) return [];
+      throw error;
+    }
+    return data || [];
+  }
+  return sqliteAll(
+    `SELECT id, user_id, login_at, logout_at, ip_address, user_agent, created_at
+     FROM auth_sessions
+     WHERE user_id = ?
+     ORDER BY login_at DESC
+     LIMIT ?`,
+    [user_id, maxLimit]
+  );
+}
+
+async function recordUserRoleChange({ id, actor_user_id, target_user_id, from_role, to_role, changed_at }) {
+  const changedAtIso = changed_at ? new Date(changed_at).toISOString() : new Date().toISOString();
+  if (useSupabase) {
+    const { error } = await supabase.from('user_role_audit').insert({
+      id,
+      actor_user_id,
+      target_user_id,
+      from_role,
+      to_role,
+      changed_at: changedAtIso,
+    });
+    if (error) return null;
+    return { id, actor_user_id, target_user_id, from_role, to_role, changed_at: changedAtIso };
+  }
+  await sqliteRun(
+    `INSERT INTO user_role_audit (id, actor_user_id, target_user_id, from_role, to_role, changed_at)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+    [id, actor_user_id, target_user_id, from_role, to_role, changedAtIso]
+  );
+  return { id, actor_user_id, target_user_id, from_role, to_role, changed_at: changedAtIso };
+}
+
+async function listUserRoleChanges({ target_user_id, limit = 20 }) {
+  const maxLimit = Math.max(1, Math.min(100, parseInt(limit, 10) || 20));
+  if (useSupabase) {
+    const { data, error } = await supabase
+      .from('user_role_audit')
+      .select('id, actor_user_id, target_user_id, from_role, to_role, changed_at, created_at')
+      .eq('target_user_id', target_user_id)
+      .order('changed_at', { ascending: false })
+      .limit(maxLimit);
+    if (error) return [];
+    return data || [];
+  }
+  return sqliteAll(
+    `SELECT id, actor_user_id, target_user_id, from_role, to_role, changed_at, created_at
+     FROM user_role_audit
+     WHERE target_user_id = ?
+     ORDER BY changed_at DESC
+     LIMIT ?`,
+    [target_user_id, maxLimit]
+  );
+}
+
+async function recordAuditEvent({ id, actor_user_id, action, entity_type, entity_id = null, details = null }) {
+  const payload = {
+    id,
+    actor_user_id,
+    action,
+    entity_type,
+    entity_id: entity_id || null,
+    details: details || {},
+    created_at: new Date().toISOString(),
+  };
+  if (useSupabase) {
+    const { error } = await supabase.from('audit_events').insert(payload);
+    if (error) return null;
+    return payload;
+  }
+  await sqliteRun(
+    `INSERT INTO audit_events (id, actor_user_id, action, entity_type, entity_id, details, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    [
+      payload.id,
+      payload.actor_user_id,
+      payload.action,
+      payload.entity_type,
+      payload.entity_id,
+      JSON.stringify(payload.details || {}),
+      payload.created_at,
+    ]
+  );
+  return payload;
+}
+
+async function listAuditEventsByActor({ actor_user_id, limit = 50 }) {
+  const maxLimit = Math.max(1, Math.min(200, parseInt(limit, 10) || 50));
+  if (useSupabase) {
+    const { data, error } = await supabase
+      .from('audit_events')
+      .select('id, actor_user_id, action, entity_type, entity_id, details, created_at')
+      .eq('actor_user_id', actor_user_id)
+      .order('created_at', { ascending: false })
+      .limit(maxLimit);
+    if (error) return [];
+    return data || [];
+  }
+  const rows = await sqliteAll(
+    `SELECT id, actor_user_id, action, entity_type, entity_id, details, created_at
+     FROM audit_events
+     WHERE actor_user_id = ?
+     ORDER BY created_at DESC
+     LIMIT ?`,
+    [actor_user_id, maxLimit]
+  );
+  return (rows || []).map((r) => {
+    let parsed = {};
+    try {
+      parsed = r.details ? JSON.parse(r.details) : {};
+    } catch {
+      parsed = {};
+    }
+    return { ...r, details: parsed };
+  });
 }
 
 // --- Password reset tokens (hashed; raw token never stored) ---
@@ -668,10 +955,43 @@ function initializeSqlite() {
       email TEXT UNIQUE,
       password_hash TEXT NOT NULL,
       role TEXT NOT NULL DEFAULT 'guest',
+      is_active INTEGER NOT NULL DEFAULT 1,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )`),
+    run(`CREATE TABLE IF NOT EXISTS auth_sessions (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      login_at DATETIME NOT NULL,
+      logout_at DATETIME,
+      ip_address TEXT,
+      user_agent TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )`),
+    run(`CREATE INDEX IF NOT EXISTS idx_auth_sessions_user_login ON auth_sessions (user_id, login_at DESC)`),
+    run(`CREATE INDEX IF NOT EXISTS idx_auth_sessions_user_logout ON auth_sessions (user_id, logout_at)`),
+    run(`CREATE TABLE IF NOT EXISTS user_role_audit (
+      id TEXT PRIMARY KEY,
+      actor_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      target_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      from_role TEXT NOT NULL,
+      to_role TEXT NOT NULL,
+      changed_at DATETIME NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )`),
+    run(`CREATE INDEX IF NOT EXISTS idx_user_role_audit_target_changed ON user_role_audit (target_user_id, changed_at DESC)`),
+    run(`CREATE TABLE IF NOT EXISTS audit_events (
+      id TEXT PRIMARY KEY,
+      actor_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      action TEXT NOT NULL,
+      entity_type TEXT NOT NULL,
+      entity_id TEXT,
+      details TEXT,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )`),
+    run(`CREATE INDEX IF NOT EXISTS idx_audit_events_actor_created ON audit_events (actor_user_id, created_at DESC)`),
     run(`ALTER TABLE users ADD COLUMN email TEXT`).catch(() => {}),
+    run(`ALTER TABLE users ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1`).catch(() => {}),
     run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email_unique ON users (email)`).catch(() => {}),
     run(`CREATE TABLE IF NOT EXISTS password_reset_tokens (
       id TEXT PRIMARY KEY,
@@ -754,6 +1074,16 @@ module.exports = {
   getUserByEmail,
   createUser,
   updateUserAccount,
+  listUsers,
+  updateUserRole,
+  updateUserActive,
+  recordLoginSession,
+  closeActiveSession,
+  listUserSessions,
+  recordUserRoleChange,
+  listUserRoleChanges,
+  recordAuditEvent,
+  listAuditEventsByActor,
   deletePasswordResetTokensForUser,
   deleteExpiredPasswordResetTokens,
   insertPasswordResetToken,

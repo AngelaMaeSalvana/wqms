@@ -382,18 +382,16 @@ export default function Settings() {
         return;
       }
 
-      if (notifications.emailEnabled) {
-        const email = accountEmail.trim().toLowerCase();
-        if (!email) {
-          setSaveFeedback("Email is required when email notifications are enabled");
-          setTimeout(() => setSaveFeedback(null), 3000);
-          return;
-        }
-        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-          setSaveFeedback("Enter a valid email address");
-          setTimeout(() => setSaveFeedback(null), 3000);
-          return;
-        }
+      const email = accountEmail.trim().toLowerCase();
+      if (!email) {
+        setSaveFeedback("Email is required for password recovery");
+        setTimeout(() => setSaveFeedback(null), 3000);
+        return;
+      }
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        setSaveFeedback("Enter a valid email address");
+        setTimeout(() => setSaveFeedback(null), 3000);
+        return;
       }
 
       const username = accountUsername.trim();
@@ -416,7 +414,7 @@ export default function Settings() {
       }
       await api.upsertProfile({
         username,
-        email: notifications.emailEnabled ? (accountEmail.trim().toLowerCase() || null) : null,
+        email,
         password: newPassword || undefined,
       });
       await refreshProfile();
@@ -1000,7 +998,7 @@ export default function Settings() {
           <div className="card__header">
             <h2 className="card__title">
               User Account
-              <InfoTooltip text="Update your username or password." label="Account settings help" />
+              <InfoTooltip text="Update your username, email, or password." label="Account settings help" />
             </h2>
           </div>
           <div className="card__body">
@@ -1021,19 +1019,17 @@ export default function Settings() {
                   aria-label="Account username"
                 />
               </label>
-              {notifications.emailEnabled && (
-                <label className="settings-label">
-                  <span>Email</span>
-                  <input
-                    type="email"
-                    className="settings-input"
-                    value={accountEmail}
-                    onChange={(e) => setAccountEmail(e.target.value)}
-                    placeholder="name@example.com"
-                    aria-label="Account email"
-                  />
-                </label>
-              )}
+              <label className="settings-label">
+                <span>Email</span>
+                <input
+                  type="email"
+                  className="settings-input"
+                  value={accountEmail}
+                  onChange={(e) => setAccountEmail(e.target.value)}
+                  placeholder="name@example.com"
+                  aria-label="Account email"
+                />
+              </label>
             </div>
             <div className="settings-actions" style={{ marginTop: "12px" }}>
               <button

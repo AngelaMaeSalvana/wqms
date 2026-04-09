@@ -1845,6 +1845,40 @@ export default function PerformanceTest() {
         </div>
       </section>
 
+      {/* River baseline: normal MQTT feed, not a test run (no test_run_id) */}
+      <section className="perf-section card" aria-labelledby="river-baseline-title">
+        <div className="perf-section-header">
+          <div>
+            <h2 id="river-baseline-title" className="perf-section-title">River baseline feed</h2>
+            <p className="perf-section-desc">
+              Optional long-running publisher for <strong>normal</strong>, in-range river-like readings. This is{" "}
+              <strong>not</strong> test-run mode: messages do not carry <code>test_run_id</code> and are not tied to Reports → Test Runs.
+              Use the Scenario Evaluator above for preset alert tests.
+            </p>
+          </div>
+        </div>
+        <pre
+          className="eval-no-chain-data"
+          style={{
+            margin: 0,
+            padding: "12px 14px",
+            border: "1px solid var(--border)",
+            borderRadius: "10px",
+            whiteSpace: "pre-wrap",
+            fontFamily: "ui-monospace, monospace",
+            fontSize: "0.88rem",
+            background: "var(--card-inner-bg, rgba(127, 127, 127, 0.06))",
+          }}
+        >
+          {`cd server
+npm run river-normal-24h
+
+# defaults: 24 h, every 5 min (~288 points), day/night variation, all within thresholds
+# options: --hours 24 --interval-seconds 300 --interval-minutes 5 --node node1
+# quick check: npm run river-normal-24h:dry`}
+        </pre>
+      </section>
+
       {packetsModalOpen && lastTestRunId && (
         <PacketsTableModal
           testRunId={lastTestRunId}

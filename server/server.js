@@ -90,6 +90,14 @@ function issueToken(user) {
   );
 }
 
+function getClientIp(req) {
+  const xff = req.headers['x-forwarded-for'];
+  if (typeof xff === 'string' && xff.trim()) {
+    return xff.split(',')[0].trim();
+  }
+  return req.ip || req.socket?.remoteAddress || null;
+}
+
 // HTTP server wrapping Express (needed for WebSocket upgrade)
 const httpServer = http.createServer(app);
 
@@ -503,10 +511,17 @@ app.post('/api/auth/signup', async (req, res) => {
       role: 'guest',
     });
     const token = issueToken(user);
+    await db.recordLoginSession({
+      id: randomUUID(),
+      user_id: user.id,
+      login_at: new Date().toISOString(),
+      ip_address: getClientIp(req),
+      user_agent: String(req.headers['user-agent'] || ''),
+    }).catch(() => {});
 
     res.status(201).json({
       token,
-      user: { id: user.id, username: user.username, email: user.email || null, role: user.role || 'guest' },
+      user: { id: user.id, username: user.username, email: user.email || null, role: user.role || 'guest', is_active: user.is_active !== false && user.is_active !== 0 },
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -528,6 +543,9 @@ app.post('/api/auth/login', async (req, res) => {
     if (!user) {
       return res.status(401).json({ error: 'invalid credentials' });
     }
+    if (user.is_active === false || user.is_active === 0) {
+      return res.status(403).json({ error: 'Account was locked, contact admin' });
+    }
 
     const ok = await bcrypt.compare(password, user.password_hash);
     if (!ok) {
@@ -535,9 +553,16 @@ app.post('/api/auth/login', async (req, res) => {
     }
 
     const token = issueToken(user);
+    await db.recordLoginSession({
+      id: randomUUID(),
+      user_id: user.id,
+      login_at: new Date().toISOString(),
+      ip_address: getClientIp(req),
+      user_agent: String(req.headers['user-agent'] || ''),
+    }).catch(() => {});
     res.json({
       token,
-      user: { id: user.id, username: user.username, email: user.email || null, role: user.role || 'guest' },
+      user: { id: user.id, username: user.username, email: user.email || null, role: user.role || 'guest', is_active: user.is_active !== false && user.is_active !== 0 },
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -645,8 +670,29 @@ app.get('/api/auth/me', requireAuth, async (req, res) => {
         username: user.username,
         email: user.email || null,
         role: user.role || 'guest',
+        is_active: user.is_active !== false && user.is_active !== 0,
       }
     });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/auth/logout', requireAuth, async (req, res) => {
+  try {
+    await db.closeActiveSession({
+      user_id: req.authUser.id,
+      logout_at: new Date().toISOString(),
+    }).catch(() => {});
+    await db.recordAuditEvent({
+      id: randomUUID(),
+      actor_user_id: req.authUser.id,
+      action: 'auth.logout',
+      entity_type: 'user',
+      entity_id: req.authUser.id,
+      details: {},
+    }).catch(() => {});
+    res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -704,7 +750,211 @@ app.put('/api/auth/profile', requireAuth, async (req, res) => {
       email: nextEmail,
       password_hash,
     });
-    res.json({ user: { id: updated.id, username: updated.username, email: updated.email || null, role: updated.role || 'guest' } });
+    const changes = [];
+    if (nextUsername != null && nextUsername !== current.username) {
+      changes.push({ field: 'username', from: current.username, to: nextUsername });
+    }
+    if (emailRaw !== undefined && nextEmail !== current.email) {
+      changes.push({ field: 'email', from: current.email || null, to: nextEmail || null });
+    }
+    if (password_hash != null) {
+      changes.push({ field: 'password', from: '[hidden]', to: '[updated]' });
+    }
+    if (changes.length > 0) {
+      await db.recordAuditEvent({
+        id: randomUUID(),
+        actor_user_id: current.id,
+        action: 'user.profile.update',
+        entity_type: 'user',
+        entity_id: current.id,
+        details: { changes },
+      }).catch(() => {});
+    }
+    res.json({ user: { id: updated.id, username: updated.username, email: updated.email || null, role: updated.role || 'guest', is_active: updated.is_active !== false && updated.is_active !== 0 } });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/auth/users', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const users = await db.listUsers();
+    res.json({
+      users: (users || []).map((user) => ({
+        id: user.id,
+        username: user.username,
+        email: user.email || null,
+        role: user.role || 'guest',
+        is_active: user.is_active !== false && user.is_active !== 0,
+        created_at: user.created_at || null,
+        updated_at: user.updated_at || null,
+      })),
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.patch('/api/auth/users/:id/role', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const userId = String(req.params?.id || '').trim();
+    const role = String(req.body?.role || '').trim();
+    if (!userId) return res.status(400).json({ error: 'user id is required' });
+    if (role !== 'admin' && role !== 'guest') {
+      return res.status(400).json({ error: 'role must be admin or guest' });
+    }
+    if (req.authUser?.id === userId && role !== 'admin') {
+      return res.status(400).json({ error: 'you cannot remove your own admin role' });
+    }
+
+    const existing = await db.getUserById(userId);
+    if (!existing) return res.status(404).json({ error: 'User not found' });
+
+    const updated = await db.updateUserRole({ id: userId, role });
+    if ((existing.role || 'guest') !== (updated.role || 'guest')) {
+      await db.recordUserRoleChange({
+        id: randomUUID(),
+        actor_user_id: req.authUser.id,
+        target_user_id: userId,
+        from_role: existing.role || 'guest',
+        to_role: updated.role || 'guest',
+        changed_at: new Date().toISOString(),
+      }).catch(() => {});
+      await db.recordAuditEvent({
+        id: randomUUID(),
+        actor_user_id: req.authUser.id,
+        action: 'user.role.update',
+        entity_type: 'user',
+        entity_id: userId,
+        details: { from_role: existing.role || 'guest', to_role: updated.role || 'guest' },
+      }).catch(() => {});
+    }
+    res.json({
+      user: {
+        id: updated.id,
+        username: updated.username,
+        email: updated.email || null,
+        role: updated.role || 'guest',
+        is_active: updated.is_active !== false && updated.is_active !== 0,
+        created_at: updated.created_at || null,
+        updated_at: updated.updated_at || null,
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.patch('/api/auth/users/:id/active', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const userId = String(req.params?.id || '').trim();
+    const activeRaw = req.body?.is_active;
+    if (!userId) return res.status(400).json({ error: 'user id is required' });
+    if (typeof activeRaw !== 'boolean') {
+      return res.status(400).json({ error: 'is_active must be boolean' });
+    }
+    if (req.authUser?.id === userId && activeRaw === false) {
+      return res.status(400).json({ error: 'you cannot deactivate your own account' });
+    }
+
+    const existing = await db.getUserById(userId);
+    if (!existing) return res.status(404).json({ error: 'User not found' });
+
+    const updated = await db.updateUserActive({ id: userId, is_active: activeRaw });
+    if ((existing.is_active !== false && existing.is_active !== 0) !== activeRaw) {
+      await db.recordAuditEvent({
+        id: randomUUID(),
+        actor_user_id: req.authUser.id,
+        action: 'user.active.update',
+        entity_type: 'user',
+        entity_id: userId,
+        details: { from_active: existing.is_active !== false && existing.is_active !== 0, to_active: activeRaw },
+      }).catch(() => {});
+    }
+
+    res.json({
+      user: {
+        id: updated.id,
+        username: updated.username,
+        email: updated.email || null,
+        role: updated.role || 'guest',
+        is_active: updated.is_active !== false && updated.is_active !== 0,
+        created_at: updated.created_at || null,
+        updated_at: updated.updated_at || null,
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/auth/users/:id/activity', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const userId = String(req.params?.id || '').trim();
+    if (!userId) return res.status(400).json({ error: 'user id is required' });
+    const limit = Math.max(1, Math.min(100, parseInt(req.query?.limit, 10) || 20));
+    const user = await db.getUserById(userId);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    const [sessions, roleChanges, auditEvents] = await Promise.all([
+      db.listUserSessions({ user_id: userId, limit }),
+      db.listUserRoleChanges({ target_user_id: userId, limit }),
+      db.listAuditEventsByActor({ actor_user_id: userId, limit: Math.max(limit, 50) }),
+    ]);
+    res.json({
+      sessions: (sessions || []).map((s) => ({
+        id: s.id,
+        user_id: s.user_id,
+        login_at: s.login_at || null,
+        logout_at: s.logout_at || null,
+        ip_address: s.ip_address || null,
+        user_agent: s.user_agent || null,
+      })),
+      role_changes: (roleChanges || []).map((r) => ({
+        id: r.id,
+        actor_user_id: r.actor_user_id,
+        target_user_id: r.target_user_id,
+        from_role: r.from_role || null,
+        to_role: r.to_role || null,
+        changed_at: r.changed_at || null,
+      })),
+      audit_events: (auditEvents || []).map((e) => ({
+        id: e.id,
+        actor_user_id: e.actor_user_id,
+        action: e.action,
+        entity_type: e.entity_type,
+        entity_id: e.entity_id || null,
+        details: e.details || {},
+        created_at: e.created_at || null,
+      })),
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/audit-events', requireAuth, async (req, res) => {
+  try {
+    const action = String(req.body?.action || '').trim();
+    const entityType = String(req.body?.entity_type || '').trim();
+    const entityIdRaw = req.body?.entity_id;
+    const entityId = entityIdRaw == null ? null : String(entityIdRaw);
+    const details = req.body?.details && typeof req.body.details === 'object' ? req.body.details : {};
+
+    if (!action || !entityType) {
+      return res.status(400).json({ error: 'action and entity_type are required' });
+    }
+
+    await db.recordAuditEvent({
+      id: randomUUID(),
+      actor_user_id: req.authUser.id,
+      action,
+      entity_type: entityType,
+      entity_id: entityId,
+      details,
+    }).catch(() => {});
+
+    res.status(201).json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

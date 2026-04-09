@@ -6,6 +6,7 @@ import LocationPickerModal from "../components/LocationPickerModal";
 import { isSupabaseEnabled } from "../lib/supabaseClient";
 import { getNodes, loadNodes, saveNodes } from "../utils/nodesStorage";
 import { sendEventNotification } from "../services/emailService";
+import api from "../services/api";
 import { PageLoader } from "../components/LoadingSkeleton";
 import { NodeStatus } from "../components/dashboard/NodeStatus";
 import BatteryIndicator, { batteryPropsFromReading } from "../components/BatteryIndicator";
@@ -52,6 +53,15 @@ function parseCoordinates(str) {
   if (isNaN(lat) || isNaN(lng)) return null;
   if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
   return { lat, lng };
+}
+
+function logNodeAudit(action, entityId, details) {
+  api.logAuditEvent({
+    action,
+    entity_type: "node",
+    entity_id: entityId,
+    details,
+  }).catch(() => {});
 }
 
 const NODES_PAGE_SIZE = 8;
@@ -180,6 +190,13 @@ export default function Nodes() {
     const next = [...nodes, node];
     setNodes(next);
     saveNodes(next);
+    logNodeAudit("node.create", node.id, {
+      name: node.name,
+      location: node.location,
+      lat: node.lat,
+      lng: node.lng,
+      lastMaintenance: node.lastMaintenance || null,
+    });
     sendEventNotification("node_added", { node });
     setNewNode({ ...emptyNode(), id: getNextNodeId(next) });
     setShowAddModal(false);
@@ -227,9 +244,32 @@ export default function Nodes() {
       lng: parsed.lng,
       lastMaintenance: editForm.lastMaintenance ? new Date(editForm.lastMaintenance + "T00:00:00Z").toISOString() : null,
     };
+    const previous = nodes.find((n) => n.id === editingId) || null;
     const next = nodes.map((n) => (n.id === editingId ? node : n));
     setNodes(next);
     saveNodes(next);
+    if (previous) {
+      const changes = [];
+      if ((previous.name || "") !== (node.name || "")) changes.push({ field: "name", from: previous.name || "", to: node.name || "" });
+      if ((previous.location || "") !== (node.location || "")) changes.push({ field: "location", from: previous.location || "", to: node.location || "" });
+      if (Number(previous.lat ?? NaN) !== Number(node.lat ?? NaN) || Number(previous.lng ?? NaN) !== Number(node.lng ?? NaN)) {
+        changes.push({
+          field: "coordinates",
+          from: { lat: previous.lat ?? null, lng: previous.lng ?? null },
+          to: { lat: node.lat ?? null, lng: node.lng ?? null },
+        });
+      }
+      if ((previous.lastMaintenance || previous.last_maintenance || null) !== (node.lastMaintenance || null)) {
+        changes.push({
+          field: "lastMaintenance",
+          from: previous.lastMaintenance || previous.last_maintenance || null,
+          to: node.lastMaintenance || null,
+        });
+      }
+      if (changes.length > 0) {
+        logNodeAudit("node.update", node.id, { changes });
+      }
+    }
     setEditingId(null);
     setEditForm(emptyNode());
   };
@@ -241,9 +281,16 @@ export default function Nodes() {
   };
 
   const handleDelete = (nodeId) => {
+    const existing = nodes.find((n) => n.id === nodeId) || null;
     const next = nodes.filter((n) => n.id !== nodeId);
     setNodes(next);
     saveNodes(next);
+    if (existing) {
+      logNodeAudit("node.remove", nodeId, {
+        name: existing.name || null,
+        location: existing.location || null,
+      });
+    }
     if (editingId === nodeId) {
       setEditingId(null);
       setEditForm(emptyNode());
@@ -251,11 +298,19 @@ export default function Nodes() {
   };
 
   const handleToggleActive = (nodeId) => {
+    const existing = nodes.find((n) => n.id === nodeId) || null;
     const next = nodes.map((n) =>
       n.id === nodeId ? { ...n, active: n.active === false ? true : false } : n
     );
     setNodes(next);
     saveNodes(next);
+    if (existing) {
+      const nowActive = existing.active === false ? true : false;
+      logNodeAudit("node.active.toggle", nodeId, {
+        from: existing.active === false ? "inactive" : "active",
+        to: nowActive ? "active" : "inactive",
+      });
+    }
   };
 
   return (

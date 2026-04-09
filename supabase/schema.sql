@@ -50,10 +50,12 @@ CREATE TABLE IF NOT EXISTS users (
   email citext UNIQUE,
   password_hash text NOT NULL,
   role text NOT NULL DEFAULT 'guest' CHECK (role IN ('guest', 'admin')),
+  is_active boolean NOT NULL DEFAULT true,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 ALTER TABLE users ADD COLUMN IF NOT EXISTS email citext;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active boolean NOT NULL DEFAULT true;
 CREATE UNIQUE INDEX IF NOT EXISTS users_email_unique_idx ON users (email);
 
 -- One-time password reset links (server-only; accessed via service role).
@@ -66,6 +68,42 @@ CREATE TABLE IF NOT EXISTS password_reset_tokens (
 );
 CREATE INDEX IF NOT EXISTS password_reset_tokens_token_hash_idx ON password_reset_tokens (token_hash);
 CREATE INDEX IF NOT EXISTS password_reset_tokens_user_id_idx ON password_reset_tokens (user_id);
+
+-- Login / logout session history for app-managed users.
+CREATE TABLE IF NOT EXISTS auth_sessions (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  login_at timestamptz NOT NULL DEFAULT now(),
+  logout_at timestamptz,
+  ip_address text,
+  user_agent text,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS auth_sessions_user_login_idx ON auth_sessions (user_id, login_at DESC);
+
+-- Audit trail for role changes (admin/guest).
+CREATE TABLE IF NOT EXISTS user_role_audit (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  actor_user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  target_user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  from_role text NOT NULL CHECK (from_role IN ('guest', 'admin')),
+  to_role text NOT NULL CHECK (to_role IN ('guest', 'admin')),
+  changed_at timestamptz NOT NULL DEFAULT now(),
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS user_role_audit_target_changed_idx ON user_role_audit (target_user_id, changed_at DESC);
+
+-- Generic audit log for app changes (profile updates, node edits, etc.).
+CREATE TABLE IF NOT EXISTS audit_events (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  actor_user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  action text NOT NULL,
+  entity_type text NOT NULL,
+  entity_id text,
+  details jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS audit_events_actor_created_idx ON audit_events (actor_user_id, created_at DESC);
 
 -- 1. Sensor readings (single table for all sensor/forwarder data; MQTT bridge + API write here)
 -- WQI calculated in backend (bridge) per reading when 3+ params available; stored here for reports/calendar.
@@ -213,6 +251,9 @@ ALTER TABLE node_last_sensor_tests ENABLE ROW LEVEL SECURITY;
 ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE users ENABLE ROW LEVEL SECURITY;
 ALTER TABLE password_reset_tokens ENABLE ROW LEVEL SECURITY;
+ALTER TABLE auth_sessions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE user_role_audit ENABLE ROW LEVEL SECURITY;
+ALTER TABLE audit_events ENABLE ROW LEVEL SECURITY;
 
 -- Policies: authenticated access defaults.
 -- Notes:
@@ -305,6 +346,19 @@ CREATE POLICY "Users read own user" ON users
   FOR SELECT TO authenticated USING (auth.uid() = id);
 CREATE POLICY "Users update own user" ON users
   FOR UPDATE TO authenticated USING (auth.uid() = id) WITH CHECK (auth.uid() = id);
+
+DROP POLICY IF EXISTS "Allow all on auth_sessions" ON auth_sessions;
+DROP POLICY IF EXISTS "Users read own auth sessions" ON auth_sessions;
+CREATE POLICY "Users read own auth sessions" ON auth_sessions
+  FOR SELECT TO authenticated USING (auth.uid() = user_id);
+
+DROP POLICY IF EXISTS "Users read own role audit" ON user_role_audit;
+CREATE POLICY "Users read own role audit" ON user_role_audit
+  FOR SELECT TO authenticated USING (auth.uid() = target_user_id);
+
+DROP POLICY IF EXISTS "Users read own audit events" ON audit_events;
+CREATE POLICY "Users read own audit events" ON audit_events
+  FOR SELECT TO authenticated USING (auth.uid() = actor_user_id);
 
 -- Optional: updated_at trigger for nodes
 CREATE OR REPLACE FUNCTION set_updated_at()

@@ -234,6 +234,37 @@ class ApiService {
     });
   }
 
+  async listUsers() {
+    return this.request('/auth/users');
+  }
+
+  async updateUserRole(userId, role) {
+    return this.request(`/auth/users/${encodeURIComponent(userId)}/role`, {
+      method: 'PATCH',
+      body: JSON.stringify({ role }),
+    });
+  }
+
+  async updateUserActive(userId, is_active) {
+    return this.request(`/auth/users/${encodeURIComponent(userId)}/active`, {
+      method: 'PATCH',
+      body: JSON.stringify({ is_active: !!is_active }),
+    });
+  }
+
+  async getUserActivity(userId, { limit = 20 } = {}) {
+    const params = new URLSearchParams();
+    params.append('limit', limit);
+    return this.request(`/auth/users/${encodeURIComponent(userId)}/activity?${params.toString()}`);
+  }
+
+  async logAuditEvent({ action, entity_type, entity_id = null, details = {} }) {
+    return this.request('/audit-events', {
+      method: 'POST',
+      body: JSON.stringify({ action, entity_type, entity_id, details }),
+    });
+  }
+
   async signup({ username, email, password }) {
     const result = await this.request('/auth/signup', {
       method: 'POST',
@@ -277,6 +308,16 @@ class ApiService {
 
   logout() {
     this.setStoredToken('');
+  }
+
+  async logoutServer() {
+    try {
+      await this.request('/auth/logout', { method: 'POST' });
+    } catch (_) {
+      // Ignore server logout errors; local logout still succeeds.
+    } finally {
+      this.setStoredToken('');
+    }
   }
 }
 

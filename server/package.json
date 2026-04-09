@@ -12,7 +12,9 @@
     "scenarios": "node scripts/run-random-scenarios.js",
     "scenarios:rest-of-day": "node scripts/run-random-scenarios.js --until-end-of-day",
     "test-with-scenarios": "node scripts/run-test-with-scenarios.js",
-    "mqtt-broker": "node mqtt-broker-test.js"
+    "mqtt-broker": "node mqtt-broker-test.js",
+    "river-normal-24h": "node scripts/river-normal-24h.js",
+    "river-normal-24h:dry": "node scripts/river-normal-24h.js --dry-run"
   },
   "keywords": [
     "mqtt",

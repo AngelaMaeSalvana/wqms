@@ -31,6 +31,10 @@
  *   persistence       Send 3 identical LOW-DO readings to escalate via persistence
  *   all-clear         All parameters well within limits — clears persistence counters
  *
+ * Long-running normal river baseline (not test-run mode; no test_run_id):
+ *   node scripts/river-normal-24h.js
+ *   (or: npm run river-normal-24h — from server/)
+ *
  * --repeat <n>  Send the same scenario payload n times (useful for persistence testing).
  *
  * Examples:
@@ -326,6 +330,7 @@ if (!scenarioArg) {
     console.log(`  ${name.padEnd(maxLen + 2)} ${s.label}`);
   }
   console.log('\nOptions: --scenario <name> [--repeat N] [--test-run-id <uuid>] [--node node1|node2]');
+  console.log('\nLong run: node scripts/river-normal-24h.js [--hours 24] [--interval-seconds 300] [--node node1]');
   console.log('\nExamples:');
   console.log('  node scripts/test.js --scenario high-do');
   console.log('  node scripts/test.js --scenario low-do --repeat 3');

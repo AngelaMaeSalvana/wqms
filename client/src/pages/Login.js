@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import { Link, Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import api from '../services/api';
+import { useToast } from '../hooks/useToast';
+import { ToastContainer } from '../components/Toast';
 import './Auth.css';
 
 export default function Login() {
@@ -11,6 +13,7 @@ export default function Login() {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const { toasts, showToast, removeToast } = useToast();
 
   const nextPath = location.state?.from || '/dashboard';
   if (user) return <Navigate to={nextPath} replace />;
@@ -23,7 +26,9 @@ export default function Login() {
       await api.login({ username, password });
       await refreshProfile();
     } catch (err) {
-      setError(err?.message || 'Login failed');
+      const message = err?.message || 'Login failed';
+      setError(message);
+      showToast(message, 'error');
     }
     setLoading(false);
   };
@@ -46,6 +51,7 @@ export default function Login() {
         </p>
         <p className="auth-footer">No account yet? <Link to="/signup">Create one</Link></p>
       </div>
+      <ToastContainer toasts={toasts} onClose={removeToast} />
     </div>
   );
 }

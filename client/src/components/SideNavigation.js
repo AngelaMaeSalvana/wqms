@@ -1,4 +1,5 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { NavLink, useLocation } from "react-router-dom";
 import { isSupabaseEnabled } from "../lib/supabaseClient";
 import { useAuth } from "../contexts/AuthContext";
@@ -55,6 +56,15 @@ const IconAlerts = () => (
   </svg>
 );
 
+const IconUsers = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+    <circle cx="8.5" cy="7" r="3" />
+    <path d="M20 8v6" />
+    <path d="M23 11h-6" />
+  </svg>
+);
+
 const IconSettings = () => (
   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <circle cx="12" cy="12" r="3"/>
@@ -68,6 +78,7 @@ const navItems = [
   { to: "/sensor-logs", label: "Sensor Logs", Icon: IconSensorLogs },
   { to: "/map", label: "Map & Locations", Icon: IconMap },
   { to: "/nodes", label: "Nodes", Icon: IconNodes },
+  { to: "/users", label: "Users", Icon: IconUsers },
   { to: "/alerts", label: "Alerts", Icon: IconAlerts },
   { to: "/settings", label: "Settings", Icon: IconSettings },
 ];
@@ -80,6 +91,8 @@ const pathToTitle = (pathname) => {
 
 export default function SideNavigation({ isMobileOpen = false, onToggle, onClose }) {
   const [collapsed, setCollapsed] = useState(false);
+  const [logoutModalOpen, setLogoutModalOpen] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
   const { pathname } = useLocation();
   const { signOut, isAdmin, role } = useAuth();
   const pageTitle = pathToTitle(pathname);
@@ -88,6 +101,75 @@ export default function SideNavigation({ isMobileOpen = false, onToggle, onClose
   const handleNavClick = () => {
     if (onClose) onClose();
   };
+
+  const openLogoutModal = () => {
+    setSigningOut(false);
+    setLogoutModalOpen(true);
+  };
+
+  const closeLogoutModal = () => {
+    if (signingOut) return;
+    setLogoutModalOpen(false);
+  };
+
+  /** Log out only after explicit confirm — not on backdrop/cancel/escape. */
+  const confirmSignOut = async () => {
+    if (signingOut) return;
+    setSigningOut(true);
+    try {
+      await signOut();
+      setLogoutModalOpen(false);
+      if (onClose) onClose();
+    } finally {
+      setSigningOut(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!logoutModalOpen) return undefined;
+    const onKey = (e) => {
+      if (e.key !== "Escape" || signingOut) return;
+      closeLogoutModal();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [logoutModalOpen, signingOut]);
+
+  const logoutModal =
+    isSupabaseEnabled() && logoutModalOpen
+      ? createPortal(
+          <div
+            className={`side-nav__logout-modal-backdrop${signingOut ? " side-nav__logout-modal-backdrop--busy" : ""}`}
+            role="presentation"
+            onClick={closeLogoutModal}
+          >
+            <div
+              className="side-nav__logout-modal"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="side-nav-logout-title"
+              aria-busy={signingOut}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h2 id="side-nav-logout-title" className="side-nav__logout-modal-title">
+                Log out?
+              </h2>
+              <p className="side-nav__logout-modal-text">
+                You will need to sign in again to access AQUALENS.
+              </p>
+              <div className="side-nav__logout-modal-actions">
+                <button type="button" className="side-nav__logout-btn side-nav__logout-btn--secondary" onClick={closeLogoutModal} disabled={signingOut}>
+                  Cancel
+                </button>
+                <button type="button" className="side-nav__logout-btn side-nav__logout-btn--primary" onClick={confirmSignOut} disabled={signingOut}>
+                  {signingOut ? "Signing out…" : "Log out"}
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )
+      : null;
 
   return (
     <>
@@ -154,7 +236,7 @@ export default function SideNavigation({ isMobileOpen = false, onToggle, onClose
 
       <nav className="side-nav__menu" aria-label="Main navigation">
         {navItems
-          .filter((item) => (item.to === "/nodes" ? isAdmin : true))
+          .filter((item) => (item.to === "/nodes" || item.to === "/users" ? isAdmin : true))
           .map(({ to, label, Icon }) => (
           <NavLink
             key={to}
@@ -175,7 +257,7 @@ export default function SideNavigation({ isMobileOpen = false, onToggle, onClose
 
       {isSupabaseEnabled() && (
         <div className="side-nav__logout">
-          <button type="button" className="side-nav__item" onClick={signOut} title={collapsed ? "Logout" : undefined}>
+          <button type="button" className="side-nav__item" onClick={openLogoutModal} title={collapsed ? "Logout" : undefined}>
             <span className="side-nav__icon" aria-hidden="true">⇦</span>
             {!collapsed && <span className="side-nav__label">Logout</span>}
           </button>
@@ -190,6 +272,7 @@ export default function SideNavigation({ isMobileOpen = false, onToggle, onClose
         )}
       </div>
     </aside>
+    {logoutModal}
     </>
   );
 }
