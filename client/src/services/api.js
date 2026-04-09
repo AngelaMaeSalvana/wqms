@@ -3,9 +3,11 @@ import { isSupabaseEnabled, supabase } from '../lib/supabaseClient';
 import * as supabaseService from './supabaseService';
 
 
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
+const isLocalDevHost = typeof window !== 'undefined'
+  && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+const API_BASE_URL = process.env.REACT_APP_API_URL || (isLocalDevHost ? 'http://localhost:5000/api' : '');
 const AUTH_TOKEN_KEY = 'wqms_auth_token';
-const FORCE_BACKEND_API = true;
+const FORCE_BACKEND_API = process.env.REACT_APP_FORCE_BACKEND_API === '1';
 
 class ApiService {
   shouldUseSupabase() {
@@ -38,6 +40,11 @@ class ApiService {
   }
 
   async request(endpoint, options = {}) {
+    if (!API_BASE_URL) {
+      throw new Error(
+        'Backend API is not configured. Set REACT_APP_API_URL to your deployed backend (e.g. https://your-backend-domain/api).'
+      );
+    }
     const url = `${API_BASE_URL}${endpoint}`;
     const authHeaders = await this.getAuthHeaders();
     const config = {
