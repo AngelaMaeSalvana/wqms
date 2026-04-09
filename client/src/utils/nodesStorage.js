@@ -79,8 +79,50 @@ export async function loadNodes() {
       // ignore import errors
     }
   }
-  nodesCache = null;
-  return getNodes();
+  // Backend API mode (Supabase disabled): derive nodes from recent readings so
+  // first-time devices do not render empty pages just because localStorage is empty.
+  try {
+    const local = getNodes();
+    const { default: api } = await import('../services/api');
+    const rows = await api.getReadings({ monitoringOnly: true, limit: 2000 });
+    const byId = {};
+    (Array.isArray(local) ? local : []).forEach((n) => {
+      if (n?.id) byId[n.id] = { ...n };
+    });
+    (Array.isArray(rows) ? rows : []).forEach((r) => {
+      const id = r?.node_id || r?.nodeId || null;
+      if (!id) return;
+      const ts = r?.timestamp ? new Date(r.timestamp).getTime() : null;
+      const isRecent = Number.isFinite(ts) ? (Date.now() - ts <= 10 * 60 * 1000) : false;
+      if (!byId[id]) {
+        byId[id] = {
+          id,
+          name: id,
+          location: id,
+          status: isRecent ? 'online' : 'offline',
+          lat: null,
+          lng: null,
+          lastMaintenance: null,
+          lastSensorTestAt: null,
+          lastSensorTestStatus: null,
+          active: true,
+        };
+      } else if (isRecent) {
+        byId[id].status = 'online';
+      }
+    });
+    const merged = Object.values(byId).sort((a, b) => String(a.id).localeCompare(String(b.id)));
+    nodesCache = merged;
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
+    } catch {
+      // ignore
+    }
+    return merged;
+  } catch {
+    nodesCache = null;
+    return getNodes();
+  }
 }
 
 /**
