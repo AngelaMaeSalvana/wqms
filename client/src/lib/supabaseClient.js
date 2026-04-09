@@ -6,15 +6,18 @@ import { createClient } from '@supabase/supabase-js';
 
 const supabaseUrl = process.env.REACT_APP_SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseAnonKey = process.env.REACT_APP_SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+const FORCE_BACKEND_API = process.env.REACT_APP_FORCE_BACKEND_API === '1';
 
 export const supabase = supabaseUrl && supabaseAnonKey
   ? createClient(supabaseUrl, supabaseAnonKey)
   : null;
 
-export const isSupabaseEnabled = () => !!supabase;
+export const isSupabaseEnabled = () => !!supabase && !FORCE_BACKEND_API;
 
-if (supabase) {
+if (supabase && !FORCE_BACKEND_API) {
   console.log('WQMS: Supabase enabled — client will use Supabase for nodes, readings, and summaries.');
+} else if (supabase && FORCE_BACKEND_API) {
+  console.log('WQMS: Supabase configured but disabled by REACT_APP_FORCE_BACKEND_API=1; backend API mode enabled.');
 } else if (typeof window !== 'undefined') {
   const missing = [];
   if (!supabaseUrl) missing.push('REACT_APP_SUPABASE_URL');
