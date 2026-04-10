@@ -11,6 +11,7 @@ import { getNodes, loadNodes } from "../utils/nodesStorage";
 import api from "../services/api";
 import { useAuth } from "../contexts/AuthContext";
 import { displayReadings } from "../utils/calibration";
+import { useRealtimeReadings } from "../hooks/useRealtimeReadings";
 import { PageLoader } from "../components/LoadingSkeleton";
 import "./SensorLogs.css";
 
@@ -188,6 +189,31 @@ export default function SensorLogs() {
       .catch(() => setSensorReadings([]));
   }, [tableDateRange?.start?.getTime(), tableDateRange?.end?.getTime(), refreshTrigger]);
 
+  // Fallback auto-refresh for backend-auth mode where Supabase realtime may be unavailable.
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (typeof document !== "undefined" && document.hidden) return;
+      setRefreshTrigger((v) => v + 1);
+    }, 10000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const handleRealtimeReading = useCallback((reading) => {
+    if (!reading?.timestamp || !tableDateRange?.start || !tableDateRange?.end) return;
+    const ts = new Date(reading.timestamp);
+    if (Number.isNaN(ts.getTime())) return;
+    if (ts < tableDateRange.start || ts > tableDateRange.end) return;
+    setSensorReadings((prev) => {
+      const key = `${reading.node_id || reading.nodeId || "1"}_${reading.seq ?? "na"}_${reading.timestamp}`;
+      const exists = prev.some((r) => `${r.node_id || r.nodeId || "1"}_${r.seq ?? "na"}_${r.timestamp}` === key);
+      if (exists) return prev;
+      return [reading, ...prev];
+    });
+  }, [tableDateRange?.end, tableDateRange?.start]);
+
+  useRealtimeReadings({
+    onNewReading: handleRealtimeReading,
+  });
   const pickReadingValue = useCallback((reading, metric) => {
     if (!reading) return null;
     if (readingMode === "raw") {
