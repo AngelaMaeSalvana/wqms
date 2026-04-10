@@ -1184,6 +1184,7 @@ export default function Reports() {
   // Node comparison chart — only parameter is independent; date/node/period are shared
   const [comparisonParameter, setComparisonParameter] = useState(PARAMETER_OPTIONS[0].id);
   const [reportChartType, setReportChartType] = useState(CHART_TYPE_OPTIONS[0].id);
+  const [readingMode, setReadingMode] = useState("corrected");
   const [reportPeriod, setReportPeriod] = useState(PERIOD_OPTIONS[0].id);
   const [reportRangeStart, setReportRangeStart] = useState(() => getWeekRange(new Date()).start);
   const [reportRangeEnd, setReportRangeEnd] = useState(() => getWeekRange(new Date()).end);
@@ -1217,30 +1218,45 @@ export default function Reports() {
     const start = typeof reportRangeStart === "string" ? reportRangeStart : (reportRangeStart.getFullYear() + "-" + String(reportRangeStart.getMonth() + 1).padStart(2, "0") + "-" + String(reportRangeStart.getDate()).padStart(2, "0"));
     const end = typeof reportRangeEnd === "string" ? reportRangeEnd : (reportRangeEnd.getFullYear() + "-" + String(reportRangeEnd.getMonth() + 1).padStart(2, "0") + "-" + String(reportRangeEnd.getDate()).padStart(2, "0"));
     const nodeId = reportNodeId === "all" ? null : reportNodeId;
-    api.getDailySummaries({ startDate: start, endDate: end, nodeId })
+    const fetchData = readingMode === "raw"
+      ? api.getSensorReadings({ startDate: start, endDate: end, nodeId, limit: null })
+          .then((rows) => aggregateReadingsToDailySummaries(Array.isArray(rows) ? rows : [], nodes))
+      : api.getDailySummaries({ startDate: start, endDate: end, nodeId })
+          .then((rows) => Array.isArray(rows) ? rows : []);
+    fetchData
       .then((rows) => setReportReadingsForChart(Array.isArray(rows) ? rows : []))
       .catch(() => setReportReadingsForChart([]));
-  }, [reportRangeStart, reportRangeEnd, reportNodeId, refreshTrigger]);
+  }, [reportRangeStart, reportRangeEnd, reportNodeId, readingMode, refreshTrigger, nodes]);
 
   // Comparison chart always fetches ALL nodes regardless of the node filter
   useEffect(() => {
     if (!reportRangeStart || !reportRangeEnd) return;
     const start = typeof reportRangeStart === "string" ? reportRangeStart : (reportRangeStart.getFullYear() + "-" + String(reportRangeStart.getMonth() + 1).padStart(2, "0") + "-" + String(reportRangeStart.getDate()).padStart(2, "0"));
     const end = typeof reportRangeEnd === "string" ? reportRangeEnd : (reportRangeEnd.getFullYear() + "-" + String(reportRangeEnd.getMonth() + 1).padStart(2, "0") + "-" + String(reportRangeEnd.getDate()).padStart(2, "0"));
-    api.getDailySummaries({ startDate: start, endDate: end, nodeId: null })
+    const fetchData = readingMode === "raw"
+      ? api.getSensorReadings({ startDate: start, endDate: end, nodeId: null, limit: null })
+          .then((rows) => aggregateReadingsToDailySummaries(Array.isArray(rows) ? rows : [], nodes))
+      : api.getDailySummaries({ startDate: start, endDate: end, nodeId: null })
+          .then((rows) => Array.isArray(rows) ? rows : []);
+    fetchData
       .then((rows) => setComparisonReadings(Array.isArray(rows) ? rows : []))
       .catch(() => setComparisonReadings([]));
-  }, [reportRangeStart, reportRangeEnd, refreshTrigger]);
+  }, [reportRangeStart, reportRangeEnd, readingMode, refreshTrigger, nodes]);
 
   useEffect(() => {
     const start = new Date(calendarView.year, calendarView.month, 1);
     const end = new Date(calendarView.year, calendarView.month + 1, 0);
     const startStr = start.getFullYear() + "-" + String(start.getMonth() + 1).padStart(2, "0") + "-" + String(start.getDate()).padStart(2, "0");
     const endStr = end.getFullYear() + "-" + String(end.getMonth() + 1).padStart(2, "0") + "-" + String(end.getDate()).padStart(2, "0");
-    api.getDailySummaries({ startDate: startStr, endDate: endStr })
+    const fetchData = readingMode === "raw"
+      ? api.getSensorReadings({ startDate: startStr, endDate: endStr, nodeId: null, limit: null })
+          .then((rows) => aggregateReadingsToDailySummaries(Array.isArray(rows) ? rows : [], nodes))
+      : api.getDailySummaries({ startDate: startStr, endDate: endStr })
+          .then((rows) => Array.isArray(rows) ? rows : []);
+    fetchData
       .then((rows) => setCalendarSummaries(Array.isArray(rows) ? rows : []))
       .catch(() => setCalendarSummaries([]));
-  }, [calendarView.year, calendarView.month, refreshTrigger]);
+  }, [calendarView.year, calendarView.month, readingMode, refreshTrigger, nodes]);
 
   useEffect(() => {
     if (!dateRangePickerOpen || !dateRangeButtonRef.current) return;
@@ -1519,6 +1535,25 @@ export default function Reports() {
                 <option key={n.id} value={n.id}>{n.name || n.id}</option>
               ))}
             </select>
+          </div>
+          <div className="reports-filter-bar__control">
+            <span className="reports-filter-bar__label">Readings</span>
+            <div className="dash__mode-toggle" role="group" aria-label="Reading mode">
+              <button
+                type="button"
+                className={`ghost-btn ${readingMode === "raw" ? "ghost-btn--active" : ""}`}
+                onClick={() => setReadingMode("raw")}
+              >
+                Raw
+              </button>
+              <button
+                type="button"
+                className={`ghost-btn ${readingMode === "corrected" ? "ghost-btn--active" : ""}`}
+                onClick={() => setReadingMode("corrected")}
+              >
+                Corrected
+              </button>
+            </div>
           </div>
           <div className="reports-filter-bar__wqi">
             <RangeWqiStats summaries={reportSummaries} />

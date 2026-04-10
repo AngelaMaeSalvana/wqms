@@ -114,6 +114,7 @@ export default function SensorLogs() {
   const tableWrapRef = useRef(null);
   const cardBodyRef = useRef(null);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
+  const [readingMode, setReadingMode] = useState("corrected");
 
   const [isMobile, setIsMobile] = useState(() =>
     typeof window !== "undefined" ? window.innerWidth <= 768 : false
@@ -187,6 +188,44 @@ export default function SensorLogs() {
       .catch(() => setSensorReadings([]));
   }, [tableDateRange?.start?.getTime(), tableDateRange?.end?.getTime(), refreshTrigger]);
 
+  const pickReadingValue = useCallback((reading, metric) => {
+    if (!reading) return null;
+    if (readingMode === "raw") {
+      switch (metric) {
+        case "temperature":
+          return reading.temperature_raw ?? reading.temperature ?? null;
+        case "ph":
+          return reading.ph_raw ?? reading.ph ?? reading.pH ?? null;
+        case "turbidity":
+          return reading.turbidity_raw ?? reading.turbidity ?? null;
+        case "dissolvedOxygen":
+          return reading.dissolved_oxygen_raw ?? reading.dissolved_oxygen ?? reading.dissolvedOxygen ?? reading.do ?? null;
+        case "flowRate":
+          return reading.flow_rate_raw ?? reading.flow_rate ?? reading.flowRate ?? null;
+        case "nh3":
+          return reading.nh3_raw ?? reading.nh3 ?? reading.NH3 ?? getNH3FromReading(reading);
+        default:
+          return null;
+      }
+    }
+    switch (metric) {
+      case "temperature":
+        return reading.temperature ?? null;
+      case "ph":
+        return reading.ph ?? reading.pH ?? null;
+      case "turbidity":
+        return reading.turbidity ?? null;
+      case "dissolvedOxygen":
+        return reading.dissolved_oxygen ?? reading.dissolvedOxygen ?? reading.do ?? null;
+      case "flowRate":
+        return reading.flow_rate ?? reading.flowRate ?? null;
+      case "nh3":
+        return reading.nh3 ?? reading.NH3 ?? getNH3FromReading(reading);
+      default:
+        return null;
+    }
+  }, [readingMode]);
+
   const sensorTableRows = useMemo(() => {
     const list = Array.isArray(sensorReadings) ? sensorReadings : [];
     const nodeMap = {};
@@ -195,22 +234,22 @@ export default function SensorLogs() {
       const d = typeof r.timestamp === "string" ? new Date(r.timestamp) : new Date(r.timestamp);
       const nodeId = r.node_id || r.nodeId || "1";
       const wqi = calculateWQI({
-        temperature: r.temperature,
-        turbidity: r.turbidity,
-        pH: r.ph ?? r.pH,
+        temperature: pickReadingValue(r, "temperature"),
+        turbidity: pickReadingValue(r, "turbidity"),
+        pH: pickReadingValue(r, "ph"),
         tan: r.tan ?? r.TAN,
-        dissolvedOxygen: r.dissolved_oxygen ?? r.dissolvedOxygen ?? r.do,
+        dissolvedOxygen: pickReadingValue(r, "dissolvedOxygen"),
       });
       return {
         date: d,
         nodeId,
         nodeName: nodeMap[nodeId] || nodeId,
-        temperature: r.temperature ?? null,
-        pH: r.ph ?? r.pH ?? null,
-        turbidity: r.turbidity ?? null,
-        dissolvedOxygen: r.dissolved_oxygen ?? r.dissolvedOxygen ?? r.do ?? null,
-        nh3: getNH3FromReading(r),
-        flowRate: r.flow_rate ?? r.flowRate ?? null,
+        temperature: pickReadingValue(r, "temperature"),
+        pH: pickReadingValue(r, "ph"),
+        turbidity: pickReadingValue(r, "turbidity"),
+        dissolvedOxygen: pickReadingValue(r, "dissolvedOxygen"),
+        nh3: pickReadingValue(r, "nh3"),
+        flowRate: pickReadingValue(r, "flowRate"),
         wqi: wqi != null ? Math.round(wqi) : null,
         batteryVoltage: r.battery_voltage ?? r.batteryVoltage ?? null,
         batteryPercentage: r.battery_percentage ?? r.batteryPercentage ?? null,
@@ -238,7 +277,7 @@ export default function SensorLogs() {
       return direction === "asc" ? cmp : -cmp;
     });
     return sorted;
-  }, [sensorReadings, nodes, search, tableNodeFilter, tableSort]);
+  }, [sensorReadings, nodes, pickReadingValue, search, tableNodeFilter, tableSort]);
 
   const groupedRows = useMemo(() => {
     const groups = {};
@@ -503,6 +542,22 @@ export default function SensorLogs() {
           )}
         </div>
         <>
+          <div className="dash__mode-toggle" role="group" aria-label="Reading mode">
+            <button
+              type="button"
+              className={`ghost-btn ${readingMode === "raw" ? "ghost-btn--active" : ""}`}
+              onClick={() => setReadingMode("raw")}
+            >
+              Raw
+            </button>
+            <button
+              type="button"
+              className={`ghost-btn ${readingMode === "corrected" ? "ghost-btn--active" : ""}`}
+              onClick={() => setReadingMode("corrected")}
+            >
+              Corrected
+            </button>
+          </div>
           {isAdmin && (
             <div className="sensor-logs-export-wrap" ref={exportRef}>
               <button

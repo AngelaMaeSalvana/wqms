@@ -336,6 +336,23 @@
   flex-shrink: 0;
 }
 
+.today-card__header-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.today-card__mode-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.today-card__mode-toggle .ghost-btn {
+  padding: 5px 10px;
+  font-size: 0.75rem;
+}
+
 /* Today card tabs view */
 .today-card__tabs {
   display: flex;

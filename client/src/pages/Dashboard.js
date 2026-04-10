@@ -130,6 +130,7 @@ export default function Dashboard() {
   } = useLiveAlerts();
 
   const [selectedNodeId, setSelectedNodeId] = useState(getStoredNodeId);
+  const [readingMode, setReadingMode] = useState("corrected");
   const [isLoadingAlerts] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
@@ -177,6 +178,64 @@ export default function Dashboard() {
     });
   };
 
+  const getValueByMode = useCallback((reading, metric) => {
+    if (!reading) return null;
+    if (readingMode === "raw") {
+      switch (metric) {
+        case "temperature":
+          return reading.temperature_raw ?? reading.temperature ?? null;
+        case "turbidity":
+          return reading.turbidity_raw ?? reading.turbidity ?? null;
+        case "ph":
+          return reading.ph_raw ?? reading.ph ?? reading.pH ?? null;
+        case "flow_rate":
+          return reading.flow_rate_raw ?? reading.flow_rate ?? reading.flowRate ?? null;
+        case "dissolved_oxygen":
+          return reading.dissolved_oxygen_raw ?? reading.dissolved_oxygen ?? reading.dissolvedOxygen ?? reading.do ?? null;
+        case "nh3":
+          return reading.nh3_raw ?? reading.nh3 ?? reading.NH3 ?? getNH3FromReading(reading);
+        default:
+          return null;
+      }
+    }
+    switch (metric) {
+      case "temperature":
+        return reading.temperature ?? null;
+      case "turbidity":
+        return reading.turbidity ?? null;
+      case "ph":
+        return reading.ph ?? reading.pH ?? null;
+      case "flow_rate":
+        return reading.flow_rate ?? reading.flowRate ?? null;
+      case "dissolved_oxygen":
+        return reading.dissolved_oxygen ?? reading.dissolvedOxygen ?? reading.do ?? null;
+      case "nh3":
+        return reading.nh3 ?? reading.NH3 ?? getNH3FromReading(reading);
+      default:
+        return null;
+    }
+  }, [readingMode]);
+
+  const selectedNodeLatestReading = useMemo(() => {
+    const reading = readingsByNode[selectedNode?.id];
+    if (!reading) return reading;
+    if (readingMode !== "raw") return reading;
+    return {
+      ...reading,
+      temperature: getValueByMode(reading, "temperature"),
+      turbidity: getValueByMode(reading, "turbidity"),
+      ph: getValueByMode(reading, "ph"),
+      pH: getValueByMode(reading, "ph"),
+      flow_rate: getValueByMode(reading, "flow_rate"),
+      flowRate: getValueByMode(reading, "flow_rate"),
+      dissolved_oxygen: getValueByMode(reading, "dissolved_oxygen"),
+      dissolvedOxygen: getValueByMode(reading, "dissolved_oxygen"),
+      do: getValueByMode(reading, "dissolved_oxygen"),
+      nh3: getValueByMode(reading, "nh3"),
+      NH3: getValueByMode(reading, "nh3"),
+    };
+  }, [getValueByMode, readingMode, readingsByNode, selectedNode?.id]);
+
   /** Today's data from API/Supabase only. One point per reading for selected node. */
   const todayData = useMemo(() => {
     const nodeId = selectedNode?.id || null;
@@ -202,12 +261,12 @@ export default function Dashboard() {
       return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
     });
     const timestamps = list.map((r) => r.timestamp);
-    const tempData = list.map((r) => r.temperature ?? null);
-    const turbData = list.map((r) => r.turbidity ?? null);
-    const phData = list.map((r) => r.ph ?? r.pH ?? null);
-    const nh3Data = list.map((r) => getNH3FromReading(r));
-    const flowData = list.map((r) => r.flow_rate ?? r.flowRate ?? null);
-    const doData = list.map((r) => r.dissolved_oxygen ?? r.dissolvedOxygen ?? r.do ?? null);
+    const tempData = list.map((r) => getValueByMode(r, "temperature"));
+    const turbData = list.map((r) => getValueByMode(r, "turbidity"));
+    const phData = list.map((r) => getValueByMode(r, "ph"));
+    const nh3Data = list.map((r) => getValueByMode(r, "nh3"));
+    const flowData = list.map((r) => getValueByMode(r, "flow_rate"));
+    const doData = list.map((r) => getValueByMode(r, "dissolved_oxygen"));
     return {
       labels,
       timestamps,
@@ -220,7 +279,7 @@ export default function Dashboard() {
         { label: "Dissolved O₂ mg/L", data: doData, borderColor: "#2ecc71", backgroundColor: "rgba(46, 204, 113, 0.1)", fill: true },
       ],
     };
-  }, [selectedNode?.id, todayReadings]);
+  }, [getValueByMode, selectedNode?.id, todayReadings]);
 
   const todayStats = useMemo(() => {
     if (!todayData?.datasets?.length) return null;
@@ -332,10 +391,12 @@ export default function Dashboard() {
         <section className="dash__cell dash__cell--today">
           <TodayCard
             todayStats={todayStats}
-            latestReading={readingsByNode[selectedNode?.id]}
+            latestReading={selectedNodeLatestReading}
             selectedNode={selectedNode}
             readingsLoaded={readingsLoaded}
             variant={isMobile ? "tabs" : "grid"}
+            readingMode={readingMode}
+            onReadingModeChange={setReadingMode}
           />
         </section>
         <section className={`dash__cell dash__cell--wqi ${isMobile ? "dash__cell--wqi-first" : ""}`}>

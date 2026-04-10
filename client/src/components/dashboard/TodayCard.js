@@ -84,7 +84,15 @@ function LastReadingBlock({ label, value, unit, colorClass, fmt }) {
   );
 }
 
-export function TodayCard({ todayStats, latestReading, selectedNode, readingsLoaded = false, variant = "grid" }) {
+export function TodayCard({
+  todayStats,
+  latestReading,
+  selectedNode,
+  readingsLoaded = false,
+  variant = "grid",
+  readingMode = "corrected",
+  onReadingModeChange,
+}) {
   const [activePage, setActivePage] = useState(0);
   const [overviewTab, setOverviewTab] = useState("avg");
   const scrollRef = useRef(null);
@@ -205,7 +213,25 @@ export function TodayCard({ todayStats, latestReading, selectedNode, readingsLoa
         <div>
           <h2 className="card__title">{cardTitle}</h2>
         </div>
-        <CurrentClassification className="today-card__classification" />
+        <div className="today-card__header-right">
+          <div className="today-card__mode-toggle" role="group" aria-label="Reading mode">
+            <button
+              type="button"
+              className={`ghost-btn ${readingMode === "raw" ? "ghost-btn--active" : ""}`}
+              onClick={() => onReadingModeChange?.("raw")}
+            >
+              Raw
+            </button>
+            <button
+              type="button"
+              className={`ghost-btn ${readingMode === "corrected" ? "ghost-btn--active" : ""}`}
+              onClick={() => onReadingModeChange?.("corrected")}
+            >
+              Corrected
+            </button>
+          </div>
+          <CurrentClassification className="today-card__classification" />
+        </div>
       </div>
       <div className="card__body card__body--fill">
         {isEmpty ? (

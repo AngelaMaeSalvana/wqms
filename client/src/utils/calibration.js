@@ -67,8 +67,20 @@ function hasBackendCorrected(reading) {
  */
 export function normalizeReadingForDisplay(r) {
   if (!r || typeof r !== "object") return r;
+  const temperatureRaw = r.temperature;
+  const phRaw = r.ph ?? r.pH;
+  const turbidityRaw = r.turbidity;
+  const dissolvedOxygenRaw = r.dissolved_oxygen ?? r.dissolvedOxygen ?? r.do;
+  const flowRateRaw = r.flow_rate ?? r.flowRate;
+  const nh3Raw = r.nh3 ?? r.NH3;
   return {
     ...r,
+    temperature_raw: temperatureRaw,
+    ph_raw: phRaw,
+    turbidity_raw: turbidityRaw,
+    dissolved_oxygen_raw: dissolvedOxygenRaw,
+    flow_rate_raw: flowRateRaw,
+    nh3_raw: nh3Raw,
     temperature: r.temperature_corrected ?? r.temperature,
     ph: r.ph_corrected ?? r.ph,
     pH: r.ph_corrected ?? r.pH ?? r.ph,

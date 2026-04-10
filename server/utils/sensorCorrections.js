@@ -1,7 +1,8 @@
 /**
- * Apply lab calibration to telemetry from sensor nodes.
+ * Apply telemetry normalization from sensor nodes.
  * Turbidity / DO: linear fit on raw ADC counts when those fields are present.
- * pH / temperature: fixed offsets on measured values.
+ * pH / temperature are kept as raw payload values; user offsets are applied later
+ * in applyUserCalibrationCorrected.
  */
 
 /** Minimum valid turbidity ADC counts (same as Heltec lab sketch; below = fault / disconnected). */
@@ -37,16 +38,12 @@ function applySensorCorrections(reading) {
     r.dissolvedOxygen = 0.00473 * doRaw - 0.292;
   }
 
+  // Keep pH and temperature untouched here (raw from payload). Offsets are
+  // applied once in applyUserCalibrationCorrected via Settings calibration.
   const ph0 = parseNum(r.pH ?? r.ph);
   if (ph0 != null) {
-    const ph1 = ph0 - 0.006;
-    r.pH = ph1;
-    r.ph = ph1;
-  }
-
-  const t0 = parseNum(r.temperature);
-  if (t0 != null) {
-    r.temperature = t0 - 0.41;
+    r.pH = ph0;
+    r.ph = ph0;
   }
 
   return r;
