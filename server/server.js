@@ -430,6 +430,8 @@ async function handleMQTTMessage(topic, data, t_be_rx) {
       return;
     }
 
+    const result = await db.insertReading(row);
+    console.log(`✅ Stored reading from Node ${row.node_id} | seq=${seq ?? 'n/a'} | id=${result.lastID}`);
     wsBroadcast('telemetry', row);
 
   } else if (topic.includes('alert')) {
